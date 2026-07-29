@@ -56,40 +56,48 @@ Use this tool BEFORE answering deep architectural or technical questions when in
 
 #### Query Formulation Rules (CRITICAL for retrieval quality)
 
-The hybrid engine combines two complementary strategies. Your query MUST serve both:
+The hybrid engine combines BM25 full-text keyword matching with dense ONNX vector search (`multilingual-e5-small`). Formulate queries according to these rules:
 
-**Rule 1 — Include exact code symbols for BM25 (keyword layer)**
-BM25 matches lexical tokens. If the user asks about a specific function, class, API, or error, include its exact name.
-- Good: `"isCancel AxiosError request cancellation"`
-- Bad: `"how to cancel HTTP requests"` (lexical mismatch with source code)
+**Rule 1 — Use Concept-Dense Declarative Phrases (POSITIVE EXAMPLES)**
+Formulate queries as concise, factual concept statements.
+- ✅ `"Библиотека для выполнения HTTP запросов и отмены отправки данных"`
+- ✅ `"Автоматизация сценариев пользователя в браузере и проверка веб-страниц"`
+- ✅ `"createStore combineReducers управление состоянием приложения Redux"`
 
-**Rule 2 — Add a natural-language description for vector search (semantic layer)**
-The ONNX embedding model (`multilingual-e5-small`) maps meaning across languages. Describe the CONCEPT in any language.
-- Good: `"Библиотека для HTTP запросов с отменой"`
-- Good: `"centralized state management single store"` → finds Redux docs
+**Rule 2 — DO NOT Use Conversational Questions (NEGATIVE EXAMPLES)**
+- ❌ **DO NOT** ask conversational questions: *"Что такое Next.js и как его настроить?"*, *"Как мне сделать отмену запроса в axios?"*, *"Подскажи пожалуйста где про базу данных?"*. Conversational filler words (*"как"*, *"что такое"*, *"где"*, *"подскажи"*) pollute BM25 lexical tokens and add noise to vector embeddings!
+- ❌ **DO NOT** copy raw code signatures with exact dots verbatim (`browser.newPage page.goto expect.toBeVisible`) unless searching specifically for an exact symbol name.
+- ❌ **DO NOT** use long rambling conversational turns. Keep queries concise (10-30 words).
 
-**Rule 3 — Combine both in a single query**
-The RRF fusion algorithm merges results from both strategies. A single query should contain BOTH keywords AND semantic description.
-- Example: `"isCancel AxiosError библиотека HTTP запросов отмена"`
-- Example: `"createStore combineReducers управление состоянием приложения"`
+**Rule 3 — Combine Exact Code Symbols + Semantic Intent**
+- Good: `"isCancel AxiosError библиотека HTTP запросов отмена"`
+- Good: `"useReducer useContext React component state management"`
 
-**Rule 4 — Query in the language of the DOCUMENTS when you know it**
-If indexed docs are in English, prefer English keywords. Use Russian only for the semantic/conceptual part.
-- Good: `"useReducer useContext management React component state"`
-- Avoid: purely Russian queries when searching English code (`"управление состоянием"` alone will miss BM25 hits)
+---
 
-**Rule 5 — Use short queries (10-30 words)**
-The `multilingual-e5-small` model works best with concise descriptions. Long rambling queries dilute the embedding signal.
+### Reading Ambiguous or Abstract Documents ("Ода о единороге" Scenario)
+
+When documents have abstract, non-descriptive, or unpredictable titles/contents (e.g. *"Ода о единороге"*, *"Заметки_2026"*, *"Планы_проекта"*), searching via `query_knowledge_base` may fail if the user or agent cannot guess what terms are inside.
+
+In such cases, use the **Full Raw Document Reading** mechanism:
+
+1. **Discover Ingested Documents**: Call `manage_knowledge_base(action: "list")` to see all ingested document IDs, titles, and paths.
+2. **Read Full Raw Document Content**: Call `manage_knowledge_base(action: "read_document", docId: "<doc_id_or_title>")`.
+3. **Analyze Content**: The server retrieves and decompresses the complete raw text document from CAS blob storage, allowing you to read and understand the entire document regardless of its title.
+
+---
 
 ### Knowledge Base Management (`manage_knowledge_base`)
 - Use `action: "stats"` to inspect stored document count and total micro-chunks.
 - Use `action: "list"` to see all ingested documents.
-- Use `action: "delete"` with `doc_id` to remove an outdated document and purge its CAS blob.
+- Use `action: "read_document"` with `docId` to read the complete raw text content of any document.
+- Use `action: "delete"` with `docId` to remove an outdated document and purge its CAS blob.
 
 ---
 
 ## 4. Core Directives for AI Agents
 
 1. **Be Proactive**: When the user mentions a durable preference or constraint, save it immediately using `remember`.
-2. **Check Knowledge Base First**: If a user asks how a specific module, API, or project architecture works, call `query_knowledge_base` before making assumptions.
-3. **Keep Memory Clean**: If a preference changes, call `forget` on the outdated entry before saving the new one.
+2. **Check Knowledge Base First**: If a user asks how a specific module, API, or project architecture works, call `query_knowledge_base` using concept-dense search phrases.
+3. **Inspect Ambiguous Docs Directly**: If querying produces low relevance scores on abstractly-named documents, call `manage_knowledge_base(action: "read_document")` to inspect the full text directly.
+4. **Keep Memory Clean**: If a preference changes, call `forget` on the outdated entry before saving the new one.

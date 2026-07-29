@@ -217,10 +217,10 @@ server.registerTool(
   "manage_knowledge_base",
   {
     description:
-      "Manage the RAG knowledge base: inspect stats, list documents, delete documents, or export/import snapshots.",
+      "Manage the RAG knowledge base: inspect stats, list documents, read full raw document, delete documents, or export/import snapshots.",
     inputSchema: z.object({
-      action: z.enum(["stats", "list", "delete", "export_snapshot", "import_snapshot"]).describe("Management action"),
-      docId: z.string().optional().describe("Document ID or path (required for delete)"),
+      action: z.enum(["stats", "list", "read_document", "delete", "export_snapshot", "import_snapshot"]).describe("Management action"),
+      docId: z.string().optional().describe("Document ID, title, or path (required for read_document and delete)"),
       snapshotPath: z.string().optional().describe("File path for snapshot export/import"),
     }),
   },
@@ -258,6 +258,36 @@ server.registerTool(
         .all();
       return {
         content: [{ type: "text", text: JSON.stringify(docs, null, 2) }],
+      };
+    }
+
+    if (action === "read_document") {
+      if (!docId) throw new Error("docId parameter is required for read_document action");
+      const doc = db
+        .prepare("SELECT id, title, path, blob_hash, created_at FROM documents WHERE id = ? OR path = ? OR title = ?")
+        .get(docId, docId, docId);
+      if (!doc) {
+        throw new Error(`Document not found in knowledge base for docId: ${docId}`);
+      }
+      const { readBlob } = await import("./storage/blob_store.js");
+      const rawContent = await readBlob(doc.blob_hash);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                id: doc.id,
+                title: doc.title,
+                path: doc.path,
+                created_at: doc.created_at,
+                content: rawContent,
+              },
+              null,
+              2
+            ),
+          },
+        ],
       };
     }
 
