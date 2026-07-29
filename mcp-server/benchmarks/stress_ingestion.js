@@ -1,10 +1,20 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { rmSync, existsSync } from "node:fs";
 import { getDatabase } from "../db/database.js";
 import { ingestDocument } from "../ingest/pipeline.js";
+import { embedText } from "../ml/model_manager.js";
 import { CORPUS_DIR, fetchRealCorpus } from "./fetch_real_corpus.js";
+
+// RSS is too volatile to measure incremental ingestion memory because V8's RSS
+// retains free-list pages long after the underlying heap shrinks. We track
+// `heapUsed + external` instead: heapUsed covers JS allocations (vector buffers,
+// sqlite cache), external covers WASM/ONNX buffers held off-heap.
+function memUsedBytes() {
+  const m = process.memoryUsage();
+  return m.heapUsed + m.external;
+}
 
 const PANEL_WIDTH = 58;
 
@@ -33,8 +43,32 @@ export async function runIngestionBenchmark(options = { generateEmbeddings: fals
     console.log(`\n  [INGEST] Processing ${corpus.length} technical documents...\n`);
   }
 
-  const startMem = process.memoryUsage().rss;
+  // Pre-warm ONNX model so its weight loading does NOT inflate ingestion RSS delta.
+  // Without this the first embedText() inside the loop would pay the one-time model
+  // load cost (~100MB), biasing the "Ingestion RAM" metric.
+  let baselineMemLabel = "pre-loop";
+  if (options.generateEmbeddings) {
+    await embedText("warmup", false);
+    baselineMemLabel = "post-model-warmup";
+    if (!silent) console.log(`   [Warmup] ONNX model loaded; baseline taken ${baselineMemLabel}.`);
+    // Force GC if exposed to drop transient allocation noise from init.
+    if (global.gc) {
+      global.gc();
+      baselineMemLabel = "post-model-warmup(post-gc)";
+    }
+  }
+
+  const startMem = memUsedBytes();
   const startTime = performance.now();
+  // Track peak heapUsed+external during the loop to capture transient allocations.
+  let peakMem = startMem;
+  // Heap shrinkage is much faster than RSS free-list reclaim, so polling works; but
+  // also sample synchronously after each doc ingest in between timer ticks, since
+  // ONNX inference for a single doc may span multiple 25ms windows.
+  const memPollInterval = setInterval(() => {
+    const cur = memUsedBytes();
+    if (cur > peakMem) peakMem = cur;
+  }, 25);
 
   let totalSections = 0;
   let totalMicroChunks = 0;
@@ -60,19 +94,34 @@ export async function runIngestionBenchmark(options = { generateEmbeddings: fals
     totalMicroChunks += ingestRes.microChunksCount;
     if (ingestRes.deduplicated) deduplicatedCount++;
 
+    // Synchronous peak sample: captures peak after each doc ingestion completes,
+    // complementing the 25ms interval poll (which can miss transient peaks).
+    const cur = memUsedBytes();
+    if (cur > peakMem) peakMem = cur;
+
     if (!silent && ((i + 1) % 5 === 0 || i === corpus.length - 1)) {
       console.log(`   [Progress] Ingested ${i + 1}/${corpus.length} docs (${totalMicroChunks} micro-chunks)`);
     }
     if (onProgress) onProgress({ phase: "ingest", current: i + 1, total: corpus.length });
   }
 
+  clearInterval(memPollInterval);
   const endTime = performance.now();
-  const endMem = process.memoryUsage().rss;
+  const endMemPreGc = memUsedBytes();
+
+  // Force GC to separate transient garbage from the persistent ingestion footprint.
+  // Requires --expose-gc (run_benchmarks.js auto-respawns with it).
+  let endMemPostGc = endMemPreGc;
+  if (global.gc) {
+    global.gc();
+    endMemPostGc = memUsedBytes();
+  }
 
   const durationMs = endTime - startTime;
   const durationSec = durationMs / 1000;
   const docsPerSec = corpus.length / durationSec;
   const chunksPerSec = totalMicroChunks / durationSec;
+  const peakDeltaMB = Math.max(peakMem - startMem, endMemPreGc - startMem) / (1024 * 1024);
 
   const dbStat = await stat(TEST_DB_PATH);
   const dbSizeBytes = dbStat.size;
@@ -100,7 +149,14 @@ export async function runIngestionBenchmark(options = { generateEmbeddings: fals
     chunksPerSec: Number(chunksPerSec.toFixed(2)),
     dbSizeMB: Number((dbSizeBytes / (1024 * 1024)).toFixed(2)),
     blobSizeMB: Number((blobSizeBytes / (1024 * 1024)).toFixed(2)),
-    ramUsageMB: Number(((endMem - startMem) / (1024 * 1024)).toFixed(2)),
+    // Ingestion-only memory delta (heapUsed + external), measured AFTER model
+    // pre-warm so ONNX weight load is excluded. `ramUsageMB` is pre-GC (upper
+    // bound incl. transient garbage); `settledRamUsageMB` is post-GC.
+    ramUsageMB: Number(((endMemPreGc - startMem) / (1024 * 1024)).toFixed(2)),
+    settledRamUsageMB: Number(((endMemPostGc - startMem) / (1024 * 1024)).toFixed(2)),
+    peakRamUsageMB: Number(peakDeltaMB.toFixed(2)),
+    ramBaseline: baselineMemLabel,
+    metric: "heapUsed + external",
     dbPath: TEST_DB_PATH,
     blobDir: TEST_BLOB_DIR,
     dbInstance: db,
@@ -115,7 +171,11 @@ export async function runIngestionBenchmark(options = { generateEmbeddings: fals
     console.log(`  - Throughput: ${metrics.docsPerSec} docs/sec | ${metrics.chunksPerSec} chunks/sec`);
     console.log(`  - Database Size: ${metrics.dbSizeMB} MB`);
     console.log(`  - Blob Storage Size: ${metrics.blobSizeMB} MB`);
-    console.log(`  - Memory Footprint (Delta RSS): ${metrics.ramUsageMB} MB\n`);
+    console.log(`  - Memory Footprint pre-GC  (heapUsed+ext Δ): ${metrics.ramUsageMB} MB (${metrics.ramBaseline})`);
+    console.log(`  - Memory Footprint post-GC (settled Δ):      ${metrics.settledRamUsageMB} MB`);
+    console.log(`  - Memory Peak (max Δ during loop):           ${metrics.peakRamUsageMB} MB`);
+    console.log(`  (Negative ingestion Δ = loop reclaimed more warmup garbage than it allocated.`);
+    console.log(`   ONNX native weights are owned by onnxruntime-node and not visible here.)\n`);
   }
 
   return metrics;

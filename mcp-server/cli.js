@@ -71,20 +71,27 @@ function renderBenchmarkResultsTable(results) {
   console.log(` \x1b[36m│\x1b[0m \x1b[90m────────────────────────────────────────────────────\x1b[0m\x1b[36m│\x1b[0m`);
 
   const strategies = [
-    { name: "BM25 Search Only", data: results.bm25 },
-    { name: "Dense ONNX Vector", data: results.vector },
-    { name: "Hybrid RRF (Rank)", data: results.hybridRrf },
-    { name: "Hybrid RSF (Score)", data: results.hybridRsf },
+    { name: "BM25 Search Only", data: results.bm25, key: "bm25" },
+    { name: "Dense ONNX Vector", data: results.vector, key: "vector" },
+    { name: "Hybrid RRF (Rank)", data: results.hybridRrf, key: "hybrid_rrf" },
+    { name: "Hybrid RSF (Score)", data: results.hybridRsf, key: "hybrid_rsf" },
   ];
+
+  // Backward-compat field access: new evaluator returns {mrr, recall, ndcg, n},
+  // older shape was {mrrAtK, recallAtK, ndcgAtK}. Support both.
+  const getMrr = (d) => (d ? (d.mrr ?? d.mrrAtK ?? 0) : 0);
+  const getRecall = (d) => (d ? (d.recall ?? d.recallAtK ?? 0) : 0);
+  const getNdcg = (d) => (d ? (d.ndcg ?? d.ndcgAtK ?? 0) : 0);
 
   strategies.forEach((s) => {
     const nameStr = s.name.padEnd(20);
-    const mrrStr = (s.data ? s.data.mrrAtK : 0).toFixed(4).padEnd(10);
-    const recallPct = s.data ? (s.data.recallAtK * 100).toFixed(1) + "%" : "0%";
+    const mrrStr = getMrr(s.data).toFixed(4).padEnd(10);
+    const recallPct = (getRecall(s.data) * 100).toFixed(1) + "%";
     const recallStr = recallPct.padEnd(13);
-    const ndcgStr = (s.data ? s.data.ndcgAtK : 0).toFixed(4);
+    const ndcgStr = getNdcg(s.data).toFixed(4);
 
-    const isBest = s.name.includes("Hybrid");
+    // Highlight the dynamically-determined winner instead of hardcoding "Hybrid".
+    const isBest = results.winner && s.key === results.winner;
     const color = isBest ? "\x1b[1m\x1b[36m" : "\x1b[37m";
 
     console.log(` \x1b[36m│\x1b[0m ${color}${nameStr}${mrrStr}${recallStr}${ndcgStr}\x1b[0m \x1b[36m│\x1b[0m`);
@@ -142,7 +149,18 @@ function selectBlockMenu({ title, stats, blocks, initialIndex = 0 }) {
           currentItemGlobalIndex++;
         });
 
-        console.log(`\x1b[36m └──${"─".repeat(PANEL_WIDTH - 4)}┘\x1b[0m\n`);
+console.log(`\x1b[36m └──${"─".repeat(PANEL_WIDTH - 4)}┘\x1b[0m\n`);
+
+  if (results.winner) {
+    const winnerLabel =
+      results.winner === "hybrid_rsf" ? "RSF"
+      : results.winner === "hybrid_rrf" ? "RRF"
+      : results.winner === "vector" ? "Vector"
+      : "BM25";
+    const p = results.pairedTests && results.pairedTests.rrfVsRsf;
+    const sigNote = p ? (p.p < 0.05 ? ` (RRF vs RSF p=${p.p}, significant)` : ` (RRF vs RSF p=${p.p}, NOT significant at N=${p.n})`) : "";
+    console.log(` \x1b[90m Winner by MRR: \x1b[1m\x1b[36m${winnerLabel}\x1b[0m\x1b[90m${sigNote}\x1b[0m\n`);
+  }
       });
 
       const activeItem = allItems[activeIndex];
