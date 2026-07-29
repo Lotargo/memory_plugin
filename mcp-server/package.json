@@ -1,0 +1,13 @@
+{
+  "name": "memory-mcp-server",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "memory-mcp-server": "index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^1.29.0",
+    "zod": "^4.1.0"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "memory-agent",
+  "version": "1.0.0",
+  "description": "Persistent memory agent that remembers user preferences and project context across sessions",
+  "author": {
+    "name": "Oleg"
+  },
+  "homepage": "https://github.com/Lotargo/memory_pugin",
+  "repository": "https://github.com/Lotargo/memory_pugin",
+  "license": "MIT",
+  "keywords": ["memory", "context", "preferences", "facts"],
+  "skills": "./skills/",
+  "hooks": {},
+  "interface": {
+    "displayName": "Memory Agent",
+    "shortDescription": "Remembers user preferences and project context",
+    "longDescription": "A persistent memory agent that saves, recalls, and manages important facts about the user and project across sessions. The agent proactively remembers high-signal information like names, preferences, constraints, and architectural decisions.",
+    "developerName": "Oleg",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "Write"],
+    "brandColor": "#6366F1"
+  }
+}

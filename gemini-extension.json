@@ -1,0 +1,6 @@
+{
+  "name": "memory-agent",
+  "description": "Persistent memory agent that remembers user preferences and project context across sessions",
+  "version": "1.0.0",
+  "contextFileName": "GEMINI.md"
+}
