@@ -197,6 +197,7 @@ export async function hybridQuery({
   embeddingModel = null,
   rerankerModel = null,
   rerankerEnabled = null,
+  instruction = null,
 }) {
   const db = customDb || getDatabase();
   const activeConfig = getConfig();
@@ -216,7 +217,7 @@ export async function hybridQuery({
       score: 1.0 / hit.bm25_rank,
     }));
   } else if (algo === "semantic_only" || algo === "vector_only") {
-    const queryVector = await embedText(query, true, embModel);
+    const queryVector = await embedText(query, true, embModel, null, instruction);
     const vectorHits = vectorSearch(db, queryVector, limit * 4, 0.10);
     fusedHits = vectorHits.map((hit) => ({
       ...hit,
@@ -224,13 +225,13 @@ export async function hybridQuery({
     }));
   } else if (algo === "rrf") {
     const bm25Hits = bm25Search(db, query, 30);
-    const queryVector = await embedText(query, true, embModel);
+    const queryVector = await embedText(query, true, embModel, null, instruction);
     const vectorHits = vectorSearch(db, queryVector, 30, 0.10);
     fusedHits = rrfFusion(bm25Hits, vectorHits, 60, scoreThreshold);
   } else {
     // Default: RSF
     const bm25Hits = bm25Search(db, query, 30);
-    const queryVector = await embedText(query, true, embModel);
+    const queryVector = await embedText(query, true, embModel, null, instruction);
     const vectorHits = vectorSearch(db, queryVector, 30, 0.10);
     fusedHits = rsfFusion(bm25Hits, vectorHits, alphaWeight, scoreThreshold);
   }

@@ -16,31 +16,31 @@ function printRichPanel(title, subtitle = "") {
 
 export const CHALLENGING_EVALUATION_QUERIES = [
   // Category A: Semantic & Paraphrased Queries (No exact keyword overlap)
-  { query: "Библиотека для выполнения HTTP запросов и отмены отправки данных", expectedDocIds: ["axios_readme"], category: "Semantic RU->EN" },
-  { query: "Инструмент для мгновенной горячей перезагрузки кода при разработке frontend", expectedDocIds: ["vite_readme"], category: "Semantic RU->EN" },
-  { query: "Централизованное управление состоянием приложения в одном сторе", expectedDocIds: ["redux_readme"], category: "Semantic RU->EN" },
-  { query: "Управление изолированными контейнерами приложений через командную строку", expectedDocIds: ["docker_cli_readme"], category: "Semantic RU->EN" },
-  { query: "Компактная база данных прямо внутри процесса без отдельного сервера", expectedDocIds: ["sqlite_readme", "sqlite_fts5_spec"], category: "Semantic RU->EN" },
-  { query: "JavaScript рантайм с нативной поддержкой TypeScript и JSX из коробки", expectedDocIds: ["bun_readme"], category: "Semantic RU->EN" },
-  { query: "Библиотека для декларативной валидации схем с автоматическим выводом типов TypeScript", expectedDocIds: ["zod_readme"], category: "Semantic RU->EN" },
+  { query: "Библиотека для выполнения HTTP запросов и отмены отправки данных", expectedDocIds: ["axios_readme"], category: "Semantic RU->EN", instruction: "Retrieve relevant software documentation and technical guides" },
+  { query: "Инструмент для мгновенной горячей перезагрузки кода при разработке frontend", expectedDocIds: ["vite_readme"], category: "Semantic RU->EN", instruction: "Retrieve relevant software documentation and technical guides" },
+  { query: "Централизованное управление состоянием приложения в одном сторе", expectedDocIds: ["redux_readme"], category: "Semantic RU->EN", instruction: "Retrieve relevant software documentation and technical guides" },
+  { query: "Управление изолированными контейнерами приложений через командную строку", expectedDocIds: ["docker_cli_readme"], category: "Semantic RU->EN", instruction: "Retrieve relevant software documentation and technical guides" },
+  { query: "Компактная база данных прямо внутри процесса без отдельного сервера", expectedDocIds: ["sqlite_readme", "sqlite_fts5_spec"], category: "Semantic RU->EN", instruction: "Retrieve relevant software documentation and technical guides" },
+  { query: "JavaScript рантайм с нативной поддержкой TypeScript и JSX из коробки", expectedDocIds: ["bun_readme"], category: "Semantic RU->EN", instruction: "Retrieve relevant software documentation and technical guides" },
+  { query: "Библиотека для декларативной валидации схем с автоматическим выводом типов TypeScript", expectedDocIds: ["zod_readme"], category: "Semantic RU->EN", instruction: "Retrieve relevant software documentation and technical guides" },
 
   // Category B: Cross-Lingual Technical Concepts (Russian prompt -> English documentation)
-  { query: "Асинхронный веб фреймворк на Python с автоматической OpenAPI документацией", expectedDocIds: ["fastapi_readme"], category: "Cross-Lingual" },
-  { query: "Язык программирования с гарантией безопасности памяти без Garbage Collector", expectedDocIds: ["rust_readme"], category: "Cross-Lingual" },
-  { query: "Верстка элементов интерфейса через атомарные CSS утилиты", expectedDocIds: ["tailwindcss_readme"], category: "Cross-Lingual" },
-  { query: "Безопасная среда выполнения TypeScript с возможностью бана сетевых прав", expectedDocIds: ["deno_readme"], category: "Cross-Lingual" },
-  { query: "Автоматизация сценариев пользователя в браузере и проверка работы веб-страниц", expectedDocIds: ["playwright_readme"], category: "Cross-Lingual" },
-  { query: "Прогрессивный JavaScript фреймворк для создания пользовательских интерфейсов с реактивной моделью данных", expectedDocIds: ["vue_readme"], category: "Cross-Lingual" },
-  { query: "Фреймворк для серверного рендеринга React приложений с файловой маршрутизацией", expectedDocIds: ["nextjs_readme"], category: "Cross-Lingual" },
+  { query: "Асинхронный веб фреймворк на Python с автоматической OpenAPI документацией", expectedDocIds: ["fastapi_readme"], category: "Cross-Lingual", instruction: "Retrieve relevant technical documentation and framework specs" },
+  { query: "Язык программирования с гарантией безопасности памяти без Garbage Collector", expectedDocIds: ["rust_readme"], category: "Cross-Lingual", instruction: "Retrieve relevant technical documentation and framework specs" },
+  { query: "Верстка элементов интерфейса через атомарные CSS утилиты", expectedDocIds: ["tailwindcss_readme"], category: "Cross-Lingual", instruction: "Retrieve relevant technical documentation and framework specs" },
+  { query: "Безопасная среда выполнения TypeScript с возможностью бана сетевых прав", expectedDocIds: ["deno_readme"], category: "Cross-Lingual", instruction: "Retrieve relevant technical documentation and framework specs" },
+  { query: "Автоматизация сценариев пользователя в браузере и проверка работы веб-страниц", expectedDocIds: ["playwright_readme"], category: "Cross-Lingual", instruction: "Retrieve relevant technical documentation and framework specs" },
+  { query: "Прогрессивный JavaScript фреймворк для создания пользовательских интерфейсов с реактивной моделью данных", expectedDocIds: ["vue_readme"], category: "Cross-Lingual", instruction: "Retrieve relevant technical documentation and framework specs" },
+  { query: "Фреймворк для серверного рендеринга React приложений с файловой маршрутизацией", expectedDocIds: ["nextjs_readme"], category: "Cross-Lingual", instruction: "Retrieve relevant technical documentation and framework specs" },
 
   // Category C: Direct Code & Keyword Searches
-  { query: "isCancel AxiosError require default export", expectedDocIds: ["axios_readme"], category: "Code/Keyword" },
-  { query: "PRAGMA user_version FTS5 unicode61 tokenizer", expectedDocIds: ["sqlite_readme", "sqlite_fts5_spec"], category: "Code/Keyword" },
-  { query: "pipeline feature-extraction quantized ONNX", expectedDocIds: ["transformers_js_readme", "onnx_runtime_spec"], category: "Code/Keyword" },
-  { query: "useContext useReducer JSX render DOM", expectedDocIds: ["react_readme"], category: "Code/Keyword" },
-  { query: "browser page goto expect locator test", expectedDocIds: ["playwright_readme"], category: "Code/Keyword" },
-  { query: "z.object z.string z.number z.enum z.array infer output", expectedDocIds: ["zod_readme"], category: "Code/Keyword" },
-  { query: "next dev build start create-next-app React framework", expectedDocIds: ["nextjs_readme"], category: "Code/Keyword" },
+  { query: "isCancel AxiosError require default export", expectedDocIds: ["axios_readme"], category: "Code/Keyword", instruction: "Retrieve relevant code snippets and API function signatures" },
+  { query: "PRAGMA user_version FTS5 unicode61 tokenizer", expectedDocIds: ["sqlite_readme", "sqlite_fts5_spec"], category: "Code/Keyword", instruction: "Retrieve relevant code snippets and API function signatures" },
+  { query: "pipeline feature-extraction quantized ONNX", expectedDocIds: ["transformers_js_readme", "onnx_runtime_spec"], category: "Code/Keyword", instruction: "Retrieve relevant code snippets and API function signatures" },
+  { query: "useContext useReducer JSX render DOM", expectedDocIds: ["react_readme"], category: "Code/Keyword", instruction: "Retrieve relevant code snippets and API function signatures" },
+  { query: "browser page goto expect locator test", expectedDocIds: ["playwright_readme"], category: "Code/Keyword", instruction: "Retrieve relevant code snippets and API function signatures" },
+  { query: "z.object z.string z.number z.enum z.array infer output", expectedDocIds: ["zod_readme"], category: "Code/Keyword", instruction: "Retrieve relevant code snippets and API function signatures" },
+  { query: "next dev build start create-next-app React framework", expectedDocIds: ["nextjs_readme"], category: "Code/Keyword", instruction: "Retrieve relevant code snippets and API function signatures" },
 ];
 
 // Smoke mode: representative subset for fast iteration loops (e.g. during dev).
@@ -374,7 +374,7 @@ export async function evaluateSearchQualityComparison(db, {
     // all 4 modes and the grid search. Eliminates ~3 redundant ONNX inferences per query.
     const startQ = performance.now();
     const bm25Hits = bm25Search(db, qObj.query, 30);
-    const qVec = await embedText(qObj.query, true);
+    const qVec = await embedText(qObj.query, true, null, null, qObj.instruction || null);
     const vectorHits = vectorSearch(db, qVec, 30, 0.10);
     const prepared = { bm25Hits, qVec, vectorHits };
     const qLatencyMs = performance.now() - startQ;

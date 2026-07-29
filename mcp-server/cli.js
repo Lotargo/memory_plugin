@@ -10,6 +10,8 @@ import { SMOKE_DOC_IDS } from "./benchmarks/quality_evaluator.js";
 
 const EMBEDDING_PRESETS = [
   "Xenova/multilingual-e5-small",
+  "Xenova/multilingual-e5-large",
+  "Xenova/bge-m3",
   "Xenova/all-MiniLM-L6-v2",
   "Xenova/bge-small-en-v1.5",
   "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
@@ -23,6 +25,57 @@ const RERANKER_PRESETS = [
 ];
 
 const PANEL_WIDTH = 58;
+
+async function downloadModelWithProgress(modelName, type = "embedding") {
+  console.clear();
+  const line = "─".repeat(PANEL_WIDTH - 2);
+  console.log(`\x1b[36m╭${line}╮\x1b[0m`);
+  console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37mMODEL DOWNLOAD & PRELOAD\x1b[0m${" ".repeat(PANEL_WIDTH - 28)}\x1b[36m│\x1b[0m`);
+  const modelSub = `${type.toUpperCase()}: ${modelName.substring(0, 36)}`;
+  console.log(`\x1b[36m│\x1b[0m  \x1b[90m${modelSub.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
+  console.log(`\x1b[36m╰${line}╯\x1b[0m\n`);
+
+  const spinFrames = ["|", "/", "-", "\\"];
+  let spinIdx = 0;
+  let lastProgress = 0;
+
+  const handleProgress = (p) => {
+    if (!p) return;
+    spinIdx = (spinIdx + 1) % spinFrames.length;
+    const spin = spinFrames[spinIdx];
+
+    const filename = p.file ? p.file.split("/").pop() : (p.name || "weights");
+    const pct = typeof p.progress === "number" ? Math.round(p.progress) : lastProgress;
+    if (typeof p.progress === "number") lastProgress = pct;
+
+    const loadedMB = p.loaded ? (p.loaded / (1024 * 1024)).toFixed(1) : "0.0";
+    const totalMB = p.total ? (p.total / (1024 * 1024)).toFixed(1) : "0.0";
+
+    const barLen = 18;
+    const filled = Math.round((pct / 100) * barLen);
+    const bar = "=".repeat(filled).padEnd(barLen);
+
+    let statusMsg = "";
+    if (p.status === "initiate") statusMsg = "Initiating...";
+    else if (p.status === "download" || p.status === "progress") statusMsg = `${pct}% (${loadedMB}/${totalMB} MB)`;
+    else if (p.status === "done") statusMsg = "Verifying...";
+    else if (p.status === "ready") statusMsg = "Ready!";
+    else statusMsg = `${pct}%`;
+
+    const fileLabel = filename.length > 18 ? filename.substring(0, 15) + "..." : filename;
+    process.stdout.write(`\r  ${spin} [${bar}] ${fileLabel.padEnd(18)} ${statusMsg.padEnd(22)}`);
+  };
+
+  try {
+    const { preloadModel } = await import("./ml/model_manager.js");
+    await preloadModel(modelName, type, handleProgress);
+    process.stdout.write("\r" + " ".repeat(72) + "\r");
+    console.log(`  \x1b[32m[OK] Model "${modelName}" ready!\x1b[0m\n`);
+  } catch (err) {
+    process.stdout.write("\r" + " ".repeat(72) + "\r");
+    console.error(`  \x1b[31m[ERROR] Download for "${modelName}" failed: ${err.message}\x1b[0m\n`);
+  }
+}
 
 async function getQuickStats() {
   let docCount = 0;
@@ -712,14 +765,18 @@ export async function runCli() {
         });
 
         if (subRes.action === "select") {
+          let chosenModel = subRes.value;
           if (subRes.value === "custom") {
             const inputRes = await readTextInput("Enter HuggingFace Model ID", "Xenova/all-MiniLM-L6-v2");
             if (inputRes.action === "submit" && inputRes.value) {
-              updateConfig({ embeddingModel: inputRes.value });
+              chosenModel = inputRes.value;
+            } else {
+              break;
             }
-          } else {
-            updateConfig({ embeddingModel: subRes.value });
           }
+          await downloadModelWithProgress(chosenModel, "embedding");
+          updateConfig({ embeddingModel: chosenModel });
+          await waitForEnter();
         }
         break;
       }
@@ -742,13 +799,19 @@ export async function runCli() {
         if (subRes.action === "select") {
           if (subRes.value === "none") {
             updateConfig({ rerankerEnabled: false, rerankerModel: "none" });
-          } else if (subRes.value === "custom") {
-            const inputRes = await readTextInput("Enter HuggingFace Reranker Model ID", "Xenova/bge-reranker-base");
-            if (inputRes.action === "submit" && inputRes.value) {
-              updateConfig({ rerankerEnabled: true, rerankerModel: inputRes.value });
-            }
           } else {
-            updateConfig({ rerankerEnabled: true, rerankerModel: subRes.value });
+            let chosenRk = subRes.value;
+            if (subRes.value === "custom") {
+              const inputRes = await readTextInput("Enter HuggingFace Reranker Model ID", "Xenova/bge-reranker-base");
+              if (inputRes.action === "submit" && inputRes.value) {
+                chosenRk = inputRes.value;
+              } else {
+                break;
+              }
+            }
+            await downloadModelWithProgress(chosenRk, "reranker");
+            updateConfig({ rerankerEnabled: true, rerankerModel: chosenRk });
+            await waitForEnter();
           }
         }
         break;

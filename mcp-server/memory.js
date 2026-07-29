@@ -3,8 +3,25 @@ import { existsSync } from "fs";
 import { join, basename } from "path";
 import { homedir } from "os";
 
-const CONFIG_DIR = process.env.MEMORY_DIR || process.env.OPENCODE_CONFIG_DIR || join(homedir(), ".config", "opencode");
-export const MEMORY_DIR = join(CONFIG_DIR, "memory");
+function resolveMemoryDir() {
+  if (process.env.MEMORY_DIR) return process.env.MEMORY_DIR;
+  if (process.env.OPENCODE_CONFIG_DIR) return join(process.env.OPENCODE_CONFIG_DIR, "memory");
+
+  const legacyDir = join(homedir(), ".config", "opencode", "memory");
+  if (existsSync(legacyDir)) {
+    return legacyDir;
+  }
+
+  if (process.platform === "win32") {
+    const appData = process.env.LOCALAPPDATA || process.env.APPDATA || join(homedir(), "AppData", "Local");
+    return join(appData, "opencode", "memory");
+  }
+
+  const configHome = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
+  return join(configHome, "opencode", "memory");
+}
+
+export const MEMORY_DIR = resolveMemoryDir();
 export const GLOBAL_KEY = "global";
 
 export async function ensureDir() {

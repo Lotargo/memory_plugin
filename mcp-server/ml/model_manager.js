@@ -6,8 +6,12 @@ let loadedModelName = null;
 let rerankerInstance = null;
 let loadedRerankerName = null;
 
-export async function getExtractor(modelName = "Xenova/multilingual-e5-small") {
-  if (extractorInstance && loadedModelName === modelName) {
+import { getConfig } from "../config/config_manager.js";
+
+export async function getExtractor(modelName = null, progressCallback = null) {
+  const targetModel = modelName || getConfig().embeddingModel || "Xenova/multilingual-e5-small";
+
+  if (extractorInstance && loadedModelName === targetModel) {
     return extractorInstance;
   }
 
@@ -16,40 +20,65 @@ export async function getExtractor(modelName = "Xenova/multilingual-e5-small") {
   env.cacheDir = MODELS_DIR;
   env.allowLocalModels = true;
   env.allowRemoteModels = true;
+  env.remoteHost = "https://huggingface.co";
+  env.remotePathTemplate = "{model}/resolve/{revision}/";
+
+  const pipelineOpts = { quantized: true };
+  if (progressCallback) {
+    pipelineOpts.progress_callback = progressCallback;
+  }
 
   try {
-    // 1. Primary load from HuggingFace
-    extractorInstance = await pipeline("feature-extraction", modelName, {
-      quantized: true,
-    });
-    loadedModelName = modelName;
+    extractorInstance = await pipeline("feature-extraction", targetModel, pipelineOpts);
+    loadedModelName = targetModel;
   } catch (err) {
-    console.warn(`Primary HuggingFace model load failed/rate-limited for ${modelName}: ${err.message}. Attempting GitHub mirror fallback...`);
-    try {
-      // 2. Fallback load from GitHub mirror host
-      env.remoteHost = "https://raw.githubusercontent.com/Lotargo/memory_pugin/main/models/";
-      env.remotePathTemplate = "{model}/";
-      extractorInstance = await pipeline("feature-extraction", modelName, {
-        quantized: true,
-      });
-      loadedModelName = modelName;
-    } catch (mirrorErr) {
-      console.warn(`GitHub mirror fallback failed: ${mirrorErr.message}. Falling back to default Xenova/all-MiniLM-L6-v2...`);
-      env.remoteHost = "https://huggingface.co";
-      env.remotePathTemplate = "{model}/resolve/{revision}/";
-      extractorInstance = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2", {
-        quantized: true,
-      });
-      loadedModelName = "Xenova/all-MiniLM-L6-v2";
+    console.warn(`HuggingFace model load failed for ${targetModel}: ${err.message}. Falling back to default Xenova/multilingual-e5-small...`);
+    if (targetModel !== "Xenova/multilingual-e5-small") {
+      extractorInstance = await pipeline("feature-extraction", "Xenova/multilingual-e5-small", pipelineOpts);
+      loadedModelName = "Xenova/multilingual-e5-small";
+    } else {
+      throw err;
     }
   }
 
   return extractorInstance;
 }
 
-export async function embedText(text, isQuery = false, modelName = "Xenova/multilingual-e5-small") {
-  const extractor = await getExtractor(modelName);
-  const formattedText = isQuery ? `query: ${text}` : `passage: ${text}`;
+export function formatInputText(text, isQuery = false, modelName = null, instruction = null) {
+  if (!text) return "";
+  const targetModel = modelName || getConfig().embeddingModel || "Xenova/multilingual-e5-small";
+  const name = targetModel.toLowerCase();
+
+  // 1. E5 Model Family (multilingual-e5-small, multilingual-e5-large, etc.)
+  if (name.includes("e5")) {
+    if (isQuery) {
+      if (instruction && instruction.trim()) {
+        return `Instruct: ${instruction.trim()}\nQuery: ${text}`;
+      }
+      return `query: ${text}`;
+    }
+    return `passage: ${text}`;
+  }
+
+  // 2. BGE Model Family (bge-m3, bge-small-en-v1.5, etc.)
+  if (name.includes("bge")) {
+    if (isQuery) {
+      if (instruction && instruction.trim()) {
+        return `Represent this sentence for searching relevant passages: ${instruction.trim()} ${text}`;
+      }
+      return `Represent this sentence for searching relevant passages: ${text}`;
+    }
+    return text;
+  }
+
+  // 3. MiniLM / Standard models (no prefixes)
+  return text;
+}
+
+export async function embedText(text, isQuery = false, modelName = null, progressCallback = null, instruction = null) {
+  const targetModel = modelName || getConfig().embeddingModel || "Xenova/multilingual-e5-small";
+  const extractor = await getExtractor(targetModel, progressCallback);
+  const formattedText = formatInputText(text, isQuery, targetModel, instruction);
 
   const output = await extractor(formattedText, {
     pooling: "mean",
@@ -59,7 +88,7 @@ export async function embedText(text, isQuery = false, modelName = "Xenova/multi
   return new Float32Array(output.data);
 }
 
-export async function getReranker(modelName = "Xenova/bge-reranker-base") {
+export async function getReranker(modelName = "Xenova/bge-reranker-base", progressCallback = null) {
   if (rerankerInstance && loadedRerankerName === modelName) {
     return rerankerInstance;
   }
@@ -67,16 +96,26 @@ export async function getReranker(modelName = "Xenova/bge-reranker-base") {
   const { pipeline, env } = await import("@xenova/transformers");
   env.cacheDir = MODELS_DIR;
 
+  const pipelineOpts = { quantized: true };
+  if (progressCallback) {
+    pipelineOpts.progress_callback = progressCallback;
+  }
+
   try {
-    rerankerInstance = await pipeline("text-classification", modelName, {
-      quantized: true,
-    });
+    rerankerInstance = await pipeline("text-classification", modelName, pipelineOpts);
     loadedRerankerName = modelName;
   } catch (err) {
     console.warn(`Failed to load reranker model ${modelName}: ${err.message}`);
     return null;
   }
   return rerankerInstance;
+}
+
+export async function preloadModel(modelName, type = "embedding", progressCallback = null) {
+  if (type === "reranker") {
+    return await getReranker(modelName, progressCallback);
+  }
+  return await getExtractor(modelName, progressCallback);
 }
 
 export async function rerankHits(query, hits, rerankerModelName = "Xenova/bge-reranker-base") {

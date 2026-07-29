@@ -281,20 +281,40 @@ server.registerTool(
     inputSchema: z.object({
       query: z.string().describe("Search query in natural language or symbol name"),
       limit: z.number().default(5).describe("Maximum number of sections to return"),
+      instruction: z
+        .string()
+        .optional()
+        .describe(
+          "Optional task-specific retrieval instruction shaping embedding focus (e.g. 'Retrieve code snippets', 'Find user preferences'). " +
+          "Recommended when using E5/BGE models for domain-specific queries."
+        ),
       generateEmbeddings: z.boolean().default(true).describe("Use vector search alongside BM25"),
     }),
   },
-  async ({ query, limit, generateEmbeddings }) => {
+  async ({ query, limit, instruction, generateEmbeddings }) => {
     const { hybridQuery } = await import("./retrieval/retriever.js");
+    const { getConfig } = await import("./config/config_manager.js");
+    const activeConfig = getConfig();
+
     const results = await hybridQuery({
       query,
       limit,
       generateEmbeddings,
+      instruction: instruction || null,
     });
 
     if (!results || results.length === 0) {
-      return { content: [{ type: "text", text: "No matching knowledge found for query." }] };
+      return {
+        content: [
+          {
+            type: "text",
+            text: `[Active Model: ${activeConfig.embeddingModel}]\nNo matching knowledge found for query.`,
+          },
+        ],
+      };
     }
+
+    const headerNote = `[Active Model: ${activeConfig.embeddingModel} | Fusion: ${activeConfig.fusionAlgorithm.toUpperCase()}]\n\n`;
 
     const formatted = results
       .map((r, i) => {
@@ -310,7 +330,7 @@ server.registerTool(
       })
       .join("\n\n---\n\n");
 
-    return { content: [{ type: "text", text: formatted }] };
+    return { content: [{ type: "text", text: headerNote + formatted }] };
   }
 );
 
