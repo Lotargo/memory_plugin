@@ -117,23 +117,33 @@ async function fetchSingleDoc(doc, targetDir) {
   return { id: doc.id, title: doc.title, path: filePath, bytes: text.length, source: "network" };
 }
 
-export async function fetchRealCorpus({ silent = false, onProgress = null } = {}) {
+export async function fetchRealCorpus({ silent = false, onProgress = null, subsetDocIds = null } = {}) {
   if (!existsSync(CORPUS_DIR)) {
     await mkdirAsync(CORPUS_DIR, { recursive: true });
   }
 
   if (!silent) {
-    printRichPanel("FETCHING TECHNICAL CORPUS", `Cache: ${CORPUS_DIR}`);
+    printRichPanel(
+      "FETCHING TECHNICAL CORPUS",
+      subsetDocIds ? `Cache: ${CORPUS_DIR} (subset: ${subsetDocIds.length} docs)` : `Cache: ${CORPUS_DIR}`,
+    );
   }
+
+  // When subsetDocIds is provided, filter RAW_DOC_SOURCES (and LOCAL_FALLBACK_DOCS
+  // below) to only the requested ids. Used by smoke mode to ingest a small subset
+  // for fast iteration instead of the full 27-doc corpus.
+  const docPool = subsetDocIds
+    ? RAW_DOC_SOURCES.filter((d) => subsetDocIds.includes(d.id))
+    : RAW_DOC_SOURCES;
 
   const results = [];
   let networkCount = 0;
   let cachedCount = 0;
-  const total = RAW_DOC_SOURCES.length;
+  const total = docPool.length;
 
   // Fetch in parallel batches for performance
-  for (let i = 0; i < RAW_DOC_SOURCES.length; i += FETCH_CONCURRENCY) {
-    const batch = RAW_DOC_SOURCES.slice(i, i + FETCH_CONCURRENCY);
+  for (let i = 0; i < docPool.length; i += FETCH_CONCURRENCY) {
+    const batch = docPool.slice(i, i + FETCH_CONCURRENCY);
     const settled = await Promise.allSettled(
       batch.map((doc) => fetchSingleDoc(doc, CORPUS_DIR))
     );
@@ -153,16 +163,19 @@ export async function fetchRealCorpus({ silent = false, onProgress = null } = {}
     if (onProgress) onProgress({ phase: "fetch", current: Math.min(i + FETCH_CONCURRENCY, total), total });
   }
 
-  // Add fallback docs if not enough real documents available
-  if (results.length < MIN_REAL_DOCS_BEFORE_FALLBACK) {
-    if (!silent) {
-      console.log(`  [FALLBACK] Only ${results.length} docs available, adding ${LOCAL_FALLBACK_DOCS.length} local docs...`);
-    }
-    for (const doc of LOCAL_FALLBACK_DOCS) {
-      const filePath = join(CORPUS_DIR, `${doc.id}.md`);
-      await writeFileAsync(filePath, doc.content, "utf-8");
-      results.push({ id: doc.id, title: doc.title, path: filePath, bytes: doc.content.length, source: "local_fallback" });
-    }
+  // Fallback docs: in subset mode, include only fallback docs whose id is in subset.
+  // In full mode: include all fallback docs only when real-doc count is too low.
+  const fallbackPool = subsetDocIds
+    ? LOCAL_FALLBACK_DOCS.filter((d) => subsetDocIds.includes(d.id))
+    : (results.length < MIN_REAL_DOCS_BEFORE_FALLBACK ? LOCAL_FALLBACK_DOCS : []);
+
+  if (fallbackPool.length > 0 && !silent) {
+    console.log(`  [FALLBACK] Adding ${fallbackPool.length} local fallback docs...`);
+  }
+  for (const doc of fallbackPool) {
+    const filePath = join(CORPUS_DIR, `${doc.id}.md`);
+    await writeFileAsync(filePath, doc.content, "utf-8");
+    results.push({ id: doc.id, title: doc.title, path: filePath, bytes: doc.content.length, source: "local_fallback" });
   }
 
   if (!silent) {

@@ -28,10 +28,11 @@ function printRichPanel(title, subtitle = "") {
   console.log(`\x1b[36m╰${line}╯\x1b[0m`);
 }
 
-export async function runIngestionBenchmark(options = { generateEmbeddings: false, silent: false, onProgress: null }) {
+export async function runIngestionBenchmark(options = {}) {
   const silent = options.silent || false;
   const onProgress = options.onProgress || null;
-  const corpus = await fetchRealCorpus({ silent, onProgress });
+  const subsetDocIds = options.subsetDocIds || null;
+  const corpus = await fetchRealCorpus({ silent, onProgress, subsetDocIds });
   const TEST_DIR = join(tmpdir(), `memory_bench_ingest_${Date.now()}`);
   const TEST_DB_PATH = join(TEST_DIR, "bench_memory.sqlite");
   const TEST_BLOB_DIR = join(TEST_DIR, "blobs");

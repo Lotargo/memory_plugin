@@ -43,6 +43,21 @@ export const CHALLENGING_EVALUATION_QUERIES = [
   { query: "npm run dev pages router getServerSideProps getStaticProps", expectedDocIds: ["nextjs_readme"], category: "Code/Keyword" },
 ];
 
+// Smoke mode: representative subset for fast iteration loops (e.g. during dev).
+// Nine queries over five target docs span all three categories. Targets are picked
+// so each doc is exercised by ≥2 queries across categories (axios/sqlite/zod in A+C,
+// playwright/nextjs in B+C), giving quick signal on whether hybrid fusion still
+// works without paying the ~30s full-corpus ingestion + 1000-iter bootstrap cost.
+export const SMOKE_QUERY_INDICES = [0, 4, 6, 11, 13, 14, 15, 18, 20];
+export const SMOKE_DOC_IDS = [
+  "axios_readme",
+  "sqlite_readme",
+  "sqlite_fts5_spec",
+  "zod_readme",
+  "playwright_readme",
+  "nextjs_readme",
+];
+
 // Derives the corpus source-id from a stored doc path. Benchmark corpus files are
 // named exactly as in RAW_DOC_SOURCES (e.g. "axios_readme.md"), so basename-no-ext
 // gives a stable, strict key to compare against qObj.expectedDocIds.
@@ -51,6 +66,15 @@ function deriveSourceId(docMeta) {
   const p = (docMeta.path || docMeta.doc_path || "") || "";
   if (p.startsWith("virtual://")) return null;
   return basename(p).replace(/\.[^.]+$/, "");
+}
+
+function getTopHitSourceId(hits, docMetaStmt) {
+  if (!Array.isArray(hits) || hits.length === 0) return "NONE";
+  const hit = hits[0];
+  let meta = null;
+  if (hit.id && docMetaStmt) meta = docMetaStmt.get(hit.id);
+  else if (hit.chunk_id && docMetaStmt) meta = docMetaStmt.get(hit.chunk_id);
+  return deriveSourceId(meta || hit) || "UNKNOWN";
 }
 
 function rankHitsById(hits, docMetaStmt, expectedDocIds, K = 5) {
@@ -188,11 +212,25 @@ export async function evaluateSearchQualityComparison(db, {
   kGrid = [10, 30, 60, 100],
   defaultAlpha = 0.5,
   defaultRrfK = 60,
+  mode = "full",
 } = {}) {
+  const isSmoke = mode === "smoke";
+  // In smoke mode we drop grid search: nothing produced, no cost.
+  if (isSmoke) {
+    alphaGrid = [];
+    kGrid = [];
+  }
+  // Select query subset for smoke; full otherwise.
+  const queryList = isSmoke
+    ? SMOKE_QUERY_INDICES.map((i) => CHALLENGING_EVALUATION_QUERIES[i]).filter(Boolean)
+    : CHALLENGING_EVALUATION_QUERIES;
+
   if (!silent) {
     printRichPanel(
-      "SEARCH QUALITY EVALUATION",
-      `${CHALLENGING_EVALUATION_QUERIES.length} queries | strict doc-id match | bootstrap CI + grid search`,
+      isSmoke ? "SMOKE SEARCH QUALITY EVALUATION" : "SEARCH QUALITY EVALUATION",
+      isSmoke
+        ? `${queryList.length} queries on ${SMOKE_DOC_IDS.length} docs | stats skipped`
+        : `${queryList.length} queries | strict doc-id match | bootstrap CI + grid search`,
     );
   }
 
@@ -204,7 +242,7 @@ export async function evaluateSearchQualityComparison(db, {
   `);
 
   const K = 5;
-  const total = CHALLENGING_EVALUATION_QUERIES.length;
+  const total = queryList.length;
   const queryBreakdown = [];
 
   // per-query rank arrays (parallel) for paired comparison & bootstrap
@@ -224,8 +262,8 @@ export async function evaluateSearchQualityComparison(db, {
   // per-category per-mode ranks (map<category, {bm25:[], vector:[], rrf[], rsf[]}>)
   const catMap = new Map();
 
-  for (let i = 0; i < CHALLENGING_EVALUATION_QUERIES.length; i++) {
-    const qObj = CHALLENGING_EVALUATION_QUERIES[i];
+  for (let i = 0; i < queryList.length; i++) {
+    const qObj = queryList[i];
 
     // Pre-fetch bm25 hits, query embedding, and vector hits ONCE — reused across
     // all 4 modes and the grid search. Eliminates ~3 redundant ONNX inferences per query.
@@ -278,15 +316,20 @@ export async function evaluateSearchQualityComparison(db, {
 
     if (onProgress) onProgress({ phase: "evaluate", current: i + 1, total });
 
+    const rsfHits = rsfFusion(bm25Hits, vectorHits, defaultAlpha, 0.01);
+    const topHitDoc = getTopHitSourceId(rsfHits, docMetaStmt);
+
     queryBreakdown.push({
       id: i + 1,
-      target: qObj.expectedDocIds.join("/").substring(0, 22),
+      target: qObj.expectedDocIds.join("/"),
       category: qObj.category,
       bm25Rank: bm25Rank > 0 ? `#${bm25Rank}` : "MISSED",
       vectorRank: vecRank > 0 ? `#${vecRank}` : "MISSED",
       rrfRank: rrfRank > 0 ? `#${rrfRank}` : "MISSED",
       rsfRank: rsfRank > 0 ? `#${rsfRank}` : "MISSED",
-      query: qObj.query.length > 40 ? `${qObj.query.substring(0, 40)}...` : qObj.query,
+      topHit: topHitDoc,
+      query: qObj.query,
+      expectedDocIds: qObj.expectedDocIds,
     });
   }
 
@@ -304,16 +347,17 @@ export async function evaluateSearchQualityComparison(db, {
   ];
   const winner = candidates.slice().sort((a, b) => b.mrr - a.mrr || b.recall - a.recall)[0].name;
 
-  // Bootstrap CIs (using per-query reciprocal ranks)
-  const bm25CI = bootstrapCI(perQueryRanks.bm25);
-  const vectorCI = bootstrapCI(perQueryRanks.vector);
-  const rrfCI = bootstrapCI(perQueryRanks.rrf);
-  const rsfCI = bootstrapCI(perQueryRanks.rsf);
+  // Bootstrap CIs (using per-query reciprocal ranks) — skipped in smoke mode.
+  const bm25CI = isSmoke ? null : bootstrapCI(perQueryRanks.bm25);
+  const vectorCI = isSmoke ? null : bootstrapCI(perQueryRanks.vector);
+  const rrfCI = isSmoke ? null : bootstrapCI(perQueryRanks.rrf);
+  const rsfCI = isSmoke ? null : bootstrapCI(perQueryRanks.rsf);
 
   // Paired comparisons: hybrid vs best single retriever (vector), rrf vs rsf.
-  const tRrfSel = pairedTTestLR(perQueryRanks.rrf, perQueryRanks.vector);
-  const tRsfSel = pairedTTestLR(perQueryRanks.rsf, perQueryRanks.vector);
-  const tRrfRsf = pairedTTestLR(perQueryRanks.rrf, perQueryRanks.rsf);
+  // Skipped in smoke mode (no need for significance testing on a 9-query subset).
+  const tRrfSel = isSmoke ? null : pairedTTestLR(perQueryRanks.rrf, perQueryRanks.vector);
+  const tRsfSel = isSmoke ? null : pairedTTestLR(perQueryRanks.rsf, perQueryRanks.vector);
+  const tRrfRsf = isSmoke ? null : pairedTTestLR(perQueryRanks.rrf, perQueryRanks.rsf);
 
   // Per-category aggregate metrics
   const categoryBreakdown = [];
@@ -366,22 +410,26 @@ export async function evaluateSearchQualityComparison(db, {
     console.log("\n [Aggregate Metric Comparison]");
     console.table([bm25Res, vectorRes, rrfRes, rsfRes]);
 
-    console.log("\n [Bootstrap 95% CIs]");
-    console.table([
-      { mode: "bm25", mrrLow: bm25CI.mrrCI[0], mrrHigh: bm25CI.mrrCI[1], recallLow: bm25CI.recallCI[0], recallHigh: bm25CI.recallCI[1] },
-      { mode: "vector", mrrLow: vectorCI.mrrCI[0], mrrHigh: vectorCI.mrrCI[1], recallLow: vectorCI.recallCI[0], recallHigh: vectorCI.recallCI[1] },
-      { mode: "rrf", mrrLow: rrfCI.mrrCI[0], mrrHigh: rrfCI.mrrCI[1], recallLow: rrfCI.recallCI[0], recallHigh: rrfCI.recallCI[1] },
-      { mode: "rsf", mrrLow: rsfCI.mrrCI[0], mrrHigh: rsfCI.mrrCI[1], recallLow: rsfCI.recallCI[0], recallHigh: rsfCI.recallCI[1] },
-    ]);
+    if (!isSmoke) {
+      console.log("\n [Bootstrap 95% CIs]");
+      console.table([
+        { mode: "bm25", mrrLow: bm25CI.mrrCI[0], mrrHigh: bm25CI.mrrCI[1], recallLow: bm25CI.recallCI[0], recallHigh: bm25CI.recallCI[1] },
+        { mode: "vector", mrrLow: vectorCI.mrrCI[0], mrrHigh: vectorCI.mrrCI[1], recallLow: vectorCI.recallCI[0], recallHigh: vectorCI.recallCI[1] },
+        { mode: "rrf", mrrLow: rrfCI.mrrCI[0], mrrHigh: rrfCI.mrrCI[1], recallLow: rrfCI.recallCI[0], recallHigh: rrfCI.recallCI[1] },
+        { mode: "rsf", mrrLow: rsfCI.mrrCI[0], mrrHigh: rsfCI.mrrCI[1], recallLow: rsfCI.recallCI[0], recallHigh: rsfCI.recallCI[1] },
+      ]);
+    }
 
     console.log(`\n [Winner by MRR]: ${winner}`);
 
-    console.log(`\n [Paired t-tests]`);
-    console.table([
-      { test: "rrf vs vector", meanDiff: tRrfSel.meanDiff, t: tRrfSel.t.toFixed(2), p: tRrfSel.p, n: tRrfSel.n },
-      { test: "rsf vs vector", meanDiff: tRsfSel.meanDiff, t: tRsfSel.t.toFixed(2), p: tRsfSel.p, n: tRsfSel.n },
-      { test: "rrf vs rsf", meanDiff: tRrfRsf.meanDiff, t: tRrfRsf.t.toFixed(2), p: tRrfRsf.p, n: tRrfRsf.n },
-    ]);
+    if (!isSmoke) {
+      console.log(`\n [Paired t-tests]`);
+      console.table([
+        { test: "rrf vs vector", meanDiff: tRrfSel.meanDiff, t: tRrfSel.t.toFixed(2), p: tRrfSel.p, n: tRrfSel.n },
+        { test: "rsf vs vector", meanDiff: tRsfSel.meanDiff, t: tRsfSel.t.toFixed(2), p: tRsfSel.p, n: tRsfSel.n },
+        { test: "rrf vs rsf", meanDiff: tRrfRsf.meanDiff, t: tRrfRsf.t.toFixed(2), p: tRrfRsf.p, n: tRrfRsf.n },
+      ]);
+    }
 
     console.log("\n [Per-Category Aggregate]");
     console.table(
@@ -397,20 +445,23 @@ export async function evaluateSearchQualityComparison(db, {
       })),
     );
 
-    console.log("\n [RSF Alpha Grid]");
-    console.table(rsfGrid);
-    console.log("\n [RRF k Grid]");
-    console.table(rrfGrid);
+    if (!isSmoke) {
+      console.log("\n [RSF Alpha Grid]");
+      console.table(rsfGrid);
+      console.log("\n [RRF k Grid]");
+      console.table(rrfGrid);
+    }
   }
 
   return {
+    mode: isSmoke ? "smoke" : "full",
     bm25: bm25Res,
     vector: vectorRes,
     hybridRrf: rrfRes,
     hybridRsf: rsfRes,
     winner,
-    bootstrap: { bm25: bm25CI, vector: vectorCI, rrf: rrfCI, rsf: rsfCI },
-    pairedTests: { rrfVsVector: tRrfSel, rsfVsVector: tRsfSel, rrfVsRsf: tRrfRsf },
+    bootstrap: isSmoke ? null : { bm25: bm25CI, vector: vectorCI, rrf: rrfCI, rsf: rsfCI },
+    pairedTests: isSmoke ? null : { rrfVsVector: tRrfSel, rsfVsVector: tRsfSel, rrfVsRsf: tRrfRsf },
     categoryBreakdown,
     rsfGrid,
     rrfGrid,

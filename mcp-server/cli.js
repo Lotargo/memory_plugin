@@ -6,6 +6,7 @@ import { getDatabase } from "./db/database.js";
 import { deleteDocument } from "./ingest/pipeline.js";
 import { readMemoryRaw, readMemory, writeMemory, GLOBAL_KEY, projectName } from "./memory.js";
 import { getCorpusCacheSize, clearCorpusCache } from "./benchmarks/fetch_real_corpus.js";
+import { SMOKE_DOC_IDS } from "./benchmarks/quality_evaluator.js";
 
 const EMBEDDING_PRESETS = [
   "Xenova/multilingual-e5-small",
@@ -59,12 +60,126 @@ function printQuickInfoBox(infoText) {
   console.log(`\x1b[90m ╰${"─".repeat(PANEL_WIDTH - 2)}╯\x1b[0m`);
 }
 
+function padVisible(str, width, align = "left") {
+  const visibleLength = String(str).replace(/\x1b\[[0-9;]*m/g, "").length;
+  const padding = " ".repeat(Math.max(0, width - visibleLength));
+  return align === "right" ? padding + str : str + padding;
+}
+
+function formatRankColor(rankStr) {
+  if (rankStr === "#1") return "\x1b[1m\x1b[32m#1\x1b[0m";
+  if (rankStr.startsWith("#")) return `\x1b[33m${rankStr}\x1b[0m`;
+  return "\x1b[90mMISSED\x1b[0m";
+}
+
+function wrapText(text, width) {
+  if (!text || text.length <= width) return [text || ""];
+  const words = text.split(/\s+/);
+  const lines = [];
+  let currentLine = "";
+
+  for (const word of words) {
+    if (word.length > width) {
+      if (currentLine) {
+        lines.push(currentLine);
+        currentLine = "";
+      }
+      let rem = word;
+      while (rem.length > width) {
+        lines.push(rem.substring(0, width));
+        rem = rem.substring(width);
+      }
+      currentLine = rem;
+    } else if ((currentLine + (currentLine ? " " : "") + word).length <= width) {
+      currentLine += (currentLine ? " " : "") + word;
+    } else {
+      lines.push(currentLine);
+      currentLine = word;
+    }
+  }
+  if (currentLine) lines.push(currentLine);
+  return lines;
+}
+
+function renderPerQueryBreakdownTable(breakdown) {
+  if (!breakdown || breakdown.length === 0) return;
+
+  const termCols = (process.stdout && process.stdout.columns) ? process.stdout.columns : 120;
+  const wId = 3;
+  const wRank = 6;
+  const fixedWidths = wId + wRank * 4 + 27; // borders + separators + rank columns
+  const flexWidth = Math.max(50, termCols - fixedWidths);
+
+  const wQ = Math.max(35, Math.floor(flexWidth * 0.52));
+  const wTarget = Math.max(16, Math.floor(flexWidth * 0.24));
+  const wTopHit = Math.max(16, Math.floor(flexWidth * 0.24));
+
+  const totalLineWidth = wId + wQ + wTarget + (wRank * 4) + wTopHit + 25;
+  const headerDashes = "─".repeat(Math.max(10, totalLineWidth - 38));
+
+  const titleLine = ` ┌── PER-QUERY RESULTS BREAKDOWN (${breakdown.length} Queries) ${headerDashes}┐`;
+  console.log(`\x1b[36m${titleLine}\x1b[0m`);
+
+  const headerRow = ` │ ${padVisible("\x1b[1m\x1b[37m#\x1b[0m", wId)} │ ${padVisible("\x1b[1m\x1b[37mQuestion / Query\x1b[0m", wQ)} │ ${padVisible("\x1b[1m\x1b[37mTarget Document\x1b[0m", wTarget)} │ ${padVisible("\x1b[1m\x1b[37mBM25\x1b[0m", wRank)} │ ${padVisible("\x1b[1m\x1b[37mVector\x1b[0m", wRank)} │ ${padVisible("\x1b[1m\x1b[37mRRF\x1b[0m", wRank)} │ ${padVisible("\x1b[1m\x1b[37mRSF\x1b[0m", wRank)} │ ${padVisible("\x1b[1m\x1b[37mTop Retrieved Hit\x1b[0m", wTopHit)} │`;
+  console.log(headerRow);
+
+  const sepLine = ` ├───┼${"─".repeat(wQ + 2)}┼${"─".repeat(wTarget + 2)}┼${"─".repeat(wRank + 2)}┼${"─".repeat(wRank + 2)}┼${"─".repeat(wRank + 2)}┼${"─".repeat(wRank + 2)}┼${"─".repeat(wTopHit + 2)}┤`;
+  console.log(`\x1b[36m${sepLine}\x1b[0m`);
+
+  breakdown.forEach((item, itemIdx) => {
+    const qLines = wrapText(item.query, wQ);
+    const targetLines = wrapText(item.target, wTarget);
+    const rawHit = item.topHit || "NONE";
+    const hitLines = wrapText(rawHit, wTopHit);
+
+    const isMatch = item.topHit && (item.topHit === item.target || (item.expectedDocIds && item.expectedDocIds.includes(item.topHit)));
+
+    const maxLines = Math.max(qLines.length, targetLines.length, hitLines.length);
+
+    for (let l = 0; l < maxLines; l++) {
+      const idCell = l === 0 ? String(item.id) : "";
+      const qCell = qLines[l] || "";
+      const targetCell = targetLines[l] ? `\x1b[36m${targetLines[l]}\x1b[0m` : "";
+
+      const bm25C = l === 0 ? formatRankColor(item.bm25Rank) : "";
+      const vecC = l === 0 ? formatRankColor(item.vectorRank) : "";
+      const rrfC = l === 0 ? formatRankColor(item.rrfRank) : "";
+      const rsfC = l === 0 ? formatRankColor(item.rsfRank) : "";
+
+      let hitC = "";
+      if (hitLines[l]) {
+        hitC = isMatch ? `\x1b[32m${hitLines[l]}\x1b[0m` : `\x1b[33m${hitLines[l]}\x1b[0m`;
+      }
+
+      const rowStr = ` │ ${padVisible(idCell, wId)} │ ${padVisible(qCell, wQ)} │ ${padVisible(targetCell, wTarget)} │ ${padVisible(bm25C, wRank)} │ ${padVisible(vecC, wRank)} │ ${padVisible(rrfC, wRank)} │ ${padVisible(rsfC, wRank)} │ ${padVisible(hitC, wTopHit)} │`;
+      console.log(rowStr);
+    }
+
+    if (itemIdx < breakdown.length - 1) {
+      console.log(`\x1b[90m${sepLine}\x1b[0m`);
+    }
+  });
+
+  const bottomLine = ` └───┴${"─".repeat(wQ + 2)}┴${"─".repeat(wTarget + 2)}┴${"─".repeat(wRank + 2)}┴${"─".repeat(wRank + 2)}┴${"─".repeat(wRank + 2)}┴${"─".repeat(wRank + 2)}┴${"─".repeat(wTopHit + 2)}┘`;
+  console.log(`\x1b[36m${bottomLine}\x1b[0m\n`);
+}
+
 function renderBenchmarkResultsTable(results) {
   const line = "─".repeat(PANEL_WIDTH - 2);
+  const isSmoke = results && results.mode === "smoke";
+  const title = isSmoke ? "SMOKE BENCHMARK RESULTS" : "SEARCH QUALITY BENCHMARK RESULTS";
   console.log(`\x1b[36m╭${line}╮\x1b[0m`);
-  console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37mSEARCH QUALITY BENCHMARK RESULTS\x1b[0m${" ".repeat(PANEL_WIDTH - 38)}\x1b[36m│\x1b[0m`);
-  console.log(`\x1b[36m│\x1b[0m  \x1b[90mEvaluated over 21 challenging cross-lingual queries\x1b[0m   \x1b[36m│\x1b[0m`);
+  console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37m${title.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
+  const nQueries = results && results.bm25 ? results.bm25.n : 0;
+  const subtitle = isSmoke
+    ? `Smoke: ${nQueries} queries (stats skipped, fast iteration)`
+    : `Evaluated over ${nQueries} challenging cross-lingual queries`;
+  console.log(`\x1b[36m│\x1b[0m  \x1b[90m${subtitle.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
   console.log(`\x1b[36m╰${line}╯\x1b[0m\n`);
+
+  if (results && results.breakdown) {
+    renderPerQueryBreakdownTable(results.breakdown);
+  }
 
   console.log(`\x1b[36m ┌── METRIC COMPARISON BY SEARCH STRATEGY ─────────────┐\x1b[0m`);
   console.log(` \x1b[36m│\x1b[0m \x1b[1m\x1b[37mStrategy            MRR@5     Recall@5     NDCG@5   \x1b[0m\x1b[36m│\x1b[0m`);
@@ -98,6 +213,22 @@ function renderBenchmarkResultsTable(results) {
   });
 
   console.log(`\x1b[36m └──${"─".repeat(PANEL_WIDTH - 4)}┘\x1b[0m\n`);
+
+  // Winner block: previously misplaced inside selectBlockMenu where `results` was
+  // out of scope (ReferenceError). Now lives here where `results` is the param.
+  if (results && results.winner) {
+    const winnerLabel =
+      results.winner === "hybrid_rsf" ? "RSF"
+      : results.winner === "hybrid_rrf" ? "RRF"
+      : results.winner === "vector" ? "Vector"
+      : results.winner === "bm25" ? "BM25"
+      : results.winner;
+    const p = results.pairedTests && results.pairedTests.rrfVsRsf;
+    const sigNote = p
+      ? (p.p < 0.05 ? ` (RRF vs RSF p=${p.p}, significant)` : ` (RRF vs RSF p=${p.p}, NOT significant at N=${p.n})`)
+      : (results.mode === "smoke" ? " (smoke: stats skipped)" : "");
+    console.log(` \x1b[90m Winner by MRR: \x1b[1m\x1b[36m${winnerLabel}\x1b[0m\x1b[90m${sigNote}\x1b[0m\n`);
+  }
 }
 
 function selectBlockMenu({ title, stats, blocks, initialIndex = 0 }) {
@@ -150,17 +281,6 @@ function selectBlockMenu({ title, stats, blocks, initialIndex = 0 }) {
         });
 
 console.log(`\x1b[36m └──${"─".repeat(PANEL_WIDTH - 4)}┘\x1b[0m\n`);
-
-  if (results.winner) {
-    const winnerLabel =
-      results.winner === "hybrid_rsf" ? "RSF"
-      : results.winner === "hybrid_rrf" ? "RRF"
-      : results.winner === "vector" ? "Vector"
-      : "BM25";
-    const p = results.pairedTests && results.pairedTests.rrfVsRsf;
-    const sigNote = p ? (p.p < 0.05 ? ` (RRF vs RSF p=${p.p}, significant)` : ` (RRF vs RSF p=${p.p}, NOT significant at N=${p.n})`) : "";
-    console.log(` \x1b[90m Winner by MRR: \x1b[1m\x1b[36m${winnerLabel}\x1b[0m\x1b[90m${sigNote}\x1b[0m\n`);
-  }
       });
 
       const activeItem = allItems[activeIndex];
@@ -509,7 +629,7 @@ export async function runCli() {
           {
             label: "[BENCHMARK] Run Search Quality Benchmark",
             value: "benchmark",
-            info: "Fetch 27 GitHub docs, compute ONNX vectors, evaluate BM25 vs Vector vs RRF vs RSF",
+            info: "Choose Quick Smoke (9 queries, ~7s) or Full (21 queries + stats, ~32s)",
           },
           {
             label: "[SEARCH] Run Search Verification Query",
@@ -794,11 +914,36 @@ export async function runCli() {
         break;
       }
       case "benchmark": {
+        const modeRes = await selectSimpleMenu({
+          title: "BENCHMARK MODE",
+          subtitle: "Choose smoke (fast iteration) vs full (statistical rigor)",
+          items: [
+            {
+              label: "Quick Smoke (~7s, 9 queries on 6 docs)",
+              value: "smoke",
+              info: `Subset: ${SMOKE_DOC_IDS.join(", ")}. Skips bootstrap/grid/t-tests for fast dev iteration loop.`,
+            },
+            {
+              label: "Full Benchmark (~32s, 21 queries + stats)",
+              value: "full",
+              info: "Full 27-doc corpus, bootstrap CIs, paired t-tests, alpha/k grid sweep. Writes dev_docs/benchmark_results.md.",
+            },
+            { label: "< Back to Main Menu", value: "back" },
+          ],
+        });
+
+        if (modeRes.action === "back" || modeRes.value === "back") {
+          break;
+        }
+
+        const isSmoke = modeRes.value === "smoke";
         console.clear();
         const line = "─".repeat(PANEL_WIDTH - 2);
+        const modeTitle = isSmoke ? "SMOKE BENCHMARK IN PROGRESS" : "BENCHMARK IN PROGRESS";
+        const modeSub = isSmoke ? "Fetch 6 docs + Ingest + Eval 9 queries (stats skipped)" : "Fetch Corpus + Ingest + Evaluate 21 Queries";
         console.log(`\x1b[36m╭${line}╮\x1b[0m`);
-        console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37m${"BENCHMARK IN PROGRESS".padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
-        console.log(`\x1b[36m│\x1b[0m  \x1b[90m${"Fetch Corpus + Ingest + Evaluate 21 Queries".padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
+        console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37m${modeTitle.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
+        console.log(`\x1b[36m│\x1b[0m  \x1b[90m${modeSub.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
         console.log(`\x1b[36m╰${line}╯\x1b[0m\n`);
 
         const spinFrames = ["|", "/", "-", "\\"];
@@ -819,9 +964,13 @@ export async function runCli() {
         try {
           const { evaluateSearchQualityComparison } = await import("./benchmarks/quality_evaluator.js");
           const { runIngestionBenchmark } = await import("./benchmarks/stress_ingestion.js");
-          const ingestRes = await runIngestionBenchmark({ generateEmbeddings: true, silent: true, onProgress });
+          const ingestOpts = isSmoke
+            ? { generateEmbeddings: true, silent: true, onProgress, subsetDocIds: SMOKE_DOC_IDS }
+            : { generateEmbeddings: true, silent: true, onProgress };
+          const ingestRes = await runIngestionBenchmark(ingestOpts);
 
-          const qualityComp = await evaluateSearchQualityComparison(ingestRes.dbInstance, { silent: true, onProgress });
+          const evalOpts = isSmoke ? { silent: true, onProgress, mode: "smoke" } : { silent: true, onProgress };
+          const qualityComp = await evaluateSearchQualityComparison(ingestRes.dbInstance, evalOpts);
 
           try { ingestRes.dbInstance.close(); } catch (e) {}
 

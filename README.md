@@ -150,6 +150,29 @@ memory_plugin cli
 memory-cli
 ```
 
+### CLI Menu Structure
+
+The interactive menu exposes the same runtime knobs that `hybridQuery` honours, so you can change search behaviour without editing code or restarting the MCP server. Keys: **↑ / ↓** to navigate, **ENTER** to select, **BACKSPACE** to go back.
+
+| Block | Item | What it does |
+|---|---|---|
+| **Engine Settings** | Fusion Algorithm | Switch between `rsf`, `rrf`, `semantic_only`, `lexical_only`. Affects every `query_knowledge_base` call until changed. |
+| | RSF Alpha Balance | Weight of semantic over lexical in `rsf` fusion (`α ∈ [0,1]`). Default `0.5`; best-in-class tuning is reported by the benchmark (see §Testing). |
+| | Embedding Model | Pick any HF `Xenova/...` ONNX model. First query after switching downloads weights and pays a one-time memory cost. |
+| | Reranker Model | Enable a cross-encoder (e.g. `bge-reranker-base`) on top of hybrid results, or disable for zero-latency fusion. |
+| **Notebook** | Layer 1 Facts | Browse / delete `global` and per-project `.md` fact stores. Hooks `remember` / `recall` / `forget`. |
+| **RAG Docs** | Layer 2 RAG Base | List ingested documents, inspect micro-chunk/section counts, and purge a document from FTS5 + vector index + CAS blobs. |
+| **Diagnostics** | Run Search Quality Benchmark | Executes the full benchmark suite in-process and prints the winner table (see §Testing). Surfaces `winner` + RRF-vs-RSF significance so you can decide before flipping the algorithm. |
+| | Run Search Verification Query | Issue a one-off `hybridQuery` against the live index to sanity-check retrieval with current settings. |
+| | Clear Benchmark Corpus Cache | Delete the cached GitHub README corpus used by the benchmark (frees disk for re-fetch from scratch). |
+| | Reset Config to Factory Defaults | Restore `config_defaults.json` to disk. |
+
+### Why use the CLI?
+
+- **Iterative tuning**: change `alpha` and re-run the benchmark in <60 s to see if MRR/Recall move — no model reload, corpus is cached.
+- **Reproducible diagnostics**: the benchmark tabulates MRR/Recall/NDCG per mode and per category, so you can attribute a regression to a specific query or fusion knob.
+- **Zero config drift**: settings persist to `~/.config/opencode/memory/config.json` and are picked up by the MCP server on next `query_knowledge_base` / `hybridQuery` call.
+
 ---
 
 ## Testing & Benchmarking
@@ -166,16 +189,41 @@ npm test
 npm run benchmark
 ```
 
+### Benchmark Methodology
+
+The benchmark suite (`mcp-server/benchmarks/`) is the canonical way to evaluate retrieval quality changes. It runs three phases end-to-end:
+
+1. **Dual-layer verification** — asserts Notebook and RAG layers are isolated (zero crosstalk, 100% precision on `recall`).
+2. **Ingestion benchmark** — fetches 27 real GitHub README documents, ingests them with ONNX `multilingual-e5-small` embeddings, and reports throughput, DB size, blob footprint, and heap delta.
+3. **Search quality benchmark** — evaluates 21 challenging Russian→English / cross-lingual / code-keyword queries against 4 retrieval strategies with per-category breakdown, bootstrap 95% CIs, paired t-tests, and grid searches over RSF `α` and RRF `k`.
+
+**Strict matching policy**: a query is counted as hit iff the returned chunk belongs to one of the query's predefined `expectedDocIds` (derived from corpus source-id, e.g. `axios_readme`). This avoids false positives from substring overlap (e.g. query "next" against any doc mentioning "next").
+
+**Outputs**: In addition to the human-readable markdown report at `dev_docs/benchmark_results.md`, each run also writes a machine-readable JSON sidecar `dev_docs/benchmark_<timestamp>.json` and archives a copy under `dev_docs/benchmark_history/` for regression tracking across runs.
+
+> **Note**: The runner auto-respawns with `--expose-gc` so heap deltas can be measured post-GC. Pass `--no-respawn` to disable.
+
 ### Empirical Benchmark Summary
 
-Benchmark performed over 27 real-world GitHub README documents (no self-referential synthetic data) with full ONNX vector embedding computation (`multilingual-e5-small`), evaluated across 21 challenging cross-lingual semantic + keyword queries:
+Latest run (21 queries, 27 documents). **Winner by MRR: RRF**, but the RRF-vs-RSF gap is **not statistically significant** at N=21 — treat both hybrids as comparable until the query set grows to ≥50.
 
-| Search Strategy | MRR@5 | Recall@5 | NDCG@5 |
-|---|---|---|---|
-| **BM25 Text Search Only** | 0.5119 | 57.1% | 0.5267 |
-| **Dense ONNX Vector Only** | 0.6048 | 71.4% | 0.6309 |
-| **Hybrid RRF (Reciprocal Rank)** | **0.6825** | **80.95%** | **0.7139** |
-| **Hybrid RSF (Relative Score)** | **0.6548** | **76.19%** | **0.6806** |
+| Search Strategy | MRR@5 | Recall@5 | NDCG@5 | Bootstrap 95% CI (MRR) |
+|---|---|---|---|---|
+| **BM25 Text Search Only** | 0.4802 | 57.1% | 0.5029 | [0.298, 0.679] |
+| **Dense ONNX Vector Only** | 0.6048 | 71.4% | 0.6309 | [0.400, 0.810] |
+| **Hybrid RRF (Reciprocal Rank)** | **0.6206** | **76.2%** | **0.6547** | [0.437, 0.810] |
+| **Hybrid RSF (Relative Score)** | 0.6087 | 76.2% | 0.6466 | [0.429, 0.787] |
+
+**Paired t-test (RRF vs RSF)**: mean ΔRR = 0.0119, p = 0.4449 → **NOT significant**, bootstrap CIs overlap.
+
+**Hyperparameter grid search** (swept across all 21 queries):
+- Best RSF `α = 0.6` → MRR 0.6143 (default 0.5 → 0.6087).
+- RRF `k ≤ 60` are equivalent; `k = 100` degrades to MRR 0.5516.
+
+**Per-category MRR**:
+- Code/Keyword: 0.857 (all modes tie — lexical overlap dominates).
+- Cross-Lingual: 0.571 (Vector & hybrids win; BM25 at 0.321 due to zero lexical overlap RU→EN).
+- Semantic RU→EN: RRF 0.433 > RSF 0.398 > Vector 0.386 > BM25 0.262.
 
 ---
 
