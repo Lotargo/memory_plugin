@@ -76,6 +76,8 @@ export async function runIngestionBenchmark(options = { generateEmbeddings: fals
 
   const metrics = {
     docCount: corpus.length,
+    networkDocCount: corpus.filter((d) => d.source === "network").length,
+    localDocCount: corpus.filter((d) => d.source !== "network").length,
     totalSections,
     totalMicroChunks,
     totalBytes,

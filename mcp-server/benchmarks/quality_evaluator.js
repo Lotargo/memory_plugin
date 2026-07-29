@@ -12,20 +12,26 @@ export const CHALLENGING_EVALUATION_QUERIES = [
   { query: "Централизованное управление состоянием приложения в одном сторе", expectedKeyword: "redux", category: "Semantic RU->EN" },
   { query: "Управление изолированными контейнерами приложений через командную строку", expectedKeyword: "docker", category: "Semantic RU->EN" },
   { query: "Компактная база данных прямо внутри процесса без отдельного сервера", expectedKeyword: "sqlite", category: "Semantic RU->EN" },
+  { query: "JavaScript рантайм с нативной поддержкой TypeScript и JSX из коробки", expectedKeyword: "bun", category: "Semantic RU->EN" },
+  { query: "Библиотека для декларативной валидации схем с автоматическим выводом типов TypeScript", expectedKeyword: "zod", category: "Semantic RU->EN" },
 
   // Category B: Cross-Lingual Technical Concepts (Russian prompt -> English documentation)
   { query: "Асинхронный веб фреймворк на Python с автоматической OpenAPI документацией", expectedKeyword: "fastapi", category: "Cross-Lingual" },
   { query: "Язык программирования с гарантией безопасности памяти без Garbage Collector", expectedKeyword: "rust", category: "Cross-Lingual" },
   { query: "Верстка элементов интерфейса через атомарные CSS утилиты", expectedKeyword: "tailwind", category: "Cross-Lingual" },
   { query: "Безопасная среда выполнения TypeScript с возможностью бана сетевых прав", expectedKeyword: "deno", category: "Cross-Lingual" },
-  { query: "Локальный векторный поиск знаний без использования тяжелого Docker контейнера", expectedKeyword: "memory_plugin", category: "Cross-Lingual" },
+  { query: "Инструмент для end-to-end тестирования веб-приложений с автоматическим ожиданием элементов", expectedKeyword: "playwright", category: "Cross-Lingual" },
+  { query: "Прогрессивный JavaScript фреймворк для создания пользовательских интерфейсов с реактивной моделью данных", expectedKeyword: "vue", category: "Cross-Lingual" },
+  { query: "Фреймворк для серверного рендеринга React приложений с файловой маршрутизацией", expectedKeyword: "next", category: "Cross-Lingual" },
 
   // Category C: Direct Code & Keyword Searches
   { query: "isCancel AxiosError require default export", expectedKeyword: "axios", category: "Code/Keyword" },
   { query: "PRAGMA user_version FTS5 unicode61 tokenizer", expectedKeyword: "sqlite", category: "Code/Keyword" },
   { query: "pipeline feature-extraction quantized ONNX", expectedKeyword: "transformers", category: "Code/Keyword" },
   { query: "useContext useReducer JSX render DOM", expectedKeyword: "react", category: "Code/Keyword" },
-  { query: "micro_chunks graph_edges Reciprocal Rank Fusion", expectedKeyword: "memory_plugin", category: "Code/Keyword" },
+  { query: "browser.newPage page.goto expect.toBeVisible test.describe", expectedKeyword: "playwright", category: "Code/Keyword" },
+  { query: "z.object z.string z.number z.enum z.array infer output", expectedKeyword: "zod", category: "Code/Keyword" },
+  { query: "npm run dev pages router getServerSideProps getStaticProps", expectedKeyword: "next", category: "Code/Keyword" },
 ];
 
 async function runQueryForMode(db, qObj, mode, K = 5) {

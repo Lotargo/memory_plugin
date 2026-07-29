@@ -50,13 +50,26 @@ async function runFullBenchmarkSuite() {
     )
     .join("\n");
 
+  // Compute dynamic analysis metrics
+  const totalQueries = qualityComp.breakdown.length;
+  const bm25Missed = qualityComp.breakdown.filter((b) => b.bm25Rank === "MISSED").length;
+  const vectorMissed = qualityComp.breakdown.filter((b) => b.vectorRank === "MISSED").length;
+  const hybridMissed = qualityComp.breakdown.filter((b) => b.hybridRank === "MISSED").length;
+  const hybridFound = totalQueries - hybridMissed;
+  const hybridRecallPct = ((hybridFound / totalQueries) * 100).toFixed(1);
+  const bm25RecallPct = ((qualityComp.bm25.recallAtK * 100)).toFixed(1);
+  const mrrDelta = (qualityComp.hybrid.mrrAtK - qualityComp.vector.mrrAtK).toFixed(4);
+  const corpusSourceCount = ingestMetrics.docCount;
+  const networkDocCount = ingestMetrics.networkDocCount;
+  const localDocCount = ingestMetrics.localDocCount;
+
   // 4. Generate Comprehensive Markdown Report
   const markdownReport = `# memory_plugin Local Hybrid RAG Rigorous Benchmark Report
 
 **Generated At**: ${new Date().toISOString()}  
 **Total Benchmark Duration**: ${totalTimeSec} seconds  
 **Embedding Engine**: \`Xenova/multilingual-e5-small\` (ONNX Quantized 384-d vectors, FULL CPU Inference Enabled)  
-**Corpus**: 21 Real-World GitHub & Technical Web Documents
+**Corpus**: ${corpusSourceCount} Documents (${networkDocCount} fetched from GitHub, ${localDocCount} local fallback)
 
 ---
 
@@ -89,13 +102,13 @@ async function runFullBenchmarkSuite() {
 
 ## 3. Aggregate Strategy Comparison (BM25 vs Vector vs Hybrid RRF)
 
-Evaluation over 15 hard semantic, paraphrased, and cross-lingual Russian-to-English queries:
+Evaluation over ${totalQueries} hard semantic, paraphrased, and cross-lingual Russian-to-English queries:
 
 | Search Strategy | MRR@5 | Recall@5 | NDCG@5 |
 |---|---|---|---|
-| **BM25 Text Search Only** | ${qualityComp.bm25.mrrAtK} | ${qualityComp.bm25.recallAtK} (${qualityComp.bm25.recallAtK * 100}%) | ${qualityComp.bm25.ndcgAtK} |
-| **Dense ONNX Vector Only** | ${qualityComp.vector.mrrAtK} | ${qualityComp.vector.recallAtK} (${qualityComp.vector.recallAtK * 100}%) | ${qualityComp.vector.ndcgAtK} |
-| **Hybrid RRF (BM25 + Vector)** | **${qualityComp.hybrid.mrrAtK}** | **${qualityComp.hybrid.recallAtK} (${qualityComp.hybrid.recallAtK * 100}%)** | **${qualityComp.hybrid.ndcgAtK}** |
+| **BM25 Text Search Only** | ${qualityComp.bm25.mrrAtK} | ${qualityComp.bm25.recallAtK} (${bm25RecallPct}%) | ${qualityComp.bm25.ndcgAtK} |
+| **Dense ONNX Vector Only** | ${qualityComp.vector.mrrAtK} | ${qualityComp.vector.recallAtK} (${(qualityComp.vector.recallAtK * 100).toFixed(1)}%) | ${qualityComp.vector.ndcgAtK} |
+| **Hybrid RRF (BM25 + Vector)** | **${qualityComp.hybrid.mrrAtK}** | **${qualityComp.hybrid.recallAtK} (${hybridRecallPct}%)** | **${qualityComp.hybrid.ndcgAtK}** |
 
 ---
 
@@ -109,12 +122,13 @@ ${breakdownRows}
 
 ## 5. Detailed Analysis & Key Takeaways
 
-1. **Why Hybrid RRF achieves higher MRR (0.7667 vs 0.7022)**:
-   - Even when Vector Search and Hybrid RRF both achieve 80% Recall@5 (12/15 queries found in Top 5), **Hybrid RRF elevates the relevant hits to position #1** (MRR 0.7667), whereas Vector Search alone ranks them lower at #2, #3, or #4 (MRR 0.7022).
-2. **Why 3 queries were missed (12/15 = 80%)**:
-   - Queries with highly abstract Russian phrasing or lacking distinct domain anchors missed the Top 5 cutoff in the quantized small embedding model (\`e5-small\`).
-3. **BM25 Weakness (66.67%)**:
-   - BM25 fails completely (MISSED) on cross-lingual queries (e.g. Russian description searching English code/READMEs).
+1. **Hybrid RRF vs Vector-Only MRR**: Hybrid RRF MRR is **${qualityComp.hybrid.mrrAtK}** vs Vector-Only **${qualityComp.vector.mrrAtK}** (Δ = ${mrrDelta}). ${Number(mrrDelta) > 0 ? "RRF fusion consistently elevates relevant hits closer to position #1." : "No significant MRR improvement from RRF fusion in this run."}
+
+2. **Hybrid Recall**: Hybrid RRF found **${hybridFound}/${totalQueries}** queries in Top-5 (${hybridRecallPct}%). ${hybridMissed > 0 ? `${hybridMissed} quer${hybridMissed === 1 ? "y" : "ies"} missed — typically highly abstract phrasing or queries without distinct domain anchors in the \`e5-small\` embedding space.` : "All queries hit in Top-5."}
+
+3. **BM25 Cross-Lingual Limitation**: BM25 found ${totalQueries - bm25Missed}/${totalQueries} (${bm25RecallPct}%). BM25 fails on cross-lingual queries (Russian query → English docs) due to zero lexical overlap, while vector search bridges the semantic gap.
+
+4. **Corpus Composition**: ${networkDocCount} documents sourced from real GitHub repositories, ${localDocCount} from local technical specifications. No self-referential synthetic documents about the plugin itself are included in the evaluation.
 `;
 
   await new Promise((resolve, reject) => writeFile(REPORT_PATH, markdownReport, "utf-8", (err) => (err ? reject(err) : resolve())));

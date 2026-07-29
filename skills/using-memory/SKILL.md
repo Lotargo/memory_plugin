@@ -54,6 +54,33 @@ Use this tool BEFORE answering deep architectural or technical questions when in
 - Performs **Hybrid RRF Fusion** combining SQLite FTS5 BM25 keyword matching with dense ONNX vector semantic search.
 - Returns candidate sections with breadcrumb paths and defined code symbols (classes, functions, types).
 
+#### Query Formulation Rules (CRITICAL for retrieval quality)
+
+The hybrid engine combines two complementary strategies. Your query MUST serve both:
+
+**Rule 1 — Include exact code symbols for BM25 (keyword layer)**
+BM25 matches lexical tokens. If the user asks about a specific function, class, API, or error, include its exact name.
+- Good: `"isCancel AxiosError request cancellation"`
+- Bad: `"how to cancel HTTP requests"` (lexical mismatch with source code)
+
+**Rule 2 — Add a natural-language description for vector search (semantic layer)**
+The ONNX embedding model (`multilingual-e5-small`) maps meaning across languages. Describe the CONCEPT in any language.
+- Good: `"Библиотека для HTTP запросов с отменой"`
+- Good: `"centralized state management single store"` → finds Redux docs
+
+**Rule 3 — Combine both in a single query**
+The RRF fusion algorithm merges results from both strategies. A single query should contain BOTH keywords AND semantic description.
+- Example: `"isCancel AxiosError библиотека HTTP запросов отмена"`
+- Example: `"createStore combineReducers управление состоянием приложения"`
+
+**Rule 4 — Query in the language of the DOCUMENTS when you know it**
+If indexed docs are in English, prefer English keywords. Use Russian only for the semantic/conceptual part.
+- Good: `"useReducer useContext management React component state"`
+- Avoid: purely Russian queries when searching English code (`"управление состоянием"` alone will miss BM25 hits)
+
+**Rule 5 — Use short queries (10-30 words)**
+The `multilingual-e5-small` model works best with concise descriptions. Long rambling queries dilute the embedding signal.
+
 ### Knowledge Base Management (`manage_knowledge_base`)
 - Use `action: "stats"` to inspect stored document count and total micro-chunks.
 - Use `action: "list"` to see all ingested documents.
