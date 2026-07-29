@@ -9,6 +9,11 @@ export const GLOBAL_KEY = "global";
 
 export async function ensureDir() {
   if (!existsSync(MEMORY_DIR)) await mkdir(MEMORY_DIR, { recursive: true });
+  const storageDir = join(MEMORY_DIR, "storage");
+  const blobsDir = join(storageDir, "blobs");
+  const modelsDir = join(storageDir, "models");
+  if (!existsSync(blobsDir)) await mkdir(blobsDir, { recursive: true });
+  if (!existsSync(modelsDir)) await mkdir(modelsDir, { recursive: true });
 }
 
 export function projectName(worktree, directory) {
