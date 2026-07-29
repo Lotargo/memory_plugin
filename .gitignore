@@ -1,6 +1,5 @@
 node_modules/
 memory/
-dev_docs/
 .DS_Store
 *.log
 .env
