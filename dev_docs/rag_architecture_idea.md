@@ -173,14 +173,14 @@ CREATE TABLE IF NOT EXISTS graph_edges (
 
 ## 10. Development Roadmap
 
-- [ ] **Phase 1: Storage & Database Foundation**
+- [x] **Phase 1: Storage & Database Foundation**
   - SQLite schema & `PRAGMA user_version` migrations engine.
   - Local S3 Blob Store manager (`blobs/` SHA-256 storage).
-- [ ] **Phase 2: ML Engine & Ingestion Pipeline**
+- [x] **Phase 2: ML Engine & Ingestion Pipeline**
   - ONNX Model Manager (`@xenova/transformers` with Project Repo Git LFS / GitHub Release primary downloads + HF fallbacks).
   - Universal Normalizer (HTML / File / Text -> Clean Markdown AST).
   - Triple-Hierarchy Chunker (Big / Medium / Small).
-- [ ] **Phase 3: Hybrid Retrieval & GraphRAG Lite**
+- [x] **Phase 3: Hybrid Retrieval & GraphRAG Lite**
   - RRF Hybrid Retriever (BM25 FTS5 + Vector + Thresholding).
   - GraphRAG Lite edge extractor during ingestion.
 - [ ] **Phase 4: MCP Tools & Administrative Suite**
