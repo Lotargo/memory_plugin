@@ -1,0 +1,21 @@
+{
+  "name": "opencode-memory-plugin",
+  "version": "1.0.0",
+  "description": "Persistent memory plugin for OpenCode — remembers user preferences and project facts across sessions.",
+  "main": ".opencode/plugins/memory-plugin.js",
+  "files": [
+    ".opencode"
+  ],
+  "keywords": [
+    "opencode",
+    "plugin",
+    "memory",
+    "ai",
+    "context"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Lotargo/memory_pugin.git"
+  }
+}
