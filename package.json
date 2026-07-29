@@ -1,6 +1,6 @@
 {
   "name": "@lotargo/memory_plugin",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Persistent memory agent for coding AI tools — remembers user preferences and project context across sessions. Works with Antigravity, OpenCode, Claude Code, and Codex.",
   "type": "module",
   "main": ".opencode/plugins/memory-plugin.js",
