@@ -15,14 +15,27 @@ export async function getExtractor(modelName = currentModelName) {
   env.allowRemoteModels = true;
 
   try {
+    // 1. Primary load from HuggingFace
     extractorInstance = await pipeline("feature-extraction", modelName, {
       quantized: true,
     });
   } catch (err) {
-    console.warn(`Failed to load primary model ${modelName}, attempting fallback...`, err.message);
-    extractorInstance = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2", {
-      quantized: true,
-    });
+    console.warn(`Primary HuggingFace model load failed/rate-limited: ${err.message}. Attempting GitHub mirror fallback...`);
+    try {
+      // 2. Fallback load from GitHub mirror host
+      env.remoteHost = "https://raw.githubusercontent.com/Lotargo/memory_pugin/main/models/";
+      env.remotePathTemplate = "{model}/";
+      extractorInstance = await pipeline("feature-extraction", modelName, {
+        quantized: true,
+      });
+    } catch (mirrorErr) {
+      console.warn(`GitHub mirror fallback failed: ${mirrorErr.message}. Attempting fallback model...`);
+      env.remoteHost = "https://huggingface.co";
+      env.remotePathTemplate = "{model}/resolve/{revision}/";
+      extractorInstance = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2", {
+        quantized: true,
+      });
+    }
   }
 
   return extractorInstance;
