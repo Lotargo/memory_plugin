@@ -29,7 +29,7 @@ Standard AI coding assistants lose context as soon as a chat session closes or a
 - **Environment Constraints**: *"Our target deployment environment is Node.js 20 on AWS Lambda."*
 
 #### 2. Everyday Chat & Interaction
-- **User Profile & Communication Tone**: *"My name is Oleg. I prefer concise, direct answers without conversational filler."*
+- **User Profile & Communication Tone**: *"My name is Alex. I prefer concise, direct answers without conversational filler."*
 - **Explanation Format**: *"Explain complex technical concepts using real-world code examples."*
 - **Goals & Context**: *"I am currently building a multi-platform memory plugin and RAG engine."*
 

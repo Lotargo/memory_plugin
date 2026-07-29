@@ -29,7 +29,7 @@ export async function testDualLayerArchitecture() {
     // 1. Setup Layer 1: Persistent Personal Facts (Notebook Store)
     console.log("\n1. Testing Layer 1: Persistent Personal Facts (Notebook Store)...");
     const personalFacts = [
-      "- [2026-07-30 02:30] User's name is Oleg",
+      "- [2026-07-30 02:30] User's name is Alex",
       "- [2026-07-30 02:30] User prefers zero-Docker Node.js architecture with SQLite",
       "- [2026-07-30 02:30] Project goal is building enterprise-grade local memory_plugin",
     ];
@@ -39,7 +39,7 @@ export async function testDualLayerArchitecture() {
     const recalledFacts = readNotebookFacts();
 
     assert.strictEqual(recalledFacts.length, 3, "Notebook facts should return all saved entries");
-    assert(recalledFacts[0].includes("User's name is Oleg"), "Notebook fact 1 should contain user name");
+    assert(recalledFacts[0].includes("User's name is Alex"), "Notebook fact 1 should contain user name");
     console.log("  [PASS] Notebook Layer returns persistent user facts instantly with 100% precision.");
     results.notebookLayerPassed = true;
     results.details.push("Notebook Layer: 100% precision instant recall verified.");
