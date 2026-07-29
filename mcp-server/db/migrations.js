@@ -62,6 +62,33 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 2,
+    name: "002_agent_knowledge_graph",
+    up: (db) => {
+      try {
+        db.exec(`ALTER TABLE graph_edges ADD COLUMN metadata_json TEXT;`);
+      } catch (e) {}
+      try {
+        db.exec(`ALTER TABLE graph_edges ADD COLUMN created_at INTEGER;`);
+      } catch (e) {}
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS knowledge_links (
+            id TEXT PRIMARY KEY,
+            fact_key TEXT NOT NULL,
+            fact_text TEXT NOT NULL,
+            doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+            section_id TEXT,
+            start_line INTEGER,
+            end_line INTEGER,
+            relation_type TEXT DEFAULT 'LINKS_TO',
+            metadata_json TEXT,
+            created_at INTEGER NOT NULL
+        );
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db) {

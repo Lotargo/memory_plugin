@@ -34,51 +34,96 @@ const server = new McpServer({
 
 // --- Legacy Key-Value Memory Tools ---
 
+// --- Legacy Key-Value Memory Tools & Agent Graph Linking ---
+
 server.registerTool(
   "remember",
   {
     description:
       "Save an important, durable fact to memory. Only use for high-signal information " +
       "(name, goals, constraints, tech preferences, project conventions). " +
+      "Optionally link the fact to a Knowledge Base document or exact line range (docId, startLine, endLine). " +
       "Translate the fact into English and keep it concise. " +
       "scope: 'project' (default) or 'global'",
     inputSchema: z.object({
       fact: z.string().describe("The fact to remember, written in English"),
       scope: z.string().default("project").describe("'project' (default) or 'global'"),
+      docId: z.string().optional().describe("Optional document ID, title, or path to link this fact to"),
+      startLine: z.number().optional().describe("Optional starting line number in target document"),
+      endLine: z.number().optional().describe("Optional ending line number in target document"),
+      relationType: z.string().default("LINKS_TO").describe("Relation type (e.g. 'RULES_FOR', 'IMPLEMENTS', 'REFERENCES')"),
     }),
   },
-  async ({ fact, scope }) => {
+  async ({ fact, scope, docId, startLine, endLine, relationType }) => {
     const key = scopeKey(scope, null, null);
     const entries = await readMemory(key);
     const factNormalized = fact.toLowerCase().trim();
-    if (entries.some((e) => {
+    if (!entries.some((e) => {
       const idx = e.indexOf("] ");
       return idx !== -1 && e.slice(idx + 2).toLowerCase().trim() === factNormalized;
     })) {
-      return { content: [{ type: "text", text: "Already saved" }] };
+      entries.push(`- [${today()}] ${fact}`);
+      await writeMemory(key, entries);
     }
-    entries.push(`- [${today()}] ${fact}`);
-    await writeMemory(key, entries);
-    return { content: [{ type: "text", text: "Memory updated" }] };
+
+    let linkInfo = "";
+    if (docId) {
+      const { linkFactToDocument } = await import("./graph/knowledge_linker.js");
+      try {
+        const linkRes = linkFactToDocument({
+          factKey: key,
+          factText: fact,
+          docId,
+          startLine,
+          endLine,
+          relationType,
+        });
+        const linesStr = startLine ? `:L${startLine}${endLine ? `-${endLine}` : ""}` : "";
+        linkInfo = ` [Linked to Doc: "${linkRes.docTitle}"${linesStr}]`;
+      } catch (err) {
+        linkInfo = ` (Note: Fact saved, but document link failed: ${err.message})`;
+      }
+    }
+
+    return { content: [{ type: "text", text: `Memory updated${linkInfo}` }] };
   }
 );
 
 server.registerTool(
   "recall",
   {
-    description: "Show saved facts. scope: 'project', 'global', or 'all' (default)",
+    description: "Show saved facts with any Agent-linked Knowledge Base documents/lines. scope: 'project', 'global', or 'all' (default)",
     inputSchema: z.object({
       scope: z.string().default("all").describe("'project', 'global', or 'all'"),
     }),
   },
   async ({ scope }) => {
     const project = projectName(null, null);
+    const { getLinksForFact } = await import("./graph/knowledge_linker.js");
     const results = [];
+
+    const formatFactWithLinks = (factText, key) => {
+      let line = factText;
+      try {
+        const links = getLinksForFact(key, factText);
+        if (links && links.length > 0) {
+          const docStr = links
+            .map((l) => {
+              const range = l.start_line ? `:L${l.start_line}${l.end_line ? `-${l.end_line}` : ""}` : "";
+              return `${l.doc_title || l.doc_path}${range}`;
+            })
+            .join(", ");
+          line += ` 🔗 [Linked Docs: ${docStr}]`;
+        }
+      } catch (e) {}
+      return line;
+    };
+
     if (scope !== "project") {
       const global = await readMemoryRaw(GLOBAL_KEY);
       if (global.length) {
         results.push("--- Global ---");
-        global.forEach((e, i) => results.push(`${i + 1}. ${e}`));
+        global.forEach((e, i) => results.push(`${i + 1}. ${formatFactWithLinks(e, GLOBAL_KEY)}`));
       }
     }
     if (scope !== "global") {
@@ -86,7 +131,7 @@ server.registerTool(
       if (local.length) {
         if (results.length) results.push("");
         results.push(`--- ${project} ---`);
-        local.forEach((e, i) => results.push(`${i + 1}. ${e}`));
+        local.forEach((e, i) => results.push(`${i + 1}. ${formatFactWithLinks(e, project)}`));
       }
     }
     const text = results.length ? results.join("\n") : "Memory is empty.";
@@ -119,6 +164,62 @@ server.registerTool(
     await writeMemory(key, entries);
     const text = removed.length ? "Memory updated" : "Not found.";
     return { content: [{ type: "text", text }] };
+  }
+);
+
+server.registerTool(
+  "link_knowledge",
+  {
+    description:
+      "Explicitly link a Notebook memory fact to a Knowledge Base document, section, or line range. " +
+      "Creates Agent-driven Graph Edges connecting memory to RAG documents.",
+    inputSchema: z.object({
+      action: z.enum(["link", "list_links", "get_doc_links"]).default("link").describe("Action type"),
+      factText: z.string().optional().describe("Memory fact text or keyword"),
+      docId: z.string().optional().describe("Document ID, title, or file path"),
+      scope: z.string().default("project").describe("'project' (default) or 'global'"),
+      startLine: z.number().optional().describe("Starting line number in target document"),
+      endLine: z.number().optional().describe("Ending line number in target document"),
+      relationType: z.string().default("LINKS_TO").describe("Relation type (e.g. 'RULES_FOR', 'IMPLEMENTS', 'EXPLAINS')"),
+    }),
+  },
+  async ({ action, factText, docId, scope, startLine, endLine, relationType }) => {
+    const { linkFactToDocument, getLinksForDoc, listAllLinks } = await import("./graph/knowledge_linker.js");
+    const key = scopeKey(scope, null, null);
+
+    if (action === "link") {
+      if (!factText || !docId) {
+        throw new Error("factText and docId are required parameters for link action");
+      }
+      const res = linkFactToDocument({
+        factKey: key,
+        factText,
+        docId,
+        startLine,
+        endLine,
+        relationType,
+      });
+      return {
+        content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
+      };
+    }
+
+    if (action === "get_doc_links") {
+      if (!docId) throw new Error("docId parameter is required for get_doc_links action");
+      const links = getLinksForDoc(docId);
+      return {
+        content: [{ type: "text", text: JSON.stringify(links, null, 2) }],
+      };
+    }
+
+    if (action === "list_links") {
+      const links = listAllLinks(key);
+      return {
+        content: [{ type: "text", text: JSON.stringify(links, null, 2) }],
+      };
+    }
+
+    throw new Error(`Unknown action: ${action}`);
   }
 );
 

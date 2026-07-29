@@ -5,9 +5,10 @@ description: Comprehensive guide for using the Memory & Hybrid RAG Knowledge Eng
 
 # Using Memory & Hybrid RAG Knowledge Engine
 
-You have access to a persistent dual-layer memory engine:
-1. **Layer 1: Notebook Store (Key-Value Facts)**: Stores high-signal personal preferences, project conventions, and durable rules.
+You have access to a persistent dual-layer memory engine supercharged with an **Agent-Driven Knowledge Graph**:
+1. **Layer 1: Notebook Store (Key-Value Facts)**: Stores high-signal personal preferences, project conventions, and durable rules in clean Markdown.
 2. **Layer 2: RAG Knowledge Base**: Indexes documentation, repositories, and technical guides for hybrid semantic retrieval.
+3. **Layer 3: Agent-Driven Knowledge Graph**: Connects Notebook facts (Layer 1) to specific Knowledge Base documents, sections, and **exact line ranges** (Layer 2).
 
 ---
 
@@ -15,30 +16,39 @@ You have access to a persistent dual-layer memory engine:
 
 | Scenario / Intent | Target Tool | Key Parameters |
 |-------------------|-------------|----------------|
-| User shares identity, tech stack preference, or workflow rule | `remember` | `fact` (English), `scope` ("global" or "project") |
-| User asks what you remember about them or the project | `recall` | `scope` ("all", "global", or "project") |
+| User shares identity, tech stack preference, or workflow rule | `remember` | `fact` (English), `scope`, optional `docId`, `startLine`, `endLine` |
+| User asks what you remember about them, the project, or linked docs | `recall` | `scope` ("all", "global", or "project") |
 | User corrects/updates an old saved fact | `forget` then `remember` | `query` (text or index number) |
+| Connect a Notebook fact to a document, section, or line range | `link_knowledge` | `factText`, `docId`, `startLine`, `endLine`, `relationType` |
 | User asks to index a documentation URL, file, or repository | `ingest_document` | `content` or `source_path`, `title`, `metadata` |
-| User asks a complex question about indexed docs or code | `query_knowledge_base` | `query`, `top_k`, `filters` |
-| User asks to view database stats, list indexed docs, or export snapshots | `manage_knowledge_base` | `action` ("stats", "list", "delete", "export") |
+| User asks a complex question about indexed docs or code | `query_knowledge_base` | `query`, `limit`, `generateEmbeddings` |
+| Read full raw content of an ambiguous/abstract document | `manage_knowledge_base` | `action: "read_document"`, `docId` |
+| User asks to view database stats, list indexed docs, or export snapshots | `manage_knowledge_base` | `action` ("stats", "list", "read_document", "delete", "export_snapshot") |
 
 ---
 
-## 2. Layer 1: Notebook Store Guidelines (`remember`, `recall`, `forget`)
+## 2. Layer 1 & 3: Notebook Store & Agent-Driven Knowledge Graph (`remember`, `recall`, `link_knowledge`)
 
-### What to Save (`remember`)
+### Agent-Driven Knowledge Graph Architecture
+Automatic regex/heuristic algorithms alone CANNOT infer high-level semantic intent or cross-document relationships. **You (the AI Agent) are the primary architect of the Knowledge Graph.**
+
+Whenever you ingest project documentation, web pages, or local files, you should link durable facts in the Notebook store directly to the corresponding RAG documents and exact line ranges.
+
+### What to Save and Link (`remember` & `link_knowledge`)
 - **High-Signal Facts**: User name, role, language preferences, architectural constraints, framework choices, coding standards, test rules.
 - **Formating**: Always translate the fact into clear, concise English before calling `remember`.
-- **Scope Selection**:
-  - `scope: "global"` for personal preferences, identity, tone, universal rules across projects.
-  - `scope: "project"` for repository-specific constraints, dependencies, directory structure rules.
+- **Linking to Knowledge Base Documents**:
+  - Pass `docId` (or document title/path) and optional `startLine` / `endLine` when calling `remember` or `link_knowledge`.
+  - Example: `remember(fact: "Use Fastify instead of Express for backend services", scope: "project", docId: "arch_specs.md", startLine: 5, endLine: 7)`
+  - Example: `link_knowledge(factText: "Use PostgreSQL 16 for primary persistence", docId: "database_guide.md", startLine: 20, endLine: 35, relationType: "IMPLEMENTS")`
 
-### What NOT to Save
-- ❌ Do NOT save one-off chat questions, transient debugging logs, raw code snippets, temporary variables, or full conversation turns.
-
-### Examples
-- `remember(fact: "User's name is Alex and prefers concise Russian explanations", scope: "global")`
-- `remember(fact: "Use Fastify instead of Express for all backend services in this project", scope: "project")`
+### How Linked Memory Appears (`recall`)
+When `recall` is invoked, the engine returns saved facts along with their Agent-linked Knowledge Base documents and exact line ranges:
+```
+--- memory_plugin ---
+1. Use Fastify instead of Express for backend services 🔗 [Linked Docs: Project Architecture Specs:L5-7]
+2. PostgreSQL 16 is primary database 🔗 [Linked Docs: database_guide.md:L20-35]
+```
 
 ---
 
