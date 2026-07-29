@@ -3,7 +3,7 @@
 # opencode-memory-plugin
 
 [![npm version](https://img.shields.io/npm/v/opencode-memory-plugin)](https://www.npmjs.com/package/opencode-memory-plugin)
-[![license](https://img.shields.io/npm/l/opencode-memory-plugin)](./LICENSE)
+[![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 <br>
 
