@@ -22,13 +22,13 @@ const RAW_DOC_SOURCES = [
   { id: "react_license", title: "React License", url: "https://raw.githubusercontent.com/facebook/react/main/LICENSE" },
   { id: "vue_readme", title: "Vue.js README", url: "https://raw.githubusercontent.com/vuejs/core/main/README.md" },
   { id: "svelte_readme", title: "Svelte README", url: "https://raw.githubusercontent.com/sveltejs/svelte/main/README.md" },
-  { id: "nextjs_readme", title: "Next.js README", url: "https://raw.githubusercontent.com/vercel/next.js/canary/README.md" },
+  { id: "nextjs_readme", title: "Next.js README", url: "https://raw.githubusercontent.com/vercel/next.js/canary/packages/next/README.md" },
   // Build tools & bundlers
   { id: "vite_readme", title: "Vite README", url: "https://raw.githubusercontent.com/vitejs/vite/main/README.md" },
   { id: "esbuild_readme", title: "esbuild README", url: "https://raw.githubusercontent.com/evanw/esbuild/main/README.md" },
   { id: "webpack_readme", title: "Webpack README", url: "https://raw.githubusercontent.com/webpack/webpack/main/README.md" },
   // Backend & runtime
-  { id: "express_readme", title: "Express.js README", url: "https://raw.githubusercontent.com/expressjs/express/master/README.md" },
+  { id: "express_readme", title: "Express.js README", url: "https://raw.githubusercontent.com/expressjs/express/master/Readme.md" },
   { id: "fastapi_readme", title: "FastAPI README", url: "https://raw.githubusercontent.com/fastapi/fastapi/master/README.md" },
   { id: "flask_readme", title: "Flask Python README", url: "https://raw.githubusercontent.com/pallets/flask/main/README.md" },
   { id: "deno_readme", title: "Deno Engine README", url: "https://raw.githubusercontent.com/denoland/deno/main/README.md" },
@@ -40,7 +40,7 @@ const RAW_DOC_SOURCES = [
   // State management & data
   { id: "redux_readme", title: "Redux README", url: "https://raw.githubusercontent.com/reduxjs/redux/master/README.md" },
   { id: "prisma_readme", title: "Prisma ORM README", url: "https://raw.githubusercontent.com/prisma/prisma/main/README.md" },
-  { id: "graphql_js_readme", title: "GraphQL.js README", url: "https://raw.githubusercontent.com/graphql/graphql-js/main/README.md" },
+  { id: "graphql_js_readme", title: "GraphQL.js README", url: "https://raw.githubusercontent.com/graphql/graphql-js/v16.8.1/README.md" },
   // Databases
   { id: "sqlite_readme", title: "SQLite README", url: "https://raw.githubusercontent.com/sqlite/sqlite/master/README.md" },
   // CSS & styling

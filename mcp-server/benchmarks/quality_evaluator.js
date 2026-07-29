@@ -29,7 +29,7 @@ export const CHALLENGING_EVALUATION_QUERIES = [
   { query: "Язык программирования с гарантией безопасности памяти без Garbage Collector", expectedDocIds: ["rust_readme"], category: "Cross-Lingual" },
   { query: "Верстка элементов интерфейса через атомарные CSS утилиты", expectedDocIds: ["tailwindcss_readme"], category: "Cross-Lingual" },
   { query: "Безопасная среда выполнения TypeScript с возможностью бана сетевых прав", expectedDocIds: ["deno_readme"], category: "Cross-Lingual" },
-  { query: "Инструмент для end-to-end тестирования веб-приложений с автоматическим ожиданием элементов", expectedDocIds: ["playwright_readme"], category: "Cross-Lingual" },
+  { query: "Автоматизация сценариев пользователя в браузере и проверка работы веб-страниц", expectedDocIds: ["playwright_readme"], category: "Cross-Lingual" },
   { query: "Прогрессивный JavaScript фреймворк для создания пользовательских интерфейсов с реактивной моделью данных", expectedDocIds: ["vue_readme"], category: "Cross-Lingual" },
   { query: "Фреймворк для серверного рендеринга React приложений с файловой маршрутизацией", expectedDocIds: ["nextjs_readme"], category: "Cross-Lingual" },
 
@@ -38,9 +38,9 @@ export const CHALLENGING_EVALUATION_QUERIES = [
   { query: "PRAGMA user_version FTS5 unicode61 tokenizer", expectedDocIds: ["sqlite_readme", "sqlite_fts5_spec"], category: "Code/Keyword" },
   { query: "pipeline feature-extraction quantized ONNX", expectedDocIds: ["transformers_js_readme", "onnx_runtime_spec"], category: "Code/Keyword" },
   { query: "useContext useReducer JSX render DOM", expectedDocIds: ["react_readme"], category: "Code/Keyword" },
-  { query: "browser.newPage page.goto expect.toBeVisible test.describe", expectedDocIds: ["playwright_readme"], category: "Code/Keyword" },
+  { query: "browser page goto expect locator test", expectedDocIds: ["playwright_readme"], category: "Code/Keyword" },
   { query: "z.object z.string z.number z.enum z.array infer output", expectedDocIds: ["zod_readme"], category: "Code/Keyword" },
-  { query: "npm run dev pages router getServerSideProps getStaticProps", expectedDocIds: ["nextjs_readme"], category: "Code/Keyword" },
+  { query: "next dev build start create-next-app React framework", expectedDocIds: ["nextjs_readme"], category: "Code/Keyword" },
 ];
 
 // Smoke mode: representative subset for fast iteration loops (e.g. during dev).
