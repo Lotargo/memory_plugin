@@ -1,5 +1,9 @@
 # opencode-memory-plugin
 
+[![npm version](https://img.shields.io/npm/v/opencode-memory-plugin)](https://www.npmjs.com/package/opencode-memory-plugin)
+[![license](https://img.shields.io/npm/l/opencode-memory-plugin)](https://github.com/Lotargo/memory_pugin/blob/main/LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/Lotargo/memory_pugin)](https://github.com/Lotargo/memory_pugin)
+
 Persistent memory plugin for [OpenCode](https://opencode.ai). Gives your AI agent a long-term memory — it remembers user preferences, project context, and important facts across sessions.
 
 ## Features
@@ -13,7 +17,11 @@ Persistent memory plugin for [OpenCode](https://opencode.ai). Gives your AI agen
 
 ## Install
 
-Add to your `opencode.json` (or `opencode.jsonc`):
+```bash
+npm install opencode-memory-plugin
+```
+
+Then add to your `opencode.json` (or `opencode.jsonc`):
 
 ```json
 {
