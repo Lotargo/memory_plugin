@@ -73,6 +73,10 @@ When saving, translate the fact into English and keep it concise.
 
 Facts are stored as markdown files under `$OPENCODE_CONFIG_DIR/memory/` (defaults to `~/.config/opencode/memory/`). Each project gets its own file; global facts go to `global.md`.
 
+## Privacy
+
+All facts are stored **locally** on your machine. Nothing is sent to any server. Add `memory/` to your `.gitignore` if you keep your opencode config in a public repository.
+
 ## License
 
 MIT
