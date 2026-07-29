@@ -5,7 +5,7 @@ import { homedir } from "os";
 
 const CONFIG_DIR = process.env.MEMORY_DIR || process.env.OPENCODE_CONFIG_DIR || join(homedir(), ".config", "opencode");
 export const MEMORY_DIR = join(CONFIG_DIR, "memory");
-const GLOBAL_KEY = "global";
+export const GLOBAL_KEY = "global";
 
 export async function ensureDir() {
   if (!existsSync(MEMORY_DIR)) await mkdir(MEMORY_DIR, { recursive: true });

@@ -9,5 +9,11 @@
   "repository": "https://github.com/Lotargo/memory_pugin",
   "license": "MIT",
   "keywords": ["memory", "context", "preferences"],
-  "skills": "./skills/"
+  "skills": "./skills/",
+  "mcpServers": {
+    "memory-agent": {
+      "command": "node",
+      "args": ["${pluginDir}/mcp-server/index.js"]
+    }
+  }
 }

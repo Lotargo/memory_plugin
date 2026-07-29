@@ -1,111 +1,105 @@
 <div align="center">
 
-# opencode-memory-plugin
+# @lotargo/memory_plugin
 
-[![npm version](https://img.shields.io/npm/v/opencode-memory-plugin)](https://www.npmjs.com/package/opencode-memory-plugin)
+[![npm version](https://img.shields.io/npm/v/@lotargo/memory_plugin)](https://www.npmjs.com/package/@lotargo/memory_plugin)
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 <br>
 
-**Persistent memory for your AI coding agent**
+**Persistent long-term memory for your AI coding agents and assistants**
 
-Remembers who you are, what you're working on, and how you like things done — across sessions, across platforms.
+Automatically remembers and recalls important facts about you, your preferences, and your projects across sessions and across platforms.
 
 </div>
 
-## Platforms
+---
 
-| Platform | Status | How it works |
-|----------|--------|-------------|
-| **OpenCode** | ✅ Native | Direct plugin with custom tools + memory injection |
-| **Claude Code** | ✅ Plugin | `.claude-plugin/` + SessionStart hook |
-| **Codex** | ✅ Plugin | `.codex-plugin/` + skills |
-| **Antigravity / Gemini CLI** | ✅ Extension | `gemini-extension.json` + GEMINI.md |
+## Why @lotargo/memory_plugin?
 
-## Install
+Standard AI assistants lose all context as soon as a chat window is closed or a session is reset. You end up having to repeatedly re-explain how you prefer your code formatted, which libraries you use, or how you like to be addressed.
 
-### OpenCode
+`@lotargo/memory_plugin` gives your AI assistants durable, local long-term memory that persists across restarts and works seamlessly across all supported coding environments.
 
-Add to `opencode.json`:
+### Practical Use Cases
 
-```json
-{
-  "plugin": ["opencode-memory-plugin"]
-}
-```
+#### 1. Software Development
+- **Architectural Decisions**: *"In this project, we use Fastify instead of Express and strict schema validation via Zod."*
+- **Coding Conventions**: *"Place all helper utilities inside `src/utils/` and always cover new functions with Vitest tests."*
+- **Environment Constraints**: *"Our target deployment environment is Node.js 20 on AWS Lambda."*
 
-Restart OpenCode. The plugin injects memory context and registers `remember`/`recall`/`forget` tools automatically.
+#### 2. Everyday Chat & Interaction
+- **User Profile & Communication Tone**: *"My name is Alex. I prefer concise, direct answers without conversational filler."*
+- **Explanation Format**: *"Explain complex technical concepts using real-world analogies."*
+- **Context & Goals**: *"I am currently preparing for a Senior Backend Developer technical interview."*
 
-### Claude Code
+---
 
+## Supported Platforms
+
+| Platform | Status | Mechanism |
+|----------|--------|-----------|
+| **Antigravity / Gemini CLI** | ✅ Supported | `.antigravity-plugin/` + skills + MCP |
+| **Claude Code** | ✅ Supported | `.claude-plugin/` + skills + MCP |
+| **Codex** | ✅ Supported | `.codex-plugin/` + skills + MCP |
+| **OpenCode** | ✅ Native | Native memory injection + custom tools |
+
+---
+
+## Minimum System Requirements
+
+- **Node.js**: version `18.0.0` or higher
+- **Package Manager**: `npm` / `npx` (included with Node.js)
+- **Supported Environment**: Any supported AI environment (Antigravity, Claude Code, Codex, OpenCode)
+
+---
+
+## Installation (Single Command)
+
+Run this single command in your terminal to automatically configure memory for your AI tools without cloning the repository:
+
+### Install for All Detected Environments
 ```bash
-/plugin install https://github.com/Lotargo/memory_pugin
+npx @lotargo/memory_plugin setup
 ```
 
-Then add MCP server to `.mcp.json` or `~/.claude.json`:
-   ```json
-   {
-     "mcpServers": {
-       "memory-agent": {
-         "command": "npx",
-         "args": ["-y", "opencode-memory-plugin"]
-       }
-     }
-   }
-   ```
+### Targeted Installation for a Specific Platform
 
-### Codex
+- **Antigravity / Gemini CLI only**:
+  ```bash
+  npx @lotargo/memory_plugin setup --antigravity
+  ```
+- **OpenCode only**:
+  ```bash
+  npx @lotargo/memory_plugin setup --opencode
+  ```
+- **Claude Code only**:
+  ```bash
+  npx @lotargo/memory_plugin setup --claude
+  ```
+- **Codex only**:
+  ```bash
+  npx @lotargo/memory_plugin setup --codex
+  ```
 
-1. Install from plugin marketplace:
-   ```
-   /plugins
-   ```
+---
 
-2. Add MCP server to `~/.codex/config.toml`:
-   ```toml
-   [mcp_servers.memory-agent]
-   command = "npx"
-   args = ["-y", "opencode-memory-plugin"]
-   ```
-
-### Antigravity / Gemini CLI
-
-```bash
-agy plugin install https://github.com/Lotargo/memory_pugin
-```
-
-Or for Gemini CLI:
-```bash
-gemini extensions install https://github.com/Lotargo/memory_pugin
-```
-
-Configure MCP in your project's `.agents/mcp_config.json`:
-```json
-{
-  "mcpServers": {
-    "memory-agent": {
-      "command": "npx",
-      "args": ["-y", "opencode-memory-plugin"]
-    }
-  }
-}
-```
-
-## Tools
+## Available Tools
 
 | Tool | Description |
 |------|-------------|
-| `remember` | Save an important fact (proactive, English, concise) |
-| `recall` | Show saved facts (`project`, `global`, or `all`) |
-| `forget` | Delete a fact by number or text search |
+| `remember` | Save an important fact (`global` or `project` scope) |
+| `recall` | Display saved facts (`project`, `global`, or `all`) |
+| `forget` | Remove a fact by number or text query |
 
-## Storage
+---
 
-Facts are stored as markdown files under `$MEMORY_DIR/memory/` (defaults to `$OPENCODE_CONFIG_DIR/memory/` or `~/.config/opencode/memory/`). Each project gets its own file; global facts go to `global.md`.
+## Storage & Privacy
 
-## Privacy
+- **Local Storage**: All facts are stored strictly locally on your machine in Markdown format under `$MEMORY_DIR/memory/` (defaults to `~/.config/opencode/memory/`).
+- **Privacy**: Your data is never sent to external servers or third-party services.
 
-All facts are stored **locally** on your machine. Nothing is sent to any server. Add `memory/` to your `.gitignore` if you keep your config in version control.
+---
 
 ## License
 

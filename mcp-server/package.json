@@ -7,7 +7,7 @@
     "memory-mcp-server": "index.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/server": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^4.1.0"
   }
 }

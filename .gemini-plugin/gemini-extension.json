@@ -1,0 +1,12 @@
+{
+  "name": "memory-agent",
+  "description": "Persistent memory agent that remembers user preferences and project context across sessions",
+  "version": "1.0.0",
+  "contextFileName": "skills/using-memory/SKILL.md",
+  "mcpServers": {
+    "memory-agent": {
+      "command": "node",
+      "args": ["${extensionDir}/mcp-server/index.js"]
+    }
+  }
+}

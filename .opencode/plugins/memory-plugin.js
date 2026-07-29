@@ -237,3 +237,5 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
     },
   };
 };
+
+export default MemoryPlugin;
