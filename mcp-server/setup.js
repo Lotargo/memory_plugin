@@ -68,18 +68,48 @@ export async function runSetup() {
     }
   }
 
-  // 3. Antigravity / Gemini CLI (~/.gemini/antigravity-ide/mcp/memory-agent.json)
+  // 3. Antigravity / Gemini CLI (~/.gemini/config/mcp_config.json & .agents/mcp_config.json)
   if (doAntigravity) {
     try {
-      const geminiMcpDir = join(home, ".gemini", "antigravity-ide", "mcp");
-      await mkdir(geminiMcpDir, { recursive: true });
-      const geminiMcpFile = join(geminiMcpDir, "memory-agent.json");
-      const config = {
+      // Global Antigravity config
+      const geminiConfigDir = join(home, ".gemini", "config");
+      await mkdir(geminiConfigDir, { recursive: true });
+      const geminiConfigFile = join(geminiConfigDir, "mcp_config.json");
+
+      let config = {};
+      if (existsSync(geminiConfigFile)) {
+        try {
+          config = JSON.parse(await readFile(geminiConfigFile, "utf-8"));
+        } catch (e) {}
+      }
+      if (!config.mcpServers) config.mcpServers = {};
+      config.mcpServers["memory-agent"] = {
         command: "npx",
         args: ["-y", "@lotargo/memory_plugin"],
       };
-      await writeFile(geminiMcpFile, JSON.stringify(config, null, 2));
-      console.log("  [OK] Antigravity: configured MCP server in ~/.gemini/antigravity-ide/mcp/");
+      await writeFile(geminiConfigFile, JSON.stringify(config, null, 2));
+
+      // Local workspace config (.agents/mcp_config.json) if in project
+      const cwd = process.cwd();
+      if (existsSync(join(cwd, ".agents")) || existsSync(join(cwd, "package.json")) || existsSync(join(cwd, ".git"))) {
+        const localAgentsDir = join(cwd, ".agents");
+        await mkdir(localAgentsDir, { recursive: true });
+        const localMcpFile = join(localAgentsDir, "mcp_config.json");
+        let localConfig = {};
+        if (existsSync(localMcpFile)) {
+          try {
+            localConfig = JSON.parse(await readFile(localMcpFile, "utf-8"));
+          } catch (e) {}
+        }
+        if (!localConfig.mcpServers) localConfig.mcpServers = {};
+        localConfig.mcpServers["memory-agent"] = {
+          command: "npx",
+          args: ["-y", "@lotargo/memory_plugin"],
+        };
+        await writeFile(localMcpFile, JSON.stringify(localConfig, null, 2));
+      }
+
+      console.log("  [OK] Antigravity: configured MCP server in ~/.gemini/config/mcp_config.json and .agents/mcp_config.json");
       configuredCount++;
     } catch (err) {
       console.log("  [SKIP] Antigravity setup skipped:", err.message);
