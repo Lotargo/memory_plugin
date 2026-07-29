@@ -205,6 +205,99 @@ function pairedTTestLR(a, b) {
   return { meanDiff: Number(mean.toFixed(4)), t, p: Number(p.toFixed(4)), sem: Number(sem.toFixed(4)), n };
 }
 
+function renderQueryBreakdownTable(breakdown) {
+  console.log("\n \x1b[1m\x1b[36m=== [PER-QUERY BENCHMARK BREAKDOWN & ANSWER EVALUATION] ===\x1b[0m\n");
+
+  const termCols = Math.min(process.stdout.columns || 130, 150);
+
+  function visibleLength(str) {
+    return String(str).replace(/\x1b\[[0-9;]*m/g, "").length;
+  }
+
+  function padVisible(str, width, alignRight = false) {
+    const len = visibleLength(str);
+    if (len >= width) return str;
+    const pad = " ".repeat(width - len);
+    return alignRight ? pad + str : str + pad;
+  }
+
+  function wrapText(text, width) {
+    if (!text) return [""];
+    const words = String(text).split(/\s+/);
+    const lines = [];
+    let currentLine = "";
+
+    for (const word of words) {
+      if (!currentLine) {
+        currentLine = word;
+      } else if (currentLine.length + 1 + word.length <= width) {
+        currentLine += " " + word;
+      } else {
+        lines.push(currentLine);
+        currentLine = word;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+    return lines.length > 0 ? lines : [""];
+  }
+
+  const wId = 4;
+  const wBM = 6;
+  const wVec = 6;
+  const wRRF = 6;
+  const wRSF = 6;
+  const wAnsTok = 9;
+
+  const remain = Math.max(70, termCols - (wId + wBM + wVec + wRRF + wRSF + wAnsTok + 20));
+  const wQ = Math.floor(remain * 0.38);
+  const wTarget = Math.floor(remain * 0.24);
+  const wSnippet = remain - (wQ + wTarget);
+
+  const header = `│ ${padVisible("#", wId)} │ ${padVisible("Question / Query", wQ)} │ ${padVisible("Target Doc (Tokens)", wTarget)} │ ${padVisible("BM25", wBM)} │ ${padVisible("Vector", wVec)} │ ${padVisible("RRF", wRRF)} │ ${padVisible("RSF", wRSF)} │ ${padVisible("Top Hit & Answer Snippet", wSnippet)} │ ${padVisible("Ans Tok", wAnsTok, true)} │`;
+  const sep = `├─${"─".repeat(wId)}─┼─${"─".repeat(wQ)}─┼─${"─".repeat(wTarget)}─┼─${"─".repeat(wBM)}─┼─${"─".repeat(wVec)}─┼─${"─".repeat(wRRF)}─┼─${"─".repeat(wRSF)}─┼─${"─".repeat(wSnippet)}─┼─${"─".repeat(wAnsTok)}─┤`;
+  const topBorder = `┌─${"─".repeat(wId)}─┬─${"─".repeat(wQ)}─┬─${"─".repeat(wTarget)}─┬─${"─".repeat(wBM)}─┬─${"─".repeat(wVec)}─┬─${"─".repeat(wRRF)}─┬─${"─".repeat(wRSF)}─┬─${"─".repeat(wSnippet)}─┬─${"─".repeat(wAnsTok)}─┐`;
+  const botBorder = `└─${"─".repeat(wId)}─┴─${"─".repeat(wQ)}─┴─${"─".repeat(wTarget)}─┴─${"─".repeat(wBM)}─┴─${"─".repeat(wVec)}─┴─${"─".repeat(wRRF)}─┴─${"─".repeat(wRSF)}─┴─${"─".repeat(wSnippet)}─┴─${"─".repeat(wAnsTok)}─┘`;
+
+  console.log(`\x1b[36m${topBorder}\x1b[0m`);
+  console.log(`\x1b[36m${header}\x1b[0m`);
+  console.log(`\x1b[36m${sep}\x1b[0m`);
+
+  breakdown.forEach((row, rIdx) => {
+    const qLines = wrapText(row.query, wQ);
+
+    const docTokFormatted = row.docTokens > 1000 ? `${(row.docTokens / 1000).toFixed(1)}k tok` : `${row.docTokens} tok`;
+    const targetStr = `${row.target} (${docTokFormatted})`;
+    const targetLines = wrapText(targetStr, wTarget);
+
+    const topHitStr = row.topHitSnippet ? `${row.topHit}: "${row.topHitSnippet.substring(0, 120).replace(/\n/g, " ")}..."` : (row.topHit || "None");
+    const snippetLines = wrapText(topHitStr, wSnippet);
+
+    const maxSubLines = Math.max(qLines.length, targetLines.length, snippetLines.length);
+
+    for (let l = 0; l < maxSubLines; l++) {
+      const cellId = l === 0 ? `Q${row.id}` : "";
+      const cellQ = qLines[l] || "";
+      const cellTarget = targetLines[l] || "";
+      const cellBM = l === 0 ? row.bm25Rank : "";
+      const cellVec = l === 0 ? row.vectorRank : "";
+      const cellRRF = l === 0 ? row.rrfRank : "";
+      const cellRSF = l === 0 ? (row.rsfRank === "#1" ? `\x1b[32m${row.rsfRank}\x1b[0m` : row.rsfRank) : "";
+      const cellSnippet = snippetLines[l] || "";
+      const cellAnsTok = l === 0 ? `${row.outputTokens} tok` : "";
+
+      console.log(
+        `│ ${padVisible(cellId, wId)} │ ${padVisible(cellQ, wQ)} │ ${padVisible(cellTarget, wTarget)} │ ${padVisible(cellBM, wBM)} │ ${padVisible(cellVec, wVec)} │ ${padVisible(cellRRF, wRRF)} │ ${padVisible(cellRSF, wRSF)} │ ${padVisible(cellSnippet, wSnippet)} │ ${padVisible(cellAnsTok, wAnsTok, true)} │`
+      );
+    }
+
+    if (rIdx < breakdown.length - 1) {
+      console.log(`\x1b[90m${sep}\x1b[0m`);
+    }
+  });
+
+  console.log(`\x1b[36m${botBorder}\x1b[0m\n`);
+}
+
 export async function evaluateSearchQualityComparison(db, {
   silent = false,
   onProgress = null,
@@ -214,6 +307,10 @@ export async function evaluateSearchQualityComparison(db, {
   defaultRrfK = 60,
   mode = "full",
 } = {}) {
+  if (!db) {
+    const { getDatabase } = await import("../db/database.js");
+    db = getDatabase();
+  }
   const isSmoke = mode === "smoke";
   // In smoke mode we drop grid search: nothing produced, no cost.
   if (isSmoke) {
@@ -235,10 +332,18 @@ export async function evaluateSearchQualityComparison(db, {
   }
 
   const docMetaStmt = db.prepare(`
-    SELECT d.id, d.path, d.title
+    SELECT d.id, d.path, d.title,
+           (SELECT COALESCE(SUM(token_count), 0) FROM sections WHERE doc_id = d.id) as doc_tokens
     FROM micro_chunks m
     JOIN documents d ON m.doc_id = d.id
     WHERE m.id = ?;
+  `);
+
+  const targetTokensStmt = db.prepare(`
+    SELECT d.id, d.title, d.path,
+           (SELECT COALESCE(SUM(token_count), 0) FROM sections WHERE doc_id = d.id) as doc_tokens
+    FROM documents d
+    WHERE d.path LIKE ? OR d.id = ?;
   `);
 
   const K = 5;
@@ -318,6 +423,21 @@ export async function evaluateSearchQualityComparison(db, {
 
     const rsfHits = rsfFusion(bm25Hits, vectorHits, defaultAlpha, 0.01);
     const topHitDoc = getTopHitSourceId(rsfHits, docMetaStmt);
+    const topHitObj = Array.isArray(rsfHits) && rsfHits.length > 0 ? rsfHits[0] : null;
+
+    let targetDocTokens = 0;
+    if (qObj.expectedDocIds && qObj.expectedDocIds.length > 0) {
+      const primaryTarget = qObj.expectedDocIds[0];
+      const match = targetTokensStmt.get(`%${primaryTarget}%`, primaryTarget);
+      if (match) targetDocTokens = match.doc_tokens || 0;
+    }
+
+    let outputTokens = 0;
+    let snippetPreview = "";
+    if (topHitObj) {
+      snippetPreview = topHitObj.snippet || topHitObj.content || "";
+      outputTokens = topHitObj.token_count || (snippetPreview ? Math.round(snippetPreview.length / 4) : 0);
+    }
 
     queryBreakdown.push({
       id: i + 1,
@@ -328,6 +448,9 @@ export async function evaluateSearchQualityComparison(db, {
       rrfRank: rrfRank > 0 ? `#${rrfRank}` : "MISSED",
       rsfRank: rsfRank > 0 ? `#${rsfRank}` : "MISSED",
       topHit: topHitDoc,
+      topHitSnippet: snippetPreview,
+      docTokens: targetDocTokens,
+      outputTokens,
       query: qObj.query,
       expectedDocIds: qObj.expectedDocIds,
     });
@@ -404,8 +527,7 @@ export async function evaluateSearchQualityComparison(db, {
   };
 
   if (!silent) {
-    console.log("\n [Granular Per-Query Ranking Breakdown]");
-    console.table(queryBreakdown);
+    renderQueryBreakdownTable(queryBreakdown);
 
     console.log("\n [Aggregate Metric Comparison]");
     console.table([bm25Res, vectorRes, rrfRes, rsfRes]);

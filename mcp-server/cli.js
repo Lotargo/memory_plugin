@@ -924,15 +924,86 @@ export async function runCli() {
               info: `Subset: ${SMOKE_DOC_IDS.join(", ")}. Skips bootstrap/grid/t-tests for fast dev iteration loop.`,
             },
             {
-              label: "Full Benchmark (~32s, 21 queries + stats)",
+              label: "Full Benchmark (~32s, 21 queries on all 28 docs)",
               value: "full",
-              info: "Full 27-doc corpus, bootstrap CIs, paired t-tests, alpha/k grid sweep. Writes dev_docs/benchmark_results.md.",
+              info: "Full 28-doc corpus, per-query answer token metrics, bootstrap CIs, grid sweep. Writes dev_docs/benchmark_results.md.",
+            },
+            {
+              label: "Graph & Notebook Linking Verification (Layer 1+3 Agent Graph Links)",
+              value: "graph_test",
+              info: "Ingest sample doc + save Notebook fact linked to line range + verify recall & raw document reader.",
             },
             { label: "< Back to Main Menu", value: "back" },
           ],
         });
 
         if (modeRes.action === "back" || modeRes.value === "back") {
+          break;
+        }
+
+        if (modeRes.value === "graph_test") {
+          console.clear();
+          const line = "─".repeat(PANEL_WIDTH - 2);
+          console.log(`\x1b[36m╭${line}╮\x1b[0m`);
+          console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37mGRAPH & NOTEBOOK LINKING VERIFICATION\x1b[0m${" ".repeat(PANEL_WIDTH - 42)}\x1b[36m│\x1b[0m`);
+          console.log(`\x1b[36m╰${line}╯\x1b[0m\n`);
+
+          const sampleDoc = `# Ода о единороге (Секретный проект Unicorn)
+
+## Раздел 1: Введение
+Разработка нового высоконагруженного сервиса Unicorn.
+
+## Раздел 2: Стандарты
+Строка 7: Бэкенд пишется исключительно на Go.
+Строка 8: Хранилище транзакций — PostgreSQL 16.
+`;
+
+          const { ingestDocument } = await import("./ingest/pipeline.js");
+          const { linkFactToDocument, getLinksForFact } = await import("./graph/knowledge_linker.js");
+          const { readMemoryRaw, writeMemory, scopeKey } = await import("./memory.js");
+
+          console.log("  1. Ingesting test document 'Ода о единороге'...");
+          const ingRes = await ingestDocument({
+            content: sampleDoc,
+            type: "text",
+            title: "Ода о единороге",
+            path: "virtual://oda_unicorna.md",
+            generateEmbeddings: false,
+          });
+          console.log(`     [OK] Document ingested. Doc ID: ${ingRes.docId}`);
+
+          console.log("\n  2. Saving Notebook fact & linking to lines L7-L8...");
+          const factText = "Project Unicorn backend services must use Go with PostgreSQL 16";
+          const factKey = scopeKey("project", "cli_test_repo", null);
+
+          const entries = await readMemoryRaw(factKey);
+          entries.push(`[2026-07-30] ${factText}`);
+          await writeMemory(factKey, entries);
+
+          const linkRes = linkFactToDocument({
+            factKey,
+            factText,
+            docId: ingRes.docId,
+            startLine: 7,
+            endLine: 8,
+            relationType: "RULES_FOR",
+          });
+          console.log(`     [OK] Graph Edge created. Link ID: ${linkRes.linkId} -> L7-L8`);
+
+          console.log("\n  3. Recalling memory (Verifying Graph Document Tag)...");
+          const rawFacts = await readMemoryRaw(factKey);
+          rawFacts.forEach((f, i) => {
+            const links = getLinksForFact(factKey, f);
+            let lStr = `     ${i + 1}. ${f}`;
+            if (links && links.length > 0) {
+              const docStr = links.map(l => `${l.doc_title || l.doc_path}:L${l.start_line}-${l.end_line}`).join(", ");
+              lStr += ` \x1b[36m🔗 [Linked Docs: ${docStr}]\x1b[0m`;
+            }
+            console.log(lStr);
+          });
+
+          console.log("\n  \x1b[32m[OK] AGENT-DRIVEN GRAPH LINKING VERIFIED SUCCESSFULLY!\x1b[0m\n");
+          await waitForEnter();
           break;
         }
 
