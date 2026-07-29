@@ -1,37 +1,20 @@
 ---
 name: using-memory
-description: Use the memory tools (remember, recall, forget) to persist important facts about the user and project across sessions. The agent should proactively save high-signal things like name, language, role/goals, constraints, tech stack preferences, architecture decisions, and project conventions. DO NOT save transient details, one-off statements, or anything unlikely to be useful in future sessions. When saving, translate the fact into English and keep it concise. Use remember with scope='global' for personal facts, scope='project' for project-specific facts.
+description: Use the memory and RAG tools (remember, recall, forget, ingest_document, query_knowledge_base, manage_knowledge_base) to persist facts and query large document knowledge bases. Proactively remember preferences and conventions, ingest documentation or source code, and perform hybrid retrieval for technical context.
 ---
 
-# Using Memory
+# Using Memory & RAG Knowledge Engine
 
-You have access to memory tools that persist important facts about the user and project across sessions.
+You have access to persistent memory and hybrid RAG tools.
 
-## When to use
+## 1. Key-Value Durable Memory (`remember`, `recall`, `forget`)
 
-**Save (`remember`):**
-- User's name, language, location, role, goals
-- Technical constraints, preferred stack, architecture decisions
-- Project conventions, naming patterns, directory structure decisions
-- Facts the user explicitly asks you to remember
+- **Save (`remember`)**: User's name, role, language, technical constraints, preferred tech stack, and project conventions. Translate facts into English and keep them concise.
+- **Recall (`recall`)**: Retrieve stored facts across global or project scope.
+- **Forget (`forget`)**: Remove outdated or contradicted facts.
 
-**DO NOT save:**
-- Transient details or one-off questions
-- Full conversation turns
-- Code snippets or error messages
-- Anything you're unsure will be useful in future sessions
+## 2. Hybrid RAG Knowledge Engine (`ingest_document`, `query_knowledge_base`, `manage_knowledge_base`)
 
-**Check (`recall`):**
-- Before making assumptions, check what you already know
-- Use `recall` with `scope: "all"` for a full view
-
-**Remove (`forget`):**
-- When the user corrects or contradicts a previously saved fact
-- When a fact is no longer relevant
-
-## Guidelines
-
-1. **Be selective.** Quality over quantity. One well-written fact is better than five vague ones.
-2. **Write in English.** Even if the user speaks another language, translate the fact.
-3. **Be concise.** One sentence per fact. "User's name is Oleg" not "The user told me their name is Oleg".
-4. **Check before saving.** Use recall to avoid duplicates.
+- **Ingest (`ingest_document`)**: Ingest markdown files, web documentation URLs, or raw text blocks into the local vector & BM25 database.
+- **Query (`query_knowledge_base`)**: Perform hybrid BM25 + dense vector RRF search to retrieve relevant candidate sections, code symbol definitions, and context blocks.
+- **Manage (`manage_knowledge_base`)**: List ingested documents, delete outdated docs, inspect stats, or export/import snapshots.

@@ -7,97 +7,63 @@
 
 <br>
 
-**Persistent long-term memory for your AI coding agents and assistants**
+**Zero-Docker Local Hybrid RAG Engine & Long-Term Memory for AI Coding Agents**
 
-Automatically remembers and recalls important facts about you, your preferences, and your projects across sessions and across platforms.
+Automatically remembers facts, ingests complex document repositories, and performs high-precision hybrid retrieval (BM25 + Dense Multilingual Embeddings + GraphRAG Lite).
 
 </div>
 
 ---
 
-## Why @lotargo/memory_plugin?
+## Key Features
 
-Standard AI assistants lose all context as soon as a chat window is closed or a session is reset. You end up having to repeatedly re-explain how you prefer your code formatted, which libraries you use, or how you like to be addressed.
-
-`@lotargo/memory_plugin` gives your AI assistants durable, local long-term memory that persists across restarts and works seamlessly across all supported coding environments.
-
-### Practical Use Cases
-
-#### 1. Software Development
-- **Architectural Decisions**: *"In this project, we use Fastify instead of Express and strict schema validation via Zod."*
-- **Coding Conventions**: *"Place all helper utilities inside `src/utils/` and always cover new functions with Vitest tests."*
-- **Environment Constraints**: *"Our target deployment environment is Node.js 20 on AWS Lambda."*
-
-#### 2. Everyday Chat & Interaction
-- **User Profile & Communication Tone**: *"My name is Alex. I prefer concise, direct answers without conversational filler."*
-- **Explanation Format**: *"Explain complex technical concepts using real-world analogies."*
-- **Context & Goals**: *"I am currently preparing for a Senior Backend Developer technical interview."*
+- **Durable Key-Value Memory**: Remember user preferences, project conventions, and architectural facts across sessions.
+- **Hybrid RAG Knowledge Engine**:
+  - **Zero Heavy Infrastructure**: No Docker, no Python server, no binary C++ build steps (`node-gyp`). Uses Node.js native SQLite (`node:sqlite`).
+  - **3-Tier Hierarchy Chunking**: Document (Big) -> Section (Medium) -> Micro-Chunk (Small).
+  - **Hybrid Retrieval & RRF Fusion**: Merges SQLite FTS5 full-text keyword precision with ONNX multilingual dense vector similarity.
+  - **GraphRAG Lite**: Automatically links documents and extracted code symbols (classes, functions, types).
+  - **Content-Addressable Storage (CAS)**: Local S3-style blob store for raw Markdown, HTML, PDFs, and code.
+- **Embedded Web Admin Dashboard**: Interactive single-page app served on `http://localhost:8765` with dynamic port resolution.
 
 ---
 
-## Supported Platforms
-
-| Platform | Status | Mechanism |
-|----------|--------|-----------|
-| **Antigravity / Gemini CLI** | ✅ Supported | `.antigravity-plugin/` + skills + MCP |
-| **Claude Code** | ✅ Supported | `.claude-plugin/` + skills + MCP |
-| **Codex** | ✅ Supported | `.codex-plugin/` + skills + MCP |
-| **OpenCode** | ✅ Native | Native memory injection + custom tools |
-
----
-
-## Minimum System Requirements
-
-- **Node.js**: version `18.0.0` or higher
-- **Package Manager**: `npm` / `npx` (included with Node.js)
-- **Supported Environment**: Any supported AI environment (Antigravity, Claude Code, Codex, OpenCode)
-
----
-
-## Installation (Single Command)
-
-Run this single command in your terminal to automatically configure memory for your AI tools without cloning the repository:
+## Installation & Setup
 
 ### Install for All Detected Environments
 ```bash
 npx @lotargo/memory_plugin setup
 ```
 
-### Targeted Installation for a Specific Platform
-
-- **Antigravity / Gemini CLI only**:
-  ```bash
-  npx @lotargo/memory_plugin setup --antigravity
-  ```
-- **OpenCode only**:
-  ```bash
-  npx @lotargo/memory_plugin setup --opencode
-  ```
-- **Claude Code only**:
-  ```bash
-  npx @lotargo/memory_plugin setup --claude
-  ```
-- **Codex only**:
-  ```bash
-  npx @lotargo/memory_plugin setup --codex
-  ```
+### Launch Web Admin Dashboard
+```bash
+npx @lotargo/memory_plugin admin
+```
 
 ---
 
-## Available Tools
+## Available MCP Tools
 
+### 1. Memory Tools (Key-Value)
 | Tool | Description |
 |------|-------------|
-| `remember` | Save an important fact (`global` or `project` scope) |
+| `remember` | Save an important durable fact (`global` or `project` scope) |
 | `recall` | Display saved facts (`project`, `global`, or `all`) |
-| `forget` | Remove a fact by number or text query |
+| `forget` | Remove a saved fact by number or query |
+
+### 2. Hybrid RAG Knowledge Base Tools
+| Tool | Description |
+|------|-------------|
+| `ingest_document` | Ingest local files, web URLs, or raw text into 3-tier hierarchy index with ONNX vector embeddings and symbol extraction |
+| `query_knowledge_base` | Perform hybrid BM25 + Vector RRF search to retrieve relevant candidate sections, code symbols, and context |
+| `manage_knowledge_base` | List documents, delete documents (purging CAS & SQLite), view database stats, or export/import portable snapshots |
 
 ---
 
 ## Storage & Privacy
 
-- **Local Storage**: All facts are stored strictly locally on your machine in Markdown format under `$MEMORY_DIR/memory/` (defaults to `~/.config/opencode/memory/`).
-- **Privacy**: Your data is never sent to external servers or third-party services.
+- **100% Local Storage**: All SQLite indexes, ONNX models, and CAS blobs are stored locally under `~/.config/opencode/memory/`.
+- **Zero External Telemetry**: No third-party network calls are required after initial model setup.
 
 ---
 

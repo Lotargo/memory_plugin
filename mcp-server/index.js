@@ -3,11 +3,20 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod/v4";
 import { ensureDir, readMemory, readMemoryRaw, writeMemory, today, MEMORY_DIR, GLOBAL_KEY, scopeKey, projectName } from "./memory.js";
+
 const cliArgs = process.argv.slice(2);
+
 if (cliArgs.includes("setup") || cliArgs.includes("install") || cliArgs.includes("--setup") || cliArgs.includes("-s")) {
   const { runSetup } = await import("./setup.js");
   await runSetup();
   process.exit(0);
+}
+
+if (cliArgs.includes("admin") || cliArgs.includes("--admin") || cliArgs.includes("-a")) {
+  const { startAdminServer } = await import("./admin/server.js");
+  await startAdminServer();
+  // Keep process running for web server
+  await new Promise(() => {});
 }
 
 await ensureDir();
@@ -16,6 +25,8 @@ const server = new McpServer({
   name: "memory-agent",
   version: "1.0.0",
 });
+
+// --- Legacy Key-Value Memory Tools ---
 
 server.registerTool(
   "remember",
@@ -102,6 +113,182 @@ server.registerTool(
     await writeMemory(key, entries);
     const text = removed.length ? "Memory updated" : "Not found.";
     return { content: [{ type: "text", text }] };
+  }
+);
+
+// --- Hybrid RAG Knowledge Engine Tools ---
+
+server.registerTool(
+  "ingest_document",
+  {
+    description:
+      "Ingest a document into the RAG knowledge base. " +
+      "Accepts local file paths, web URLs, or raw Markdown/text content. " +
+      "Processes document through 3-tier hierarchy chunking (Big/Medium/Small), " +
+      "computes dense vectors, and extracts GraphRAG code symbols.",
+    inputSchema: z.object({
+      content: z.string().describe("Raw text content, file path, or web URL"),
+      type: z.enum(["text", "file", "url"]).default("text").describe("Input content type"),
+      title: z.string().optional().describe("Document title"),
+      path: z.string().optional().describe("Original document file path"),
+      generateEmbeddings: z.boolean().default(true).describe("Compute dense vector embeddings"),
+    }),
+  },
+  async ({ content, type, title, path, generateEmbeddings }) => {
+    const { ingestDocument } = await import("./ingest/pipeline.js");
+    const result = await ingestDocument({
+      content,
+      type,
+      title: title || null,
+      path: path || null,
+      generateEmbeddings,
+    });
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              status: "success",
+              docId: result.docId,
+              title: result.title,
+              sectionsCount: result.sectionsCount,
+              microChunksCount: result.microChunksCount,
+              deduplicated: result.deduplicated,
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  }
+);
+
+server.registerTool(
+  "query_knowledge_base",
+  {
+    description:
+      "Perform hybrid RRF search (BM25 full-text + dense vector similarity) across the RAG knowledge base. " +
+      "Returns top-ranked candidate document sections with breadcrumbs, GraphRAG defined code symbols, and RRF scores.",
+    inputSchema: z.object({
+      query: z.string().describe("Search query in natural language or symbol name"),
+      limit: z.number().default(5).describe("Maximum number of sections to return"),
+      generateEmbeddings: z.boolean().default(true).describe("Use vector search alongside BM25"),
+    }),
+  },
+  async ({ query, limit, generateEmbeddings }) => {
+    const { hybridQuery } = await import("./retrieval/retriever.js");
+    const results = await hybridQuery({
+      query,
+      limit,
+      generateEmbeddings,
+    });
+
+    if (!results || results.length === 0) {
+      return { content: [{ type: "text", text: "No matching knowledge found for query." }] };
+    }
+
+    const formatted = results
+      .map((r, i) => {
+        let header = `### [${i + 1}] ${r.doc_title || "Untitled"}`;
+        if (r.heading) header += ` > ${r.heading}`;
+        if (r.breadcrumbs) header += ` (${r.breadcrumbs})`;
+        let body = `Score (RRF): ${r.score.toFixed(4)}\n`;
+        if (r.defined_symbols && r.defined_symbols.length > 0) {
+          body += `Defined Symbols: ${r.defined_symbols.join(", ")}\n`;
+        }
+        body += `\n${r.content}`;
+        return `${header}\n${body}`;
+      })
+      .join("\n\n---\n\n");
+
+    return { content: [{ type: "text", text: formatted }] };
+  }
+);
+
+server.registerTool(
+  "manage_knowledge_base",
+  {
+    description:
+      "Manage the RAG knowledge base: inspect stats, list documents, delete documents, or export/import snapshots.",
+    inputSchema: z.object({
+      action: z.enum(["stats", "list", "delete", "export_snapshot", "import_snapshot"]).describe("Management action"),
+      docId: z.string().optional().describe("Document ID or path (required for delete)"),
+      snapshotPath: z.string().optional().describe("File path for snapshot export/import"),
+    }),
+  },
+  async ({ action, docId, snapshotPath }) => {
+    const { getDatabase } = await import("./db/database.js");
+    const db = getDatabase();
+
+    if (action === "stats") {
+      const docCount = db.prepare("SELECT COUNT(*) as cnt FROM documents").get().cnt;
+      const secCount = db.prepare("SELECT COUNT(*) as cnt FROM sections").get().cnt;
+      const chunkCount = db.prepare("SELECT COUNT(*) as cnt FROM micro_chunks").get().cnt;
+      const edgeCount = db.prepare("SELECT COUNT(*) as cnt FROM graph_edges").get().cnt;
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                documents: docCount,
+                sections: secCount,
+                micro_chunks: chunkCount,
+                graph_edges: edgeCount,
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+
+    if (action === "list") {
+      const docs = db
+        .prepare("SELECT id, title, path, blob_hash, created_at FROM documents ORDER BY created_at DESC")
+        .all();
+      return {
+        content: [{ type: "text", text: JSON.stringify(docs, null, 2) }],
+      };
+    }
+
+    if (action === "delete") {
+      if (!docId) throw new Error("docId parameter is required for delete action");
+      const { deleteDocument } = await import("./ingest/pipeline.js");
+      const result = await deleteDocument(docId, db);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      };
+    }
+
+    if (action === "export_snapshot") {
+      const { exportSnapshot } = await import("./admin/snapshot.js");
+      const result = await exportSnapshot({ customDb: db, outputPath: snapshotPath || null });
+      return {
+        content: [
+          {
+            type: "text",
+            text: snapshotPath
+              ? `Snapshot exported successfully to ${snapshotPath}`
+              : JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+
+    if (action === "import_snapshot") {
+      if (!snapshotPath) throw new Error("snapshotPath parameter is required for import_snapshot action");
+      const { importSnapshot } = await import("./admin/snapshot.js");
+      const result = await importSnapshot({ customDb: db, snapshotPathOrData: snapshotPath });
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      };
+    }
+
+    throw new Error(`Unknown action: ${action}`);
   }
 );
 

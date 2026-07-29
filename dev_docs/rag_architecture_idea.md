@@ -183,10 +183,10 @@ CREATE TABLE IF NOT EXISTS graph_edges (
 - [x] **Phase 3: Hybrid Retrieval & GraphRAG Lite**
   - RRF Hybrid Retriever (BM25 FTS5 + Vector + Thresholding).
   - GraphRAG Lite edge extractor during ingestion.
-- [ ] **Phase 4: MCP Tools & Administrative Suite**
+- [x] **Phase 4: MCP Tools & Administrative Suite**
   - Register MCP tools (`ingest_document`, `query_knowledge_base`, `manage_knowledge_base`).
   - Snapshots, import/export, and quality evaluation benchmark suite.
-- [ ] **Phase 5: Stitch-Designed Web Admin UI & NPM Packaging (Final)**
+- [x] **Phase 5: Stitch-Designed Web Admin UI & NPM Packaging (Final)**
   - Prototype UI design with StitchMCP.
   - Package embedded Web Admin SPA with dynamic port resolution (`8765`+).
   - Publish `@lotargo/memory_plugin` to npm with `npx` setup command.

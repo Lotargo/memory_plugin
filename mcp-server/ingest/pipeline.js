@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { getDatabase } from "../db/database.js";
-import { saveBlob } from "../storage/blob_store.js";
+import { getDatabase, BLOBS_DIR } from "../db/database.js";
+import { saveBlob, deleteBlob } from "../storage/blob_store.js";
 import { normalizeContent } from "./normalizer.js";
 import { buildTripleHierarchy } from "./chunker.js";
 import { embedText, vectorToBuffer } from "../ml/model_manager.js";
@@ -12,13 +12,14 @@ export async function ingestDocument({
   path = null,
   title = null,
   customDb = null,
+  customBlobDir = BLOBS_DIR,
   generateEmbeddings = true,
 }) {
   const db = customDb || getDatabase();
 
   const { markdown, title: docTitle, metadata } = normalizeContent({ content, type, path, title });
 
-  const blobRes = await saveBlob(markdown);
+  const blobRes = await saveBlob(markdown, customBlobDir);
   const blobHash = blobRes.hash;
 
   const docId = `doc_${randomUUID().replace(/-/g, "").substring(0, 12)}`;
@@ -42,6 +43,13 @@ export async function ingestDocument({
   try {
     const existingDoc = db.prepare("SELECT id FROM documents WHERE path = ?").get(docPath);
     if (existingDoc) {
+      const microChunks = db.prepare("SELECT id FROM micro_chunks WHERE doc_id = ?").all(existingDoc.id);
+      for (const mc of microChunks) {
+        try {
+          db.prepare("DELETE FROM micro_chunks_fts WHERE id = ?").run(mc.id);
+        } catch {}
+      }
+      db.prepare("DELETE FROM graph_edges WHERE source_id = ? OR target_id = ?").run(existingDoc.id, existingDoc.id);
       db.prepare("DELETE FROM documents WHERE id = ?").run(existingDoc.id);
     }
 
@@ -92,11 +100,52 @@ export async function ingestDocument({
   }
 
   return {
+    docId,
     doc_id: docId,
     path: docPath,
+    blobHash,
     blob_hash: blobHash,
     title: docTitle,
+    sectionsCount: hierarchy.sections.length,
     sections_count: hierarchy.sections.length,
+    microChunksCount: hierarchy.microChunks.length,
     micro_chunks_count: hierarchy.microChunks.length,
+    deduplicated: blobRes.deduplicated,
   };
+}
+
+export async function deleteDocument(docIdOrPath, customDb = null, customBlobDir = BLOBS_DIR) {
+  const db = customDb || getDatabase();
+  const doc = db.prepare("SELECT * FROM documents WHERE id = ? OR path = ?").get(docIdOrPath, docIdOrPath);
+  if (!doc) {
+    return { deleted: false, reason: "Document not found" };
+  }
+
+  const microChunks = db.prepare("SELECT id FROM micro_chunks WHERE doc_id = ?").all(doc.id);
+
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    for (const mc of microChunks) {
+      try {
+        db.prepare("DELETE FROM micro_chunks_fts WHERE id = ?").run(mc.id);
+      } catch {}
+    }
+
+    db.prepare("DELETE FROM graph_edges WHERE source_id = ? OR target_id = ?").run(doc.id, doc.id);
+    db.prepare("DELETE FROM documents WHERE id = ?").run(doc.id);
+
+    db.exec("COMMIT;");
+  } catch (err) {
+    db.exec("ROLLBACK;");
+    throw err;
+  }
+
+  if (doc.blob_hash) {
+    const refCount = db.prepare("SELECT COUNT(*) as cnt FROM documents WHERE blob_hash = ?").get(doc.blob_hash).cnt;
+    if (refCount === 0) {
+      await deleteBlob(doc.blob_hash, customBlobDir);
+    }
+  }
+
+  return { deleted: true, docId: doc.id, title: doc.title };
 }
