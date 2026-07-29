@@ -1,7 +1,14 @@
 node_modules/
+mcp-server/node_modules/
+mcp-server/benchmarks/corpus/
 memory/
-.DS_Store
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
 *.log
+.DS_Store
 .env
 .env.*
 .npmrc
+dev_docs*

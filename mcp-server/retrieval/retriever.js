@@ -35,7 +35,7 @@ export function bm25Search(db, query, limit = 30) {
   }
 }
 
-export function vectorSearch(db, queryVector, limit = 30) {
+export function vectorSearch(db, queryVector, limit = 30, minSim = 0.25) {
   if (!queryVector || queryVector.length === 0) return [];
 
   const stmt = db.prepare(`
@@ -49,14 +49,16 @@ export function vectorSearch(db, queryVector, limit = 30) {
   for (const r of rows) {
     const vec = bufferToVector(r.vector);
     const sim = cosineSimilarity(queryVector, vec);
-    scored.push({
-      id: r.id,
-      section_id: r.section_id,
-      doc_id: r.doc_id,
-      content: r.content,
-      breadcrumbs: r.breadcrumbs,
-      cosine_sim: sim,
-    });
+    if (!isNaN(sim) && sim >= minSim) {
+      scored.push({
+        id: r.id,
+        section_id: r.section_id,
+        doc_id: r.doc_id,
+        content: r.content,
+        breadcrumbs: r.breadcrumbs,
+        cosine_sim: sim,
+      });
+    }
   }
 
   scored.sort((a, b) => b.cosine_sim - a.cosine_sim);
