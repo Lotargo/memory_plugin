@@ -1,9 +1,20 @@
-import { mkdir, writeFile, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFile, readdir, stat, rm, mkdir as mkdirAsync, writeFile as writeFileAsync } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { MEMORY_DIR } from "../memory.js";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-export const CORPUS_DIR = join(__dirname, "corpus");
+export const CORPUS_DIR = join(MEMORY_DIR, "cache", "benchmark_corpus");
+const PANEL_WIDTH = 58;
+
+function printRichPanel(title, subtitle = "") {
+  const line = "─".repeat(PANEL_WIDTH - 2);
+  console.log(`\x1b[36m╭${line}╮\x1b[0m`);
+  console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37m${title.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
+  if (subtitle) {
+    console.log(`\x1b[36m│\x1b[0m  \x1b[90m${subtitle.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
+  }
+  console.log(`\x1b[36m╰${line}╯\x1b[0m`);
+}
 
 const RAW_DOC_SOURCES = [
   // Frontend frameworks & libraries
@@ -52,9 +63,6 @@ const RAW_DOC_SOURCES = [
   { id: "vscode_readme", title: "VS Code README", url: "https://raw.githubusercontent.com/microsoft/vscode/main/README.md" },
 ];
 
-// Fallback offline documents if network fetch is blocked or offline
-// Fallback tech-spec docs — only used when few real documents fetched (network issues).
-// These describe real, independently-existing technologies; none reference this plugin.
 const LOCAL_FALLBACK_DOCS = [
   {
     id: "sqlite_fts5_spec",
@@ -82,46 +90,120 @@ Key components:
 ];
 
 const MIN_REAL_DOCS_BEFORE_FALLBACK = 15;
+const FETCH_CONCURRENCY = 6;
 
-export async function fetchRealCorpus() {
-  if (!existsSync(CORPUS_DIR)) {
-    await new Promise((resolve, reject) => mkdir(CORPUS_DIR, { recursive: true }, (err) => (err ? reject(err) : resolve())));
-  }
+async function fetchSingleDoc(doc, targetDir) {
+  const filePath = join(targetDir, `${doc.id}.md`);
 
-  console.log(`📡 Fetching real-world corpus files into ${CORPUS_DIR}...`);
-  const results = [];
-  let networkSuccesses = 0;
-
-  for (const doc of RAW_DOC_SOURCES) {
-    const filePath = join(CORPUS_DIR, `${doc.id}.md`);
+  // Use cached file if it already exists
+  if (existsSync(filePath)) {
     try {
-      const response = await fetch(doc.url, { signal: AbortSignal.timeout(10000) });
-      if (response.ok) {
-        const text = await response.text();
-        await new Promise((resolve, reject) => writeFile(filePath, text, "utf-8", (err) => (err ? reject(err) : resolve())));
-        results.push({ id: doc.id, title: doc.title, path: filePath, bytes: text.length, source: "network" });
-        networkSuccesses++;
-        console.log(`  [OK] Fetched ${doc.id} (${text.length} bytes)`);
-        continue;
+      const content = await readFile(filePath, "utf-8");
+      if (content.length > 0) {
+        return { id: doc.id, title: doc.title, path: filePath, bytes: content.length, source: "cached" };
       }
     } catch {
-      // Network fetch failed or timed out - fall through
+      // Cache read failed, re-fetch below
     }
   }
 
-  // Only add local fallback docs when network fetches are sparse (offline / blocked)
-  if (networkSuccesses < MIN_REAL_DOCS_BEFORE_FALLBACK) {
-    console.log(`  [FALLBACK] Only ${networkSuccesses} network docs fetched (threshold: ${MIN_REAL_DOCS_BEFORE_FALLBACK}), adding ${LOCAL_FALLBACK_DOCS.length} local docs...`);
+  // Fetch from network
+  const response = await fetch(doc.url, { signal: AbortSignal.timeout(10000) });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  const text = await response.text();
+  await writeFileAsync(filePath, text, "utf-8");
+  return { id: doc.id, title: doc.title, path: filePath, bytes: text.length, source: "network" };
+}
+
+export async function fetchRealCorpus({ silent = false, onProgress = null } = {}) {
+  if (!existsSync(CORPUS_DIR)) {
+    await mkdirAsync(CORPUS_DIR, { recursive: true });
+  }
+
+  if (!silent) {
+    printRichPanel("FETCHING TECHNICAL CORPUS", `Cache: ${CORPUS_DIR}`);
+  }
+
+  const results = [];
+  let networkCount = 0;
+  let cachedCount = 0;
+  const total = RAW_DOC_SOURCES.length;
+
+  // Fetch in parallel batches for performance
+  for (let i = 0; i < RAW_DOC_SOURCES.length; i += FETCH_CONCURRENCY) {
+    const batch = RAW_DOC_SOURCES.slice(i, i + FETCH_CONCURRENCY);
+    const settled = await Promise.allSettled(
+      batch.map((doc) => fetchSingleDoc(doc, CORPUS_DIR))
+    );
+
+    for (const result of settled) {
+      if (result.status === "fulfilled") {
+        results.push(result.value);
+        if (result.value.source === "network") {
+          networkCount++;
+          if (!silent) console.log(`  [OK] Fetched ${result.value.id} (${result.value.bytes} bytes)`);
+        } else if (result.value.source === "cached") {
+          cachedCount++;
+        }
+      }
+    }
+
+    if (onProgress) onProgress({ phase: "fetch", current: Math.min(i + FETCH_CONCURRENCY, total), total });
+  }
+
+  // Add fallback docs if not enough real documents available
+  if (results.length < MIN_REAL_DOCS_BEFORE_FALLBACK) {
+    if (!silent) {
+      console.log(`  [FALLBACK] Only ${results.length} docs available, adding ${LOCAL_FALLBACK_DOCS.length} local docs...`);
+    }
     for (const doc of LOCAL_FALLBACK_DOCS) {
       const filePath = join(CORPUS_DIR, `${doc.id}.md`);
-      await new Promise((resolve, reject) => writeFile(filePath, doc.content, "utf-8", (err) => (err ? reject(err) : resolve())));
+      await writeFileAsync(filePath, doc.content, "utf-8");
       results.push({ id: doc.id, title: doc.title, path: filePath, bytes: doc.content.length, source: "local_fallback" });
-      console.log(`  [OK] Saved fallback ${doc.id} (${doc.content.length} bytes)`);
     }
   }
 
-  console.log(`✅ Corpus ready: ${results.length} documents (${networkSuccesses} network, ${results.length - networkSuccesses} local).`);
+  if (!silent) {
+    console.log(`\n  [OK] Corpus ready: ${results.length} documents (${networkCount} fetched, ${cachedCount} cached, ${results.length - networkCount - cachedCount} fallback).\n`);
+  }
   return results;
+}
+
+/**
+ * Returns the total size of the benchmark corpus cache in bytes,
+ * or 0 if the cache directory doesn't exist.
+ */
+export async function getCorpusCacheSize() {
+  if (!existsSync(CORPUS_DIR)) return 0;
+  let totalBytes = 0;
+  try {
+    const files = await readdir(CORPUS_DIR);
+    const stats = await Promise.all(
+      files.map(async (f) => {
+        try {
+          const s = await stat(join(CORPUS_DIR, f));
+          return s.isFile() ? s.size : 0;
+        } catch {
+          return 0;
+        }
+      })
+    );
+    totalBytes = stats.reduce((sum, s) => sum + s, 0);
+  } catch {
+    // Directory read failed
+  }
+  return totalBytes;
+}
+
+/**
+ * Deletes the entire benchmark corpus cache directory.
+ */
+export async function clearCorpusCache() {
+  if (!existsSync(CORPUS_DIR)) return false;
+  await rm(CORPUS_DIR, { recursive: true, force: true });
+  return true;
 }
 
 if (process.argv[1] && process.argv[1].includes("fetch_real_corpus.js")) {

@@ -4,9 +4,11 @@
   "type": "module",
   "main": "index.js",
   "bin": {
-    "memory-mcp-server": "index.js"
+    "memory-mcp-server": "index.js",
+    "memory-cli": "cli.js"
   },
   "scripts": {
+    "cli": "node cli.js",
     "test": "node test_phase4.js",
     "benchmark": "node benchmarks/run_benchmarks.js"
   },

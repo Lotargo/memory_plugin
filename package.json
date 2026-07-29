@@ -6,7 +6,8 @@
   "main": "opencode-plugin/index.js",
   "bin": {
     "memory_plugin": "mcp-server/index.js",
-    "memory-agent": "mcp-server/index.js"
+    "memory-agent": "mcp-server/index.js",
+    "memory-cli": "mcp-server/cli.js"
   },
   "files": [
     "opencode-plugin",

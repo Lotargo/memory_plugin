@@ -129,8 +129,26 @@ npx @lotargo/memory_plugin admin
 | Tool | Description |
 |------|-------------|
 | `ingest_document` | Ingest local files, web URLs, or raw text into 3-tier hierarchy index with ONNX vector embeddings and symbol extraction |
-| `query_knowledge_base` | Perform hybrid BM25 + Vector RRF search to retrieve relevant candidate sections, code symbols, and context |
+| `query_knowledge_base` | Perform hybrid RSF/RRF search (BM25 + Vector) to retrieve relevant candidate sections, code symbols, and context |
 | `manage_knowledge_base` | List documents, delete documents (purging CAS & SQLite), view database stats, or export/import portable snapshots |
+
+---
+
+## Interactive CLI & Engine Tuning
+
+Launch the interactive CLI terminal interface to configure fusion algorithm (RSF / RRF), alpha weights, embedding models, and reranker options:
+
+```bash
+# From local repository folder:
+node mcp-server/index.js cli
+# or
+npx . cli
+
+# If installed / linked globally via npm link:
+memory_plugin cli
+# or
+memory-cli
+```
 
 ---
 
@@ -150,13 +168,14 @@ npm run benchmark
 
 ### Empirical Benchmark Summary
 
-Benchmark performed over 21 real-world technical documents from GitHub with full ONNX vector embedding computation (`multilingual-e5-small`):
+Benchmark performed over 27 real-world GitHub README documents (no self-referential synthetic data) with full ONNX vector embedding computation (`multilingual-e5-small`), evaluated across 21 challenging cross-lingual semantic + keyword queries:
 
-| Search Strategy | MRR@5 | Recall@5 | NDCG@5 | Avg Latency |
-|---|---|---|---|---|
-| **BM25 Text Search Only** | 0.5667 | 66.67% | 0.5929 | 0.49 ms |
-| **Dense ONNX Vector Only** | 0.7022 | 80.00% | 0.7258 | 11.74 ms |
-| **Hybrid RRF (BM25 + Vector)** | **0.7667** | **80.00%** | **0.7754** | **12.54 ms** |
+| Search Strategy | MRR@5 | Recall@5 | NDCG@5 |
+|---|---|---|---|
+| **BM25 Text Search Only** | 0.5119 | 57.1% | 0.5267 |
+| **Dense ONNX Vector Only** | 0.6048 | 71.4% | 0.6309 |
+| **Hybrid RRF (Reciprocal Rank)** | **0.6825** | **80.95%** | **0.7139** |
+| **Hybrid RSF (Relative Score)** | **0.6548** | **76.19%** | **0.6806** |
 
 ---
 

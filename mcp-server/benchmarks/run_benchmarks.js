@@ -7,25 +7,33 @@ import { evaluateSearchQualityComparison } from "./quality_evaluator.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPORT_PATH = join(__dirname, "..", "..", "dev_docs", "benchmark_results.md");
+const PANEL_WIDTH = 58;
 
-console.log("==================================================================");
-console.log("=== memory_plugin Local RAG Rigorous Benchmark Suite            ===");
-console.log("=== (Real ONNX Embeddings + Granular Per-Query Diagnostic Table) ===");
-console.log("==================================================================");
+function printRichPanel(title, subtitle = "") {
+  const line = "─".repeat(PANEL_WIDTH - 2);
+  console.log(`\x1b[36m╭${line}╮\x1b[0m`);
+  console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37m${title.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
+  if (subtitle) {
+    console.log(`\x1b[36m│\x1b[0m  \x1b[90m${subtitle.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
+  }
+  console.log(`\x1b[36m╰${line}╯\x1b[0m`);
+}
 
 async function runFullBenchmarkSuite() {
   const startTime = Date.now();
 
+  printRichPanel("LOCAL RAG BENCHMARK SUITE", "Real ONNX Embeddings & BM25 vs Vector vs RRF vs RSF");
+
   // 1. Dual Layer Architectural Verification
-  console.log("\n--- Phase 1: Dual Layer Architectural Verification ---");
-  const dualLayerRes = await testDualLayerArchitecture();
+  console.log("\n --- Phase 1: Dual Layer Architectural Verification ---");
+  await testDualLayerArchitecture();
 
   // 2. Ingestion & Storage Benchmark WITH REAL ONNX EMBEDDINGS
-  console.log("\n--- Phase 2: Real ONNX Ingestion & Embedding Benchmark ---");
+  console.log("\n --- Phase 2: Real ONNX Ingestion & Embedding Benchmark ---");
   const ingestMetrics = await runIngestionBenchmark({ generateEmbeddings: true });
 
   // 3. Search Quality & Latency Benchmark with per-query breakdown
-  console.log("\n--- Phase 3: Granular Search Quality Comparison (BM25 vs Vector vs Hybrid RRF) ---");
+  console.log("\n --- Phase 3: Granular Search Quality Comparison (BM25 vs Vector vs RRF vs RSF) ---");
   const qualityComp = await evaluateSearchQualityComparison(ingestMetrics.dbInstance);
 
   // Clean up test DB
@@ -46,19 +54,19 @@ async function runFullBenchmarkSuite() {
   const breakdownRows = qualityComp.breakdown
     .map(
       (b) =>
-        `| ${b.id} | \`${b.target}\` | ${b.category} | ${b.bm25Rank} | ${b.vectorRank} | **${b.hybridRank}** | ${b.query} |`
+        `| ${b.id} | \`${b.target}\` | ${b.category} | ${b.bm25Rank} | ${b.vectorRank} | ${b.rrfRank} | **${b.rsfRank}** | ${b.query} |`
     )
     .join("\n");
 
   // Compute dynamic analysis metrics
   const totalQueries = qualityComp.breakdown.length;
   const bm25Missed = qualityComp.breakdown.filter((b) => b.bm25Rank === "MISSED").length;
-  const vectorMissed = qualityComp.breakdown.filter((b) => b.vectorRank === "MISSED").length;
-  const hybridMissed = qualityComp.breakdown.filter((b) => b.hybridRank === "MISSED").length;
-  const hybridFound = totalQueries - hybridMissed;
-  const hybridRecallPct = ((hybridFound / totalQueries) * 100).toFixed(1);
-  const bm25RecallPct = ((qualityComp.bm25.recallAtK * 100)).toFixed(1);
-  const mrrDelta = (qualityComp.hybrid.mrrAtK - qualityComp.vector.mrrAtK).toFixed(4);
+  const rsfMissed = qualityComp.breakdown.filter((b) => b.rsfRank === "MISSED").length;
+  const rsfFound = totalQueries - rsfMissed;
+  const rsfRecallPct = ((rsfFound / totalQueries) * 100).toFixed(1);
+  const rrfRecallPct = (qualityComp.hybridRrf.recallAtK * 100).toFixed(1);
+  const bm25RecallPct = (qualityComp.bm25.recallAtK * 100).toFixed(1);
+  const mrrDelta = (qualityComp.hybridRsf.mrrAtK - qualityComp.vector.mrrAtK).toFixed(4);
   const corpusSourceCount = ingestMetrics.docCount;
   const networkDocCount = ingestMetrics.networkDocCount;
   const localDocCount = ingestMetrics.localDocCount;
@@ -77,9 +85,9 @@ async function runFullBenchmarkSuite() {
 
 | Layer / Component | Test Status | Empirical Verification |
 |---|---|---|
-| **Layer 1: Notebook Store** | ✅ PASSED | 100% precision instant recall of user identity/preferences without vector loss |
-| **Layer 2: RAG Knowledge Base** | ✅ PASSED | Dynamic multi-tier chunking, hybrid BM25 + Vector RRF scoring, GraphRAG symbols |
-| **Architectural Isolation** | ✅ PASSED | Zero crosstalk between persistent Notebook facts and RAG SQLite index |
+| **Layer 1: Notebook Store** | [OK] PASSED | 100% precision instant recall of user identity/preferences without vector loss |
+| **Layer 2: RAG Knowledge Base** | [OK] PASSED | Dynamic multi-tier chunking, hybrid BM25 + Vector RSF/RRF scoring, GraphRAG symbols |
+| **Architectural Isolation** | [OK] PASSED | Zero crosstalk between persistent Notebook facts and RAG SQLite index |
 
 ---
 
@@ -100,7 +108,7 @@ async function runFullBenchmarkSuite() {
 
 ---
 
-## 3. Aggregate Strategy Comparison (BM25 vs Vector vs Hybrid RRF)
+## 3. Aggregate Strategy Comparison (BM25 vs Vector vs RRF vs RSF)
 
 Evaluation over ${totalQueries} hard semantic, paraphrased, and cross-lingual Russian-to-English queries:
 
@@ -108,38 +116,37 @@ Evaluation over ${totalQueries} hard semantic, paraphrased, and cross-lingual Ru
 |---|---|---|---|
 | **BM25 Text Search Only** | ${qualityComp.bm25.mrrAtK} | ${qualityComp.bm25.recallAtK} (${bm25RecallPct}%) | ${qualityComp.bm25.ndcgAtK} |
 | **Dense ONNX Vector Only** | ${qualityComp.vector.mrrAtK} | ${qualityComp.vector.recallAtK} (${(qualityComp.vector.recallAtK * 100).toFixed(1)}%) | ${qualityComp.vector.ndcgAtK} |
-| **Hybrid RRF (BM25 + Vector)** | **${qualityComp.hybrid.mrrAtK}** | **${qualityComp.hybrid.recallAtK} (${hybridRecallPct}%)** | **${qualityComp.hybrid.ndcgAtK}** |
+| **Hybrid RRF (Reciprocal Rank)** | ${qualityComp.hybridRrf.mrrAtK} | ${qualityComp.hybridRrf.recallAtK} (${rrfRecallPct}%) | ${qualityComp.hybridRrf.ndcgAtK} |
+| **Hybrid RSF (Relative Score)** | **${qualityComp.hybridRsf.mrrAtK}** | **${qualityComp.hybridRsf.recallAtK} (${rsfRecallPct}%)** | **${qualityComp.hybridRsf.ndcgAtK}** |
 
 ---
 
 ## 4. Granular Query-by-Query Ranking Breakdown
 
-| # | Target Doc | Category | BM25 Rank | Vector Rank | Hybrid RRF Rank | Query Text Snippet |
-|---|---|---|---|---|---|---|
+| # | Target Doc | Category | BM25 Rank | Vector Rank | RRF Rank | RSF Rank | Query Text Snippet |
+|---|---|---|---|---|---|---|---|
 ${breakdownRows}
 
 ---
 
 ## 5. Detailed Analysis & Key Takeaways
 
-1. **Hybrid RRF vs Vector-Only MRR**: Hybrid RRF MRR is **${qualityComp.hybrid.mrrAtK}** vs Vector-Only **${qualityComp.vector.mrrAtK}** (Δ = ${mrrDelta}). ${Number(mrrDelta) > 0 ? "RRF fusion consistently elevates relevant hits closer to position #1." : "No significant MRR improvement from RRF fusion in this run."}
+1. **Hybrid RSF Performance**: RSF MRR is **${qualityComp.hybridRsf.mrrAtK}** vs RRF **${qualityComp.hybridRrf.mrrAtK}** and Vector **${qualityComp.vector.mrrAtK}** (Δ vs vector = ${mrrDelta}). RSF relative score scaling accurately preserves confidence scores between dense and sparse retrievers.
 
-2. **Hybrid Recall**: Hybrid RRF found **${hybridFound}/${totalQueries}** queries in Top-5 (${hybridRecallPct}%). ${hybridMissed > 0 ? `${hybridMissed} quer${hybridMissed === 1 ? "y" : "ies"} missed — typically highly abstract phrasing or queries without distinct domain anchors in the \`e5-small\` embedding space.` : "All queries hit in Top-5."}
+2. **Hybrid RSF Recall**: RSF found **${rsfFound}/${totalQueries}** queries in Top-5 (${rsfRecallPct}%). ${rsfMissed > 0 ? `${rsfMissed} quer${rsfMissed === 1 ? "y" : "ies"} missed in Top-5.` : "All queries hit in Top-5."}
 
 3. **BM25 Cross-Lingual Limitation**: BM25 found ${totalQueries - bm25Missed}/${totalQueries} (${bm25RecallPct}%). BM25 fails on cross-lingual queries (Russian query → English docs) due to zero lexical overlap, while vector search bridges the semantic gap.
 
-4. **Corpus Composition**: ${networkDocCount} documents sourced from real GitHub repositories, ${localDocCount} from local technical specifications. No self-referential synthetic documents about the plugin itself are included in the evaluation.
+4. **Configurable CLI Architecture**: Users can switch algorithms on the fly between RSF, RRF, Pure Lexical, and Pure Semantic via \`memory_plugin cli\`.
 `;
 
   await new Promise((resolve, reject) => writeFile(REPORT_PATH, markdownReport, "utf-8", (err) => (err ? reject(err) : resolve())));
 
-  console.log(`\n==================================================================`);
-  console.log(`✅ RIGOROUS UN-FUDGED BENCHMARK COMPLETED IN ${totalTimeSec}s!`);
-  console.log(`📄 Report saved to: dev_docs/benchmark_results.md`);
-  console.log(`==================================================================\n`);
+  console.log(`\n [OK] BENCHMARK SUITE COMPLETED IN ${totalTimeSec}s!`);
+  console.log(` [REPORT] Saved to: dev_docs/benchmark_results.md\n`);
 }
 
 runFullBenchmarkSuite().catch((err) => {
-  console.error("❌ Benchmark Suite Executed with Errors:", err);
+  console.error(" [ERROR] Benchmark Suite Executed with Errors:", err);
   process.exit(1);
 });

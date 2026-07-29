@@ -1,9 +1,17 @@
 import { bm25Search, vectorSearch, hybridQuery } from "../retrieval/retriever.js";
 import { embedText } from "../ml/model_manager.js";
 
-console.log("==========================================================");
-console.log("=== RAG Search Quality Evaluator: BM25 vs Vector vs RRF ===");
-console.log("==========================================================");
+const PANEL_WIDTH = 58;
+
+function printRichPanel(title, subtitle = "") {
+  const line = "─".repeat(PANEL_WIDTH - 2);
+  console.log(`\x1b[36m╭${line}╮\x1b[0m`);
+  console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37m${title.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
+  if (subtitle) {
+    console.log(`\x1b[36m│\x1b[0m  \x1b[90m${subtitle.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
+  }
+  console.log(`\x1b[36m╰${line}╯\x1b[0m`);
+}
 
 export const CHALLENGING_EVALUATION_QUERIES = [
   // Category A: Semantic & Paraphrased Queries (No exact keyword overlap)
@@ -41,12 +49,22 @@ async function runQueryForMode(db, qObj, mode, K = 5) {
   } else if (mode === "vector_only") {
     const qVec = await embedText(qObj.query, true);
     hits = vectorSearch(db, qVec, K, 0.10);
+  } else if (mode === "hybrid_rrf") {
+    hits = await hybridQuery({
+      query: qObj.query,
+      limit: K,
+      generateEmbeddings: true,
+      customDb: db,
+      fusionAlgorithm: "rrf",
+    });
   } else {
     hits = await hybridQuery({
       query: qObj.query,
       limit: K,
       generateEmbeddings: true,
       customDb: db,
+      fusionAlgorithm: "rsf",
+      alpha: 0.5,
     });
   }
 
@@ -67,22 +85,29 @@ async function runQueryForMode(db, qObj, mode, K = 5) {
   return 0; // Not found in Top K
 }
 
-export async function evaluateSearchQualityComparison(db) {
-  console.log(`\n🔬 Executing Per-Query Granular Search Evaluation across ${CHALLENGING_EVALUATION_QUERIES.length} hard queries...\n`);
+export async function evaluateSearchQualityComparison(db, { silent = false, onProgress = null } = {}) {
+  if (!silent) {
+    printRichPanel("SEARCH QUALITY EVALUATION", `Running evaluation across ${CHALLENGING_EVALUATION_QUERIES.length} hard queries`);
+  }
 
   const queryBreakdown = [];
   const K = 5;
+  const total = CHALLENGING_EVALUATION_QUERIES.length;
 
   let bm25Mrr = 0, bm25Recall = 0, bm25Ndcg = 0;
   let vecMrr = 0, vecRecall = 0, vecNdcg = 0;
-  let hybridMrr = 0, hybridRecall = 0, hybridNdcg = 0;
+  let rrfMrr = 0, rrfRecall = 0, rrfNdcg = 0;
+  let rsfMrr = 0, rsfRecall = 0, rsfNdcg = 0;
 
   for (let i = 0; i < CHALLENGING_EVALUATION_QUERIES.length; i++) {
     const qObj = CHALLENGING_EVALUATION_QUERIES[i];
 
     const bm25Rank = await runQueryForMode(db, qObj, "bm25_only", K);
     const vecRank = await runQueryForMode(db, qObj, "vector_only", K);
-    const hybridRank = await runQueryForMode(db, qObj, "hybrid_rrf", K);
+    const rrfRank = await runQueryForMode(db, qObj, "hybrid_rrf", K);
+    const rsfRank = await runQueryForMode(db, qObj, "hybrid_rsf", K);
+
+    if (onProgress) onProgress({ phase: "evaluate", current: i + 1, total });
 
     if (bm25Rank > 0) {
       bm25Mrr += 1 / bm25Rank;
@@ -96,10 +121,16 @@ export async function evaluateSearchQualityComparison(db) {
       vecNdcg += 1 / Math.log2(vecRank + 1);
     }
 
-    if (hybridRank > 0) {
-      hybridMrr += 1 / hybridRank;
-      hybridRecall += 1;
-      hybridNdcg += 1 / Math.log2(hybridRank + 1);
+    if (rrfRank > 0) {
+      rrfMrr += 1 / rrfRank;
+      rrfRecall += 1;
+      rrfNdcg += 1 / Math.log2(rrfRank + 1);
+    }
+
+    if (rsfRank > 0) {
+      rsfMrr += 1 / rsfRank;
+      rsfRecall += 1;
+      rsfNdcg += 1 / Math.log2(rsfRank + 1);
     }
 
     queryBreakdown.push({
@@ -108,12 +139,11 @@ export async function evaluateSearchQualityComparison(db) {
       category: qObj.category,
       bm25Rank: bm25Rank > 0 ? `#${bm25Rank}` : "MISSED",
       vectorRank: vecRank > 0 ? `#${vecRank}` : "MISSED",
-      hybridRank: hybridRank > 0 ? `#${hybridRank}` : "MISSED",
+      rrfRank: rrfRank > 0 ? `#${rrfRank}` : "MISSED",
+      rsfRank: rsfRank > 0 ? `#${rsfRank}` : "MISSED",
       query: qObj.query.length > 40 ? `${qObj.query.substring(0, 40)}...` : qObj.query,
     });
   }
-
-  const total = CHALLENGING_EVALUATION_QUERIES.length;
 
   const bm25Res = {
     mode: "bm25_only",
@@ -129,23 +159,33 @@ export async function evaluateSearchQualityComparison(db) {
     ndcgAtK: Number((vecNdcg / total).toFixed(4)),
   };
 
-  const hybridRes = {
+  const rrfRes = {
     mode: "hybrid_rrf",
-    mrrAtK: Number((hybridMrr / total).toFixed(4)),
-    recallAtK: Number((hybridRecall / total).toFixed(4)),
-    ndcgAtK: Number((hybridNdcg / total).toFixed(4)),
+    mrrAtK: Number((rrfMrr / total).toFixed(4)),
+    recallAtK: Number((rrfRecall / total).toFixed(4)),
+    ndcgAtK: Number((rrfNdcg / total).toFixed(4)),
   };
 
-  console.log("📌 Granular Query-by-Query Ranking Breakdown:");
-  console.table(queryBreakdown);
+  const rsfRes = {
+    mode: "hybrid_rsf",
+    mrrAtK: Number((rsfMrr / total).toFixed(4)),
+    recallAtK: Number((rsfRecall / total).toFixed(4)),
+    ndcgAtK: Number((rsfNdcg / total).toFixed(4)),
+  };
 
-  console.log("\n📊 Final Aggregate Metric Comparison:");
-  console.table([bm25Res, vectorRes, hybridRes]);
+  if (!silent) {
+    console.log("\n [Granular Per-Query Ranking Breakdown]");
+    console.table(queryBreakdown);
+
+    console.log("\n [Aggregate Metric Comparison]");
+    console.table([bm25Res, vectorRes, rrfRes, rsfRes]);
+  }
 
   return {
     bm25: bm25Res,
     vector: vectorRes,
-    hybrid: hybridRes,
+    hybridRrf: rrfRes,
+    hybridRsf: rsfRes,
     breakdown: queryBreakdown,
   };
 }

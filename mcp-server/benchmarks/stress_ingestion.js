@@ -6,20 +6,32 @@ import { getDatabase } from "../db/database.js";
 import { ingestDocument } from "../ingest/pipeline.js";
 import { CORPUS_DIR, fetchRealCorpus } from "./fetch_real_corpus.js";
 
-console.log("==========================================================");
-console.log("=== Real-World Document Ingestion Benchmark            ===");
-console.log("==========================================================");
+const PANEL_WIDTH = 58;
 
-export async function runIngestionBenchmark(options = { generateEmbeddings: false }) {
-  const corpus = await fetchRealCorpus();
+function printRichPanel(title, subtitle = "") {
+  const line = "─".repeat(PANEL_WIDTH - 2);
+  console.log(`\x1b[36m╭${line}╮\x1b[0m`);
+  console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37m${title.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
+  if (subtitle) {
+    console.log(`\x1b[36m│\x1b[0m  \x1b[90m${subtitle.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
+  }
+  console.log(`\x1b[36m╰${line}╯\x1b[0m`);
+}
+
+export async function runIngestionBenchmark(options = { generateEmbeddings: false, silent: false, onProgress: null }) {
+  const silent = options.silent || false;
+  const onProgress = options.onProgress || null;
+  const corpus = await fetchRealCorpus({ silent, onProgress });
   const TEST_DIR = join(tmpdir(), `memory_bench_ingest_${Date.now()}`);
   const TEST_DB_PATH = join(TEST_DIR, "bench_memory.sqlite");
   const TEST_BLOB_DIR = join(TEST_DIR, "blobs");
 
   const db = getDatabase(TEST_DB_PATH);
 
-  console.log(`\n🚀 Starting ingestion benchmark across ${corpus.length} real documents...`);
-  console.log(`   ONNX Embeddings Enabled: ${options.generateEmbeddings}`);
+  if (!silent) {
+    printRichPanel("DOCUMENT INGESTION BENCHMARK", `Embeddings ONNX Enabled: ${options.generateEmbeddings}`);
+    console.log(`\n  [INGEST] Processing ${corpus.length} technical documents...\n`);
+  }
 
   const startMem = process.memoryUsage().rss;
   const startTime = performance.now();
@@ -48,9 +60,10 @@ export async function runIngestionBenchmark(options = { generateEmbeddings: fals
     totalMicroChunks += ingestRes.microChunksCount;
     if (ingestRes.deduplicated) deduplicatedCount++;
 
-    if ((i + 1) % 5 === 0 || i === corpus.length - 1) {
+    if (!silent && ((i + 1) % 5 === 0 || i === corpus.length - 1)) {
       console.log(`   [Progress] Ingested ${i + 1}/${corpus.length} docs (${totalMicroChunks} micro-chunks)`);
     }
+    if (onProgress) onProgress({ phase: "ingest", current: i + 1, total: corpus.length });
   }
 
   const endTime = performance.now();
@@ -93,15 +106,17 @@ export async function runIngestionBenchmark(options = { generateEmbeddings: fals
     dbInstance: db,
   };
 
-  console.log("\n📊 Ingestion Performance Summary:");
-  console.log(`  - Total Documents: ${metrics.docCount}`);
-  console.log(`  - Total Sections: ${metrics.totalSections}`);
-  console.log(`  - Total Micro-Chunks: ${metrics.totalMicroChunks}`);
-  console.log(`  - Duration: ${metrics.durationSec}s`);
-  console.log(`  - Throughput: ${metrics.docsPerSec} docs/sec | ${metrics.chunksPerSec} chunks/sec`);
-  console.log(`  - Database Size: ${metrics.dbSizeMB} MB`);
-  console.log(`  - Blob Storage Size: ${metrics.blobSizeMB} MB`);
-  console.log(`  - Memory Footprint (Delta RSS): ${metrics.ramUsageMB} MB`);
+  if (!silent) {
+    console.log("\n  [Ingestion Performance Summary]");
+    console.log(`  - Total Documents: ${metrics.docCount}`);
+    console.log(`  - Total Sections: ${metrics.totalSections}`);
+    console.log(`  - Total Micro-Chunks: ${metrics.totalMicroChunks}`);
+    console.log(`  - Duration: ${metrics.durationSec}s`);
+    console.log(`  - Throughput: ${metrics.docsPerSec} docs/sec | ${metrics.chunksPerSec} chunks/sec`);
+    console.log(`  - Database Size: ${metrics.dbSizeMB} MB`);
+    console.log(`  - Blob Storage Size: ${metrics.blobSizeMB} MB`);
+    console.log(`  - Memory Footprint (Delta RSS): ${metrics.ramUsageMB} MB\n`);
+  }
 
   return metrics;
 }

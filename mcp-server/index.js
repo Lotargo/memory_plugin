@@ -19,6 +19,12 @@ if (cliArgs.includes("admin") || cliArgs.includes("--admin") || cliArgs.includes
   await new Promise(() => {});
 }
 
+if (cliArgs.includes("cli") || cliArgs.includes("config") || cliArgs.includes("--cli") || cliArgs.includes("-c")) {
+  const { runCli } = await import("./cli.js");
+  await runCli();
+  process.exit(0);
+}
+
 await ensureDir();
 
 const server = new McpServer({
@@ -169,8 +175,8 @@ server.registerTool(
   "query_knowledge_base",
   {
     description:
-      "Perform hybrid RRF search (BM25 full-text + dense vector similarity) across the RAG knowledge base. " +
-      "Returns top-ranked candidate document sections with breadcrumbs, GraphRAG defined code symbols, and RRF scores.",
+      "Perform hybrid search (RSF/RRF BM25 full-text + dense vector similarity) across the RAG knowledge base. " +
+      "Returns top-ranked candidate document sections with breadcrumbs, GraphRAG defined code symbols, and relevance scores.",
     inputSchema: z.object({
       query: z.string().describe("Search query in natural language or symbol name"),
       limit: z.number().default(5).describe("Maximum number of sections to return"),
@@ -194,11 +200,11 @@ server.registerTool(
         let header = `### [${i + 1}] ${r.doc_title || "Untitled"}`;
         if (r.heading) header += ` > ${r.heading}`;
         if (r.breadcrumbs) header += ` (${r.breadcrumbs})`;
-        let body = `Score (RRF): ${r.score.toFixed(4)}\n`;
+        let body = `Score: ${(r.score || 0).toFixed(4)}\n`;
         if (r.defined_symbols && r.defined_symbols.length > 0) {
           body += `Defined Symbols: ${r.defined_symbols.join(", ")}\n`;
         }
-        body += `\n${r.content}`;
+        body += `\n${r.snippet || r.full_section_content || ""}`;
         return `${header}\n${body}`;
       })
       .join("\n\n---\n\n");

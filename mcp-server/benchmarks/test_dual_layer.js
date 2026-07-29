@@ -1,17 +1,26 @@
 import assert from "node:assert";
-import { rmSync, existsSync, readFileSync } from "node:fs";
+import { rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { getDatabase } from "../db/database.js";
 import { ingestDocument } from "../ingest/pipeline.js";
 import { hybridQuery } from "../retrieval/retriever.js";
 
-console.log("==========================================================");
-console.log("=== Dual-Layer Architectural Verification Suite        ===");
-console.log("=== (Layer 1: Notebook Facts vs Layer 2: RAG Engine)   ===");
-console.log("==========================================================");
+const PANEL_WIDTH = 58;
+
+function printRichPanel(title, subtitle = "") {
+  const line = "─".repeat(PANEL_WIDTH - 2);
+  console.log(`\x1b[36m╭${line}╮\x1b[0m`);
+  console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37m${title.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
+  if (subtitle) {
+    console.log(`\x1b[36m│\x1b[0m  \x1b[90m${subtitle.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
+  }
+  console.log(`\x1b[36m╰${line}╯\x1b[0m`);
+}
 
 export async function testDualLayerArchitecture() {
+  printRichPanel("DUAL-LAYER VERIFICATION SUITE", "Layer 1: Notebook Facts vs Layer 2: RAG Engine");
+
   const TEST_DIR = join(tmpdir(), `memory_test_dual_layer_${Date.now()}`);
   const TEST_DB_PATH = join(TEST_DIR, "test_dual_layer.sqlite");
   const TEST_BLOB_DIR = join(TEST_DIR, "blobs");
@@ -27,14 +36,13 @@ export async function testDualLayerArchitecture() {
     const db = getDatabase(TEST_DB_PATH);
 
     // 1. Setup Layer 1: Persistent Personal Facts (Notebook Store)
-    console.log("\n1. Testing Layer 1: Persistent Personal Facts (Notebook Store)...");
+    console.log("\n  1. Testing Layer 1: Persistent Personal Facts (Notebook Store)...");
     const personalFacts = [
       "- [2026-07-30 02:30] User's name is Alex",
       "- [2026-07-30 02:30] User prefers zero-Docker Node.js architecture with SQLite",
       "- [2026-07-30 02:30] Project goal is building enterprise-grade local memory_plugin",
     ];
 
-    // Mock Notebook facts retrieval (direct read, no vector search thresholding)
     const readNotebookFacts = () => personalFacts.map((f) => f.slice(2));
     const recalledFacts = readNotebookFacts();
 
@@ -45,7 +53,7 @@ export async function testDualLayerArchitecture() {
     results.details.push("Notebook Layer: 100% precision instant recall verified.");
 
     // 2. Setup Layer 2: RAG Knowledge Base (Vector + BM25 + GraphRAG)
-    console.log("\n2. Testing Layer 2: RAG Knowledge Base (Vector + BM25 Search)...");
+    console.log("\n  2. Testing Layer 2: RAG Knowledge Base (Vector + BM25 Search)...");
     const doc1 = `
 # React Architecture Guide
 React is a JavaScript library for building user interfaces.
@@ -80,7 +88,6 @@ It supports Full-Text Search FTS5 and Write-Ahead Logging WAL mode.
     assert(ingestRes1.docId && ingestRes2.docId, "RAG documents should be ingested successfully");
     console.log("  [PASS] RAG Knowledge Base ingestion OK.");
 
-    // Execute hybrid query on RAG Knowledge Base
     const ragResults = await hybridQuery({
       query: "SQLite FTS5 full-text search engine",
       limit: 5,
@@ -95,13 +102,11 @@ It supports Full-Text Search FTS5 and Write-Ahead Logging WAL mode.
     results.details.push("RAG Layer: Dynamic hybrid retrieval verified.");
 
     // 3. Test Architectural Isolation
-    console.log("\n3. Testing Architectural Isolation between Notebook & RAG...");
+    console.log("\n  3. Testing Architectural Isolation between Notebook & RAG...");
     
-    // Ensure SQLite database documents table does NOT contain notebook facts
     const docsInDb = db.prepare("SELECT COUNT(*) as cnt FROM documents").get().cnt;
     assert.strictEqual(docsInDb, 2, "SQLite DB should contain exactly 2 ingested documents, 0 notebook facts");
 
-    // Ensure querying non-existent RAG topics returns 0 docs without leaking notebook facts into RAG results
     const emptyRagResults = await hybridQuery({
       query: "NonExistentTopicForSearch12345",
       limit: 5,
@@ -112,12 +117,12 @@ It supports Full-Text Search FTS5 and Write-Ahead Logging WAL mode.
     assert.strictEqual(emptyRagResults.length, 0, "RAG query for non-existent topic should return empty list without leaking notebook facts");
     console.log("  [PASS] Zero cross-contamination between Notebook Store and RAG Database.");
     results.isolationPassed = true;
-    results.details.push("Isolation: 100% separation verified. Personal facts remain in Notebook layer; documentation remains in RAG layer.");
+    results.details.push("Isolation: 100% separation verified.");
 
     db.close();
     return results;
   } catch (err) {
-    console.error("❌ Dual-Layer Test Failed:", err);
+    console.error("  [FAIL] Dual-Layer Test Failed:", err);
     throw err;
   } finally {
     if (existsSync(TEST_DIR)) {
