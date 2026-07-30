@@ -58,6 +58,15 @@ When `recall` is invoked, the engine returns saved facts along with their Agent-
 Use this tool when adding technical documentation, API specs, architectural documents, or code repos into the searchable knowledge base.
 - **Hierarchy Chunking**: The engine automatically creates 3-tier chunks (Big Document -> Medium Section -> Small Micro-Chunk) and extracts GraphRAG code symbols.
 - **Auto Vector Embeddings**: Dense ONNX vectors (`multilingual-e5-small`) are automatically computed and indexed in SQLite.
+- **CRITICAL Schema Usage & Parameters**:
+  - `content` (required, string): Must be the **actual raw text or markdown content** of the document, NOT just a file path!
+  - `type` (optional, enum: `"text"`, `"file"`, `"url"`): Set to `"text"` (default) or `"file"`.
+  - `path` (optional, string): Provide the absolute file path (e.g. `f:\projects\plugins\memory\README.md`).
+  - `title` (optional, string): Provide document title (e.g. `README.md`).
+  - **Correct Example**: `ingest_document(content: "<full text content>", path: "f:/path/to/file.md", title: "file.md", type: "file")`
+  - ❌ **Common Error**: `ingest_document(content: "f:/path/to/file.md")` — this causes validation failures because `content` is missing the text content.
+
+- **CLI/Script Execution Note**: When writing batch node scripts to call `ingestDocument`, remember that `@lotargo/memory_plugin` uses ES Modules (`"type": "module"`). Use `import` syntax instead of `require()`.
 
 ### Hybrid Retrieval (`query_knowledge_base`)
 Use this tool BEFORE answering deep architectural or technical questions when indexed documents exist.
