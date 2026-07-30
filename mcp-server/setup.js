@@ -32,13 +32,19 @@ export async function runSetup() {
         } catch (e) {}
       }
       if (!Array.isArray(config.plugin)) config.plugin = [];
+      // Clean up legacy / incorrect plugin entry names
+      const obsoleteNames = ["opencode-memory-plugin", "memory_plugin", "memory-plugin"];
+      config.plugin = config.plugin.filter((p) => !obsoleteNames.includes(p));
       if (!config.plugin.includes("@lotargo/memory_plugin")) {
         config.plugin.push("@lotargo/memory_plugin");
-        await writeFile(opencodeConfigPath, JSON.stringify(config, null, 2));
-        console.log("  [OK] OpenCode: added plugin to ~/.config/opencode/opencode.json");
-      } else {
-        console.log("  [INFO] OpenCode: already configured");
       }
+      // Clean up legacy mcp-helper.js standalone file plugin if present
+      const legacyPluginFile = join(opencodeDir, "plugins", "mcp-helper.js");
+      if (existsSync(legacyPluginFile)) {
+        try { const { unlink } = await import("fs/promises"); await unlink(legacyPluginFile); } catch (e) {}
+      }
+      await writeFile(opencodeConfigPath, JSON.stringify(config, null, 2));
+      console.log("  [OK] OpenCode: configured plugin in ~/.config/opencode/opencode.json");
       configuredCount++;
     } catch (err) {
       console.log("  [SKIP] OpenCode setup skipped:", err.message);

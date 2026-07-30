@@ -1,0 +1,59 @@
+import fs from "fs";
+import path from "path";
+import { MEMORY_DIR, ensureDir } from "../memory.js";
+
+const CONFIG_FILE = path.join(MEMORY_DIR, "config.json");
+
+export const DEFAULT_CONFIG = {
+  fusionAlgorithm: "rsf", // "rsf" | "rrf" | "semantic_only" | "lexical_only"
+  alpha: 0.5,             // Weight for vector similarity in RSF [0.0 - 1.0] (50/50 balance)
+  embeddingModel: "Xenova/multilingual-e5-small",
+  rerankerModel: "none",   // "none" | "Xenova/bge-reranker-base" | custom HF model
+  rerankerEnabled: false,
+};
+
+let cachedConfig = null;
+
+export function getConfig() {
+  if (cachedConfig) {
+    return { ...cachedConfig };
+  }
+
+  ensureDir();
+
+  if (fs.existsSync(CONFIG_FILE)) {
+    try {
+      const raw = fs.readFileSync(CONFIG_FILE, "utf-8");
+      const parsed = JSON.parse(raw);
+      cachedConfig = { ...DEFAULT_CONFIG, ...parsed };
+      return { ...cachedConfig };
+    } catch (err) {
+      console.warn("Failed to read config file, falling back to defaults:", err.message);
+    }
+  }
+
+  cachedConfig = { ...DEFAULT_CONFIG };
+  saveConfig(cachedConfig);
+  return { ...cachedConfig };
+}
+
+export function saveConfig(newConfig) {
+  ensureDir();
+  cachedConfig = { ...DEFAULT_CONFIG, ...newConfig };
+  try {
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(cachedConfig, null, 2), "utf-8");
+  } catch (err) {
+    console.error("Failed to write config file:", err.message);
+  }
+  return { ...cachedConfig };
+}
+
+export function updateConfig(partialConfig) {
+  const current = getConfig();
+  const updated = { ...current, ...partialConfig };
+  return saveConfig(updated);
+}
+
+export function resetConfig() {
+  return saveConfig(DEFAULT_CONFIG);
+}

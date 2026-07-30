@@ -3,17 +3,14 @@
   "version": "1.0.3",
   "description": "Persistent memory agent for coding AI tools — remembers user preferences and project context across sessions. Works with Antigravity, OpenCode, Claude Code, and Codex.",
   "type": "module",
-  "main": ".opencode/plugins/memory-plugin.js",
+  "main": "opencode-plugin/index.js",
   "bin": {
     "memory_plugin": "mcp-server/index.js",
-    "memory-agent": "mcp-server/index.js"
+    "memory-agent": "mcp-server/index.js",
+    "memory-cli": "mcp-server/cli.js"
   },
   "files": [
-    ".opencode",
-    ".claude-plugin",
-    ".codex-plugin",
-    ".gemini-plugin",
-    ".antigravity-plugin",
+    "opencode-plugin",
     "mcp-server",
     "skills"
   ],
