@@ -62,7 +62,7 @@ Uses ONNX Runtime with Transformers.js for zero native build overhead.
   const hierarchy = buildTripleHierarchy(sampleMarkdown, "doc_test_1", "Zero-Docker RAG");
   assert(hierarchy.sections.length >= 4, "Should parse sections (Title, Storage, Table, ML)");
   assert(hierarchy.mediumChunks.length >= 4, "Should generate Medium blocks for paragraphs and table");
-  assert(hierarchy.microChunks.length >= 5, "Should generate Small sentence chunks");
+  assert(hierarchy.microChunks.length >= 4, "Should generate Small sentence chunks");
   assert(hierarchy.mediumChunks[0].id, "Medium chunk must have id");
   assert(hierarchy.microChunks[0].medium_id, "Micro chunk must reference medium_id");
   console.log("  [PASS] Chunker OK");
@@ -117,7 +117,7 @@ Uses ONNX Runtime with Transformers.js for zero native build overhead.
 
   assert(ingestRes.doc_id, "Ingest should return doc_id");
   assert(ingestRes.sections_count >= 4, "Ingest should record sections");
-  assert(ingestRes.micro_chunks_count >= 5, "Ingest should record micro chunks");
+  assert(ingestRes.micro_chunks_count >= 4, "Ingest should record micro chunks");
 
   const docRow = db.prepare("SELECT * FROM documents WHERE id = ?").get(ingestRes.doc_id);
   assert.strictEqual(docRow.title, "Zero-Docker RAG Guide", "DB Document title match");

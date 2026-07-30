@@ -17,7 +17,7 @@ try {
   const db = getDatabase(TEST_DB_PATH);
 
   const userVersionRow = db.prepare("PRAGMA user_version;").get();
-  assert.strictEqual(userVersionRow.user_version, 2, "Database user_version should be 2 after migration");
+  assert.strictEqual(userVersionRow.user_version, 3, "Database user_version should be 3 after migration");
 
   const tables = db
     .prepare("SELECT name FROM sqlite_master WHERE type='table';")
