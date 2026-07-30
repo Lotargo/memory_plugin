@@ -1,13 +1,18 @@
 import os from "node:os";
+import fs from "node:fs";
+import path from "node:path";
 import { MODELS_DIR } from "../db/database.js";
 
 let extractorInstance = null;
 let loadedModelName = null;
+let loadedDevice = null;
 
 let rerankerInstance = null;
 let loadedRerankerName = null;
 
 import { getConfig } from "../config/config_manager.js";
+import { GpuMonitor, ExecutionTracer } from "./gpu_monitor.js";
+export { GpuMonitor, ExecutionTracer };
 
 function getOptimalThreadCount() {
   const userSetting = getConfig().onnxThreads;
@@ -21,20 +26,24 @@ function getOptimalThreadCount() {
 export async function getExtractor(modelName = null, progressCallback = null) {
   const targetModel = modelName || getConfig().embeddingModel || "Xenova/multilingual-e5-small";
 
-  if (extractorInstance && loadedModelName === targetModel) {
+  // Resolve target device BEFORE cache check so comparison works correctly
+  const rawDevice = (getConfig().executionDevice || "cpu").toLowerCase();
+  let targetDevice = "cpu";
+  if (rawDevice === "webgpu" || rawDevice === "gpu" || rawDevice === "dml" || rawDevice === "cuda") {
+    if (process.platform === "win32") {
+      targetDevice = "dml";
+    } else if (process.platform === "linux") {
+      targetDevice = "cuda";
+    } else {
+      targetDevice = "webgpu";
+    }
+  }
+
+  if (extractorInstance && loadedModelName === targetModel && loadedDevice === targetDevice) {
     return extractorInstance;
   }
 
-  const { pipeline, env } = await import("@xenova/transformers");
-
-  // Fix ONNX Runtime Node.js WASM execution provider warning
-  try {
-    const { executionProviders } = await import("@xenova/transformers/src/backends/onnx.js");
-    const wasmIdx = executionProviders.indexOf("wasm");
-    if (wasmIdx !== -1) {
-      executionProviders.splice(wasmIdx, 1);
-    }
-  } catch {}
+  const { pipeline, env } = await import("@huggingface/transformers");
 
   env.cacheDir = MODELS_DIR;
   env.allowLocalModels = true;
@@ -48,12 +57,26 @@ export async function getExtractor(modelName = null, progressCallback = null) {
     env.backends.onnx.wasm.numThreads = numThreads;
   }
 
+  const sessionOptions = {
+    graphOptimizationLevel: "all",
+    executionMode: targetDevice !== "cpu" ? "parallel" : "sequential",
+  };
+
+  if (targetDevice !== "cpu") {
+    sessionOptions.enableCpuMemArena = false;
+    sessionOptions.enableMemPattern = false;
+    if (targetDevice === "dml") {
+      sessionOptions.executionProviders = [{ name: "dml", device_id: 0 }];
+    } else if (targetDevice === "cuda") {
+      sessionOptions.executionProviders = [{ name: "cuda", device_id: 0 }];
+    }
+  }
+
   const pipelineOpts = {
     quantized: true,
-    session_options: {
-      graphOptimizationLevel: "all",
-      executionMode: "sequential",
-    },
+    dtype: "q8",
+    device: targetDevice,
+    session_options: sessionOptions,
   };
   if (progressCallback) {
     pipelineOpts.progress_callback = progressCallback;
@@ -62,17 +85,38 @@ export async function getExtractor(modelName = null, progressCallback = null) {
   try {
     extractorInstance = await pipeline("feature-extraction", targetModel, pipelineOpts);
     loadedModelName = targetModel;
+    loadedDevice = targetDevice;
+
+    if (targetDevice !== "cpu") {
+      try {
+        await extractorInstance("GPU VRAM Warmup Init", { pooling: "mean", normalize: true });
+      } catch {}
+    }
   } catch (err) {
-    console.warn(`HuggingFace model load failed for ${targetModel}: ${err.message}. Falling back to default Xenova/multilingual-e5-small...`);
-    if (targetModel !== "Xenova/multilingual-e5-small") {
+    if (targetDevice !== "cpu") {
+      console.warn(`[GPU Engine] GPU initialization (${targetDevice}) failed: ${err.message}. Falling back to CPU...`);
+      pipelineOpts.device = "cpu";
+      pipelineOpts.session_options.executionMode = "sequential";
+      extractorInstance = await pipeline("feature-extraction", targetModel, pipelineOpts);
+      loadedModelName = targetModel;
+      loadedDevice = "cpu";
+    } else if (targetModel !== "Xenova/multilingual-e5-small") {
+      console.warn(`HuggingFace model load failed for ${targetModel}: ${err.message}. Falling back to default Xenova/multilingual-e5-small...`);
       extractorInstance = await pipeline("feature-extraction", "Xenova/multilingual-e5-small", pipelineOpts);
       loadedModelName = "Xenova/multilingual-e5-small";
+      loadedDevice = targetDevice;
     } else {
       throw err;
     }
   }
 
   return extractorInstance;
+}
+
+export function resetExtractor() {
+  extractorInstance = null;
+  loadedModelName = null;
+  loadedDevice = null;
 }
 
 export function formatInputText(text, isQuery = false, modelName = null, instruction = null) {
@@ -85,6 +129,11 @@ export function formatInputText(text, isQuery = false, modelName = null, instruc
     cleanText = cleanText.substring(9).trim();
   } else if (cleanText.startsWith("query: ")) {
     cleanText = cleanText.substring(7).trim();
+  }
+
+  // Safety trim long text to prevent ONNX tensor padding explosions (>4000 chars ~1000 tokens)
+  if (cleanText.length > 4000) {
+    cleanText = cleanText.substring(0, 4000);
   }
 
   // 1. E5 Model Family (multilingual-e5-small, multilingual-e5-large, etc.)
@@ -119,39 +168,127 @@ export async function embedText(text, isQuery = false, modelName = null, progres
   const extractor = await getExtractor(targetModel, progressCallback);
   const formattedText = formatInputText(text, isQuery, targetModel, instruction);
 
+  const isBgeM3 = targetModel.toLowerCase().includes("bge-m3");
+  const maxLen = isBgeM3 ? 1024 : 512;
+
   const output = await extractor(formattedText, {
     pooling: "mean",
     normalize: true,
+    truncation: true,
+    max_length: maxLen,
   });
 
-  return new Float32Array(output.data);
+  const result = output.data.slice();
+  if (typeof output.dispose === 'function') {
+    output.dispose();
+  }
+  return result;
 }
 
-export async function embedBatch(texts, isQuery = false, modelName = null, progressCallback = null, instruction = null) {
+export async function embedBatch(texts, isQuery = false, modelName = null, progressCallback = null, instruction = null, traceOptions = {}) {
   if (!texts || texts.length === 0) return [];
   const targetModel = modelName || getConfig().embeddingModel || "Xenova/multilingual-e5-small";
-  const extractor = await getExtractor(targetModel, progressCallback);
+  
+  const rawDevice = (getConfig().executionDevice || "cpu").toLowerCase();
+  const isGpu = rawDevice === "webgpu" || rawDevice === "gpu" || rawDevice === "dml" || rawDevice === "cuda";
+  
+  const tracer = traceOptions.enableTrace ? new ExecutionTracer(`Embed Batch (${texts.length} items)`) : null;
+  const monitor = (isGpu && traceOptions.enableMonitor) ? new GpuMonitor(50) : null;
+  if (monitor) monitor.start();
 
-  const formattedTexts = texts.map((text) => formatInputText(text, isQuery, targetModel, instruction));
+  try {
+    if (tracer) tracer.startStage("Model Initialization & Session", "CPU");
+    const extractor = await getExtractor(targetModel, progressCallback);
 
-  const output = await extractor(formattedTexts, {
-    pooling: "mean",
-    normalize: true,
-  });
+    if (tracer) tracer.startStage("Text Formatting & Tokenization Preprocessing", "CPU");
+    const formattedTexts = texts.map((text) => formatInputText(text, isQuery, targetModel, instruction));
 
-  const dims = output.dims;
-  const batchSize = dims[0];
-  const vectorDim = dims[dims.length - 1];
-  const flatData = output.data;
+    const userBatch = getConfig().batchSize || 12;
+    const isBgeM3 = targetModel.toLowerCase().includes("bge-m3");
+    const isLarge = isBgeM3 || targetModel.toLowerCase().includes("large");
 
-  const results = [];
-  for (let i = 0; i < batchSize; i++) {
-    const start = i * vectorDim;
-    const end = start + vectorDim;
-    results.push(new Float32Array(flatData.subarray(start, end)));
+    // DYNAMIC ATTENTION BUDGET SAMPLER (PyTorch-style Token Budgeting):
+    // Attention memory scales quadratically O(seq_len^2).
+    // Target max GPU attention budget per ONNX pass: ~2,000,000 token-squared units (~1.5 GB VRAM peak).
+    // Short texts (50 tokens) dynamically scale UP to full userBatch (32-64 items per pass) for max GPU compute.
+    // Long texts (1000 tokens) dynamically scale DOWN to 2-4 items per pass, keeping VRAM strictly <1.5 GB.
+    const configuredBudget = getConfig().gpuAttentionBudget || 2000000;
+    const maxAttentionBudget = isGpu
+      ? (isLarge ? Math.min(configuredBudget, 2000000) : configuredBudget)
+      : 32000000;
+
+    const CHAR_TO_TOKEN = 3.5;
+    const subBatches = [];
+    let currentSubBatch = [];
+    let currentSubBatchCost = 0;
+
+    for (const text of formattedTexts) {
+      const estimatedTokens = Math.max(1, Math.ceil(text.length / CHAR_TO_TOKEN));
+      const cost = estimatedTokens * estimatedTokens;
+
+      if (
+        currentSubBatch.length > 0 &&
+        (currentSubBatch.length >= userBatch || currentSubBatchCost + cost > maxAttentionBudget)
+      ) {
+        subBatches.push(currentSubBatch);
+        currentSubBatch = [];
+        currentSubBatchCost = 0;
+      }
+
+      currentSubBatch.push(text);
+      currentSubBatchCost += cost;
+    }
+
+    if (currentSubBatch.length > 0) {
+      subBatches.push(currentSubBatch);
+    }
+
+    if (tracer) tracer.startStage("ONNX Model Tensor Execution", isGpu ? "GPU" : "CPU");
+
+    const allResults = [];
+    const maxLen = isBgeM3 ? 1024 : 512;
+
+    for (const batchTexts of subBatches) {
+      const output = await extractor(batchTexts, {
+        pooling: "mean",
+        normalize: true,
+        truncation: true,
+        padding: isGpu ? "max_length" : true,
+        max_length: maxLen,
+      });
+
+      const dims = output.dims;
+      const batchSize = dims[0];
+      const vectorDim = dims[dims.length - 1];
+      const rawData = output.data;
+
+      for (let i = 0; i < batchSize; i++) {
+        const byteOffset = i * vectorDim;
+        allResults.push(rawData.slice(byteOffset, byteOffset + vectorDim));
+      }
+
+      if (typeof output.dispose === 'function') {
+        output.dispose();
+      }
+
+      if (isGpu && global.gc) {
+        global.gc({ type: 'minor' });
+      }
+    }
+
+    if (tracer) tracer.endStage();
+
+    const gpuStats = monitor ? monitor.stop() : null;
+
+    if (tracer && traceOptions.verboseTrace) {
+      tracer.printTraceReport(gpuStats);
+    }
+
+    return allResults;
+  } catch (err) {
+    if (monitor) monitor.stop();
+    throw err;
   }
-
-  return results;
 }
 
 export async function getReranker(modelName = "Xenova/bge-reranker-base", progressCallback = null) {
@@ -159,7 +296,7 @@ export async function getReranker(modelName = "Xenova/bge-reranker-base", progre
     return rerankerInstance;
   }
 
-  const { pipeline, env } = await import("@xenova/transformers");
+  const { pipeline, env } = await import("@huggingface/transformers");
   env.cacheDir = MODELS_DIR;
   env.allowLocalModels = true;
   env.allowRemoteModels = true;
@@ -167,7 +304,32 @@ export async function getReranker(modelName = "Xenova/bge-reranker-base", progre
   env.remotePathTemplate = "{model}/resolve/{revision}/";
   env.sharp = false;
 
-  const pipelineOpts = { quantized: true };
+  const rawDevice = (getConfig().executionDevice || "cpu").toLowerCase();
+  let targetDevice = "cpu";
+  if (rawDevice === "webgpu" || rawDevice === "gpu" || rawDevice === "dml" || rawDevice === "cuda") {
+    targetDevice = process.platform === "win32" ? "dml" : (process.platform === "linux" ? "cuda" : "webgpu");
+  }
+
+  const sessionOptions = {
+    graphOptimizationLevel: "all",
+  };
+
+  if (targetDevice !== "cpu") {
+    sessionOptions.enableCpuMemArena = true;
+    sessionOptions.enableMemPattern = true;
+    if (targetDevice === "dml") {
+      sessionOptions.executionProviders = [{ name: "dml", device_id: 0 }];
+    } else if (targetDevice === "cuda") {
+      sessionOptions.executionProviders = [{ name: "cuda", device_id: 0 }];
+    }
+  }
+
+  const pipelineOpts = {
+    quantized: true,
+    dtype: "q8",
+    device: targetDevice,
+    session_options: sessionOptions,
+  };
   if (progressCallback) {
     pipelineOpts.progress_callback = progressCallback;
   }
@@ -236,4 +398,98 @@ export function cosineSimilarity(vecA, vecB) {
   }
   if (normA === 0 || normB === 0) return 0;
   return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+export function getModelStorageInfo(modelName) {
+  if (!modelName || modelName === "none") return { status: "not_downloaded", sizeMB: "0.00", bytes: 0 };
+  const parts = modelName.split("/");
+  const modelDir = path.join(MODELS_DIR, ...parts);
+
+  if (!fs.existsSync(modelDir)) {
+    return { status: "not_downloaded", sizeMB: "0.00", bytes: 0, dir: modelDir };
+  }
+
+  let totalBytes = 0;
+  let hasConfig = false;
+  let hasTokenizer = false;
+  let hasOnnxWeights = false;
+
+  function scan(dir) {
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          scan(fullPath);
+        } else if (entry.isFile()) {
+          const stat = fs.statSync(fullPath);
+          totalBytes += stat.size;
+          if (entry.name === "config.json") hasConfig = true;
+          if (entry.name.includes("tokenizer")) hasTokenizer = true;
+          // ONNX weights must be substantial (>5MB) or external data (.onnx_data)
+          if ((entry.name.endsWith(".onnx") || entry.name.endsWith(".onnx_data")) && stat.size > 5 * 1024 * 1024) {
+            hasOnnxWeights = true;
+          }
+        }
+      }
+    } catch {}
+  }
+
+  scan(modelDir);
+
+  const sizeMB = (totalBytes / (1024 * 1024)).toFixed(2);
+
+  if (totalBytes === 0) {
+    return { status: "not_downloaded", sizeMB: "0.00", bytes: 0, dir: modelDir };
+  }
+
+  // Model is ready only if it has config, tokenizer, ONNX weights >5MB, and total folder size >10MB
+  if (hasConfig && hasTokenizer && hasOnnxWeights && totalBytes > 10 * 1024 * 1024) {
+    return { status: "downloaded", sizeMB, bytes: totalBytes, dir: modelDir };
+  }
+
+  return { status: "partial", sizeMB, bytes: totalBytes, dir: modelDir };
+}
+
+export function deleteModelCache(modelName) {
+  const info = getModelStorageInfo(modelName);
+  if (info.status === "not_downloaded" || !fs.existsSync(info.dir)) {
+    return { deleted: false, reason: "Model directory not found" };
+  }
+
+  try {
+    fs.rmSync(info.dir, { recursive: true, force: true });
+    const parentDir = path.dirname(info.dir);
+    if (fs.existsSync(parentDir) && fs.readdirSync(parentDir).length === 0) {
+      fs.rmdirSync(parentDir);
+    }
+    resetExtractor();
+    return { deleted: true, modelName, freedMB: info.sizeMB };
+  } catch (err) {
+    return { deleted: false, reason: err.message };
+  }
+}
+
+export function listAllCachedModels() {
+  const result = [];
+  if (!fs.existsSync(MODELS_DIR)) return result;
+
+  try {
+    const orgs = fs.readdirSync(MODELS_DIR, { withFileTypes: true });
+    for (const org of orgs) {
+      if (org.isDirectory()) {
+        const orgDir = path.join(MODELS_DIR, org.name);
+        const models = fs.readdirSync(orgDir, { withFileTypes: true });
+        for (const model of models) {
+          if (model.isDirectory()) {
+            const modelName = `${org.name}/${model.name}`;
+            const info = getModelStorageInfo(modelName);
+            result.push({ modelName, ...info });
+          }
+        }
+      }
+    }
+  } catch {}
+
+  return result;
 }

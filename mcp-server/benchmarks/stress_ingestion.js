@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { rmSync, existsSync } from "node:fs";
 import { getDatabase } from "../db/database.js";
 import { ingestDocument } from "../ingest/pipeline.js";
-import { embedText } from "../ml/model_manager.js";
+import { embedText, resetExtractor } from "../ml/model_manager.js";
 import { CORPUS_DIR, fetchRealCorpus } from "./fetch_real_corpus.js";
 
 // RSS is too volatile to measure incremental ingestion memory because V8's RSS
@@ -94,6 +94,8 @@ export async function runIngestionBenchmark(options = {}) {
     totalSections += ingestRes.sectionsCount;
     totalMicroChunks += ingestRes.microChunksCount;
     if (ingestRes.deduplicated) deduplicatedCount++;
+
+    if (global.gc) global.gc();
 
     // Synchronous peak sample: captures peak after each doc ingestion completes,
     // complementing the 25ms interval poll (which can miss transient peaks).

@@ -88,6 +88,20 @@ Query categories include:
 
 ---
 
+### 5.3 Heavy Multi-Feature Model Benchmark: Xenova/bge-m3
+*Model: Xenova/bge-m3 (1024-dim, 8192 context window, INT8/q8 ONNX), DirectML GPU & AVX2 execution, 30 real technical documents, 21 evaluation queries.*
+
+| Retrieval Strategy | MRR@5 | Recall@5 | NDCG@5 | Note |
+|---|:---:|:---:|:---:|---|
+| BM25 Lexical Search Only | 0.6706 | 76.20% | 0.6934 | Baseline FTS5 |
+| Dense ONNX Vector (BGE-M3) | 0.4476 | 57.10% | 0.4779 | Single dense vector pass |
+| Hybrid RRF ($k=60$) | 0.7183 | 81.00% | 0.7410 | Rank-based fusion |
+| **Hybrid RSF ($\alpha=0.5$)** | **0.7540** | **81.00%** | **0.7681** | **Score-based fusion (Winner)** |
+
+*Winner by MRR: Hybrid RSF (Score)*
+
+---
+
 ## 6. Category Performance Breakdown
 
 | Category | Query Count (N) | BM25 MRR@5 | Dense Vector MRR@5 | Hybrid RSF MRR@5 | RSF Recall@5 |
@@ -100,5 +114,6 @@ Query categories include:
 
 ## 7. Conclusions
 
-1. **Model-Aware Prefixing & Protocol Handling**: Enforcing precise asymmetric prefixing (`passage: ` for indexing, `query: ` for search in standard E5 models, prompt prefixes for BGE, and dynamic `Instruct: ` blocks specifically for `*-instruct` models) eliminates task drift, raising dense vector MRR@5 from 0.6048 to 0.8333.
-2. **Hybrid RSF Convergence**: Relative Score Fusion ($\alpha=0.5$) achieves **0.9206 MRR@5** and **95.24% Recall@5** across the full 32-document technical repository benchmark.
+1. **ONNX JS & DirectML Optimization**: Successfully eliminated ONNX VRAM memory leaks and DirectX 12 buffer overflows on Windows via Dynamic PyTorch-style Attention Budgeting ($O(\text{seq\_len}^2)$) and fixed tensor shape padding (`padding: "max_length"`).
+2. **Model-Aware Prefixing & Protocol Handling**: Enforcing precise asymmetric prefixing (`passage: ` for indexing, `query: ` for search in standard E5 models, prompt prefixes for BGE, and dynamic `Instruct: ` blocks specifically for `*-instruct` models) eliminates task drift, raising dense vector MRR@5 from 0.6048 to 0.8333.
+3. **Hybrid RSF Convergence**: Relative Score Fusion ($\alpha=0.5$) achieves **0.9206 MRR@5** (e5-small) and **0.7540 MRR@5** (bge-m3) with **81.0%–95.2% Recall@5** across full technical repository benchmarks.

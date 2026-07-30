@@ -10,15 +10,17 @@ export const DEFAULT_CONFIG = {
   embeddingModel: "Xenova/multilingual-e5-small",
   rerankerModel: "none",   // "none" | "Xenova/bge-reranker-base" | custom HF model
   rerankerEnabled: false,
-  batchSize: 12,           // Ingestion vector batch size [1 - 32] (default 12)
+  batchSize: 12,           // Ingestion vector batch size [1 - 256] (default 12)
+  gpuAttentionBudget: 2000000, // GPU micro-batch attention budget [1M - 16M] (default 2.0M ~1.5GB VRAM)
   onnxThreads: 0,          // ONNX WASM threads: 0 = auto-detect CPU cores, or 1-16
+  executionDevice: "cpu",  // "cpu" | "webgpu"
 };
 
 let cachedConfig = null;
 
 export function getConfig() {
   if (cachedConfig) {
-    return { ...cachedConfig };
+    return cachedConfig;
   }
 
   ensureDir();
@@ -27,27 +29,27 @@ export function getConfig() {
     try {
       const raw = fs.readFileSync(CONFIG_FILE, "utf-8");
       const parsed = JSON.parse(raw);
-      cachedConfig = { ...DEFAULT_CONFIG, ...parsed };
-      return { ...cachedConfig };
+      cachedConfig = Object.freeze({ ...DEFAULT_CONFIG, ...parsed });
+      return cachedConfig;
     } catch (err) {
       console.warn("Failed to read config file, falling back to defaults:", err.message);
     }
   }
 
-  cachedConfig = { ...DEFAULT_CONFIG };
+  cachedConfig = Object.freeze({ ...DEFAULT_CONFIG });
   saveConfig(cachedConfig);
-  return { ...cachedConfig };
+  return cachedConfig;
 }
 
 export function saveConfig(newConfig) {
   ensureDir();
-  cachedConfig = { ...DEFAULT_CONFIG, ...newConfig };
+  cachedConfig = Object.freeze({ ...DEFAULT_CONFIG, ...newConfig });
   try {
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(cachedConfig, null, 2), "utf-8");
   } catch (err) {
     console.error("Failed to write config file:", err.message);
   }
-  return { ...cachedConfig };
+  return cachedConfig;
 }
 
 export function updateConfig(partialConfig) {

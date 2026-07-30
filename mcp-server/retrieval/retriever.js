@@ -1,5 +1,5 @@
 import { getDatabase } from "../db/database.js";
-import { embedText, bufferToVector, cosineSimilarity, rerankHits } from "../ml/model_manager.js";
+import { embedText, cosineSimilarity, rerankHits } from "../ml/model_manager.js";
 import { getRelatedSymbols } from "../graph/graph_extractor.js";
 import { getConfig } from "../config/config_manager.js";
 
@@ -40,17 +40,22 @@ export function bm25Search(db, query, limit = 30) {
 export function vectorSearch(db, queryVector, limit = 30, minSim = 0.25) {
   if (!queryVector || queryVector.length === 0) return [];
 
+  const vectorDim = queryVector.length;
+  const tempBuf = new ArrayBuffer(vectorDim * 4);
+  const tempView = new Uint8Array(tempBuf);
+  const tempVec = new Float32Array(tempBuf);
+
   const stmt = db.prepare(`
     SELECT m.id, m.section_id, m.doc_id, m.content, m.vector, s.breadcrumbs
     FROM micro_chunks m
     JOIN sections s ON m.section_id = s.id;
   `);
-  const rows = stmt.all();
 
   const scored = [];
-  for (const r of rows) {
-    const vec = bufferToVector(r.vector);
-    const sim = cosineSimilarity(queryVector, vec);
+  for (const r of stmt.iterate()) {
+    tempView.set(r.vector.subarray(0, vectorDim * 4));
+
+    const sim = cosineSimilarity(queryVector, tempVec);
     if (!isNaN(sim) && sim >= minSim) {
       scored.push({
         id: r.id,

@@ -8,20 +8,28 @@ import { deleteDocument } from "./ingest/pipeline.js";
 import { readMemoryRaw, readMemory, writeMemory, GLOBAL_KEY, projectName } from "./memory.js";
 import { getCorpusCacheSize, clearCorpusCache } from "./benchmarks/fetch_real_corpus.js";
 import { SMOKE_DOC_IDS } from "./benchmarks/quality_evaluator.js";
+import { getModelStorageInfo, deleteModelCache, listAllCachedModels } from "./ml/model_manager.js";
 
 const EMBEDDING_PRESETS = [
   "Xenova/multilingual-e5-small",
+  "Xenova/multilingual-e5-base",
   "Xenova/multilingual-e5-large",
+  "Xenova/bge-small-en-v1.5",
+  "Xenova/bge-base-en-v1.5",
+  "Xenova/bge-large-en-v1.5",
   "Xenova/bge-m3",
   "Xenova/all-MiniLM-L6-v2",
-  "Xenova/bge-small-en-v1.5",
+  "Xenova/all-mpnet-base-v2",
   "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+  "Xenova/gte-small",
+  "Xenova/gte-large",
 ];
 
 const RERANKER_PRESETS = [
   "none",
   "Xenova/bge-reranker-base",
-  "Xenova/bge-reranker-small",
+  "Xenova/bge-reranker-large",
+  "Xenova/ms-marco-MiniLM-L-6-v2",
   "Xenova/ms-marco-TinyBERT-L-2-v2",
 ];
 
@@ -650,7 +658,7 @@ export async function runCli() {
             label: "Embedding Model",
             badge: config.embeddingModel.split("/").pop(),
             value: "embedding",
-            info: `Model: ${config.embeddingModel}. ONNX Feature Extraction via @xenova/transformers`,
+            info: `Model: ${config.embeddingModel}. ONNX Feature Extraction via @huggingface/transformers`,
           },
           {
             label: "Reranker Model",
@@ -665,10 +673,24 @@ export async function runCli() {
             info: `Ingestion batch size: ${config.batchSize || 12} micro-chunks per ONNX pass`,
           },
           {
+            label: "GPU Attention Budget",
+            badge: `${((config.gpuAttentionBudget || 2000000) / 1000000).toFixed(1)}M Units`,
+            value: "gpu_budget",
+            info: `Micro-batch tensor budget: ${((config.gpuAttentionBudget || 2000000) / 1000000).toFixed(1)}M quadratic units (controls max peak VRAM usage on GPU)`,
+          },
+          {
             label: "CPU WASM Threads",
             badge: config.onnxThreads > 0 ? `${config.onnxThreads} Threads` : "AUTO (CPU Cores)",
             value: "onnx_threads",
             info: config.onnxThreads > 0 ? `ONNX execution threads manually set to ${config.onnxThreads}` : "Auto-detect optimal physical CPU threads",
+          },
+          {
+            label: "Execution Hardware",
+            badge: (config.executionDevice || "cpu").toUpperCase() === "WEBGPU" || (config.executionDevice || "cpu").toUpperCase() === "GPU" ? "\x1b[31mGPU (EXPERIMENTAL)\x1b[0m" : "CPU (AVX2)",
+            value: "execution_device",
+            info: config.executionDevice === "webgpu" || config.executionDevice === "gpu"
+              ? "⚠️ EXPERIMENTAL: ONNX DirectML GPU execution (high VRAM/padding overhead, CPU AVX2 recommended)"
+              : "CPU inference via AVX2 / WASM SIMD (Recommended for stability & speed)",
           },
         ],
       },
@@ -696,6 +718,11 @@ export async function runCli() {
             label: "[SNAPSHOT IMPORT] Import RAG Base Snapshot",
             value: "import_snapshot",
             info: "Import RAG database, vectors & blobs from a snapshot file (.json or .json.gz)",
+          },
+          {
+            label: "[MODELS] Manage & Purge ML Model Cache",
+            value: "manage_models",
+            info: "Inspect cached ONNX models on disk, check status (Ready / Partial / Not Downloaded) & delete models to free disk space",
           },
           {
             label: "[HARD RESET] Purge RAG Base & Blob Storage",
@@ -781,13 +808,19 @@ export async function runCli() {
         break;
       }
       case "embedding": {
-        const embItems = EMBEDDING_PRESETS.map((m) => ({ label: m, value: m, info: `Load ONNX model ${m}` }));
+        const embItems = EMBEDDING_PRESETS.map((m) => {
+          const info = getModelStorageInfo(m);
+          let badge = "NOT DOWNLOADED";
+          if (info.status === "downloaded") badge = `READY (${info.sizeMB} MB)`;
+          else if (info.status === "partial") badge = `INCOMPLETE (${info.sizeMB} MB)`;
+          return { label: m, badge, value: m, info: `Model: ${m} [${badge}]` };
+        });
         embItems.push({ label: "Custom HuggingFace Model...", value: "custom", info: "Specify custom HF model string" });
         const initialEmbIdx = Math.max(0, embItems.findIndex((i) => i.value === config.embeddingModel));
         
         const subRes = await selectSimpleMenu({
           title: "SELECT EMBEDDING MODEL",
-          subtitle: "Dense vector extraction model via @xenova/transformers",
+          subtitle: "Dense vector extraction model via @huggingface/transformers",
           items: embItems,
           initialIndex: initialEmbIdx,
         });
@@ -811,7 +844,13 @@ export async function runCli() {
       case "reranker": {
         const rkItems = [
           { label: "Disable Reranker", value: "none", info: "No cross-encoder re-ranking" },
-          ...RERANKER_PRESETS.filter((r) => r !== "none").map((r) => ({ label: r, value: r, info: `Load reranker ${r}` })),
+          ...RERANKER_PRESETS.filter((r) => r !== "none").map((r) => {
+            const info = getModelStorageInfo(r);
+            let badge = "NOT DOWNLOADED";
+            if (info.status === "downloaded") badge = `READY (${info.sizeMB} MB)`;
+            else if (info.status === "partial") badge = `INCOMPLETE (${info.sizeMB} MB)`;
+            return { label: r, badge, value: r, info: `Reranker: ${r} [${badge}]` };
+          }),
           { label: "Custom Reranker Model...", value: "custom", info: "Specify custom HuggingFace cross-encoder model" },
         ];
         const currentRk = config.rerankerEnabled ? config.rerankerModel : "none";
@@ -847,12 +886,15 @@ export async function runCli() {
       case "batch_size": {
         const batchItems = [
           { label: "Batch Size 1 (Single Item)", value: 1, info: "Process micro-chunks strictly 1 by 1" },
-          { label: "Batch Size 4", value: 4, info: "Small batch size" },
-          { label: "Batch Size 8", value: 8, info: "Medium batch size" },
-          { label: "Batch Size 12 (Default Recommended)", value: 12, info: "Optimal balance between throughput and tensor memory" },
+          { label: "Batch Size 4", value: 4, info: "Small CPU batch size" },
+          { label: "Batch Size 8 (CPU Sweet Spot)", value: 8, info: "Optimal for CPU L3 cache" },
+          { label: "Batch Size 12 (Default)", value: 12, info: "Balanced CPU throughput" },
           { label: "Batch Size 16", value: 16, info: "High throughput batch size" },
-          { label: "Batch Size 24", value: 24, info: "Large batch size" },
-          { label: "Batch Size 32", value: 32, info: "Maximum batch size" },
+          { label: "Batch Size 32 (Standard GPU)", value: 32, info: "Standard GPU batching" },
+          { label: "Batch Size 48 (High GPU)", value: 48, info: "High throughput GPU batching" },
+          { label: "Batch Size 64 (Ultra GPU)", value: 64, info: "Ultra-fast GPU parallel tensor execution" },
+          { label: "Batch Size 128 (Extreme GPU)", value: 128, info: "Massive GPU parallelism" },
+          { label: "Batch Size 256 (Max GPU)", value: 256, info: "Maximum batch capacity for dedicated VRAM" },
         ];
         const currentBatch = config.batchSize || 12;
         const initialBatchIdx = Math.max(0, batchItems.findIndex((i) => i.value === currentBatch));
@@ -864,6 +906,27 @@ export async function runCli() {
         });
         if (subRes.action === "select") {
           updateConfig({ batchSize: subRes.value });
+        }
+        break;
+      }
+      case "gpu_budget": {
+        const budgetItems = [
+          { label: "1.0M Units (Conservative ~0.8 GB VRAM)", value: 1000000, info: "Ultra-safe for 4GB-6GB GPUs or heavy background multitasking" },
+          { label: "2.0M Units (Balanced ~1.5 GB VRAM - Default)", value: 2000000, info: "Optimal balance between GPU throughput & safe VRAM ceiling" },
+          { label: "4.0M Units (Aggressive ~2.5 GB VRAM)", value: 4000000, info: "Higher GPU parallel compute for dedicated 8GB+ GPUs" },
+          { label: "8.0M Units (High Parallelism ~4.5 GB VRAM)", value: 8000000, info: "Maximum batching throughput for 12GB-16GB VRAM GPUs" },
+          { label: "16.0M Units (Extreme ~8.0 GB VRAM)", value: 16000000, info: "Uncapped micro-batching for 24GB+ VRAM workstation GPUs" },
+        ];
+        const currentBudget = config.gpuAttentionBudget || 2000000;
+        const initialIdx = Math.max(0, budgetItems.findIndex((i) => i.value === currentBudget));
+        const subRes = await selectSimpleMenu({
+          title: "SELECT GPU MICRO-BATCH ATTENTION BUDGET",
+          subtitle: "Controls dynamic O(seq_len^2) sub-batching to prevent VRAM overflow",
+          items: budgetItems,
+          initialIndex: initialIdx,
+        });
+        if (subRes.action === "select") {
+          updateConfig({ gpuAttentionBudget: subRes.value });
         }
         break;
       }
@@ -886,6 +949,32 @@ export async function runCli() {
         });
         if (subRes.action === "select") {
           updateConfig({ onnxThreads: subRes.value });
+        }
+        break;
+      }
+      case "execution_device": {
+        const devItems = [
+          {
+            label: "CPU (AVX2 / WASM SIMD - RECOMMENDED)",
+            value: "cpu",
+            info: "Standard multi-threaded CPU execution via ONNX native AVX2 (Optimal speed, stability & zero VRAM overhead)",
+          },
+          {
+            label: "\x1b[31m[EXPERIMENTAL]\x1b[0m GPU (DirectML / WebGPU)",
+            value: "webgpu",
+            info: "⚠️ EXPERIMENTAL: DirectML GPU tensor execution. High JS FFI & zero-padding overhead; CPU AVX2 is recommended for local Node.js.",
+          },
+        ];
+        const currentDev = config.executionDevice || "cpu";
+        const initialDevIdx = Math.max(0, devItems.findIndex((i) => i.value === currentDev));
+        const subRes = await selectSimpleMenu({
+          title: "SELECT EXECUTION HARDWARE DEVICE",
+          subtitle: "CPU AVX2 (Recommended) vs Experimental DirectML GPU Hardware Mode",
+          items: devItems,
+          initialIndex: initialDevIdx,
+        });
+        if (subRes.action === "select") {
+          updateConfig({ executionDevice: subRes.value });
         }
         break;
       }
@@ -1174,6 +1263,79 @@ export async function runCli() {
         }
         break;
       }
+      case "manage_models": {
+        let modelMgmtRunning = true;
+        while (modelMgmtRunning) {
+          const allPresets = [...new Set([...EMBEDDING_PRESETS, ...RERANKER_PRESETS.filter((r) => r !== "none")])];
+          const cachedOnDisk = listAllCachedModels();
+          const diskModelNames = cachedOnDisk.map((m) => m.modelName);
+
+          const combinedModels = [...new Set([...allPresets, ...diskModelNames])];
+
+          let totalDiskBytes = 0;
+          const modelItems = combinedModels.map((m) => {
+            const info = getModelStorageInfo(m);
+            totalDiskBytes += info.bytes;
+            let badge = "NOT DOWNLOADED";
+            if (info.status === "downloaded") badge = `READY (${info.sizeMB} MB)`;
+            else if (info.status === "partial") badge = `INCOMPLETE (${info.sizeMB} MB)`;
+
+            return {
+              label: m,
+              badge,
+              value: m,
+              info: info.status !== "not_downloaded"
+                ? `Size: ${info.sizeMB} MB | Select to inspect or delete from disk`
+                : "Model weights not present on local disk",
+            };
+          });
+
+          modelItems.push({ label: "< Back to Main Menu", value: "back" });
+
+          const totalDiskMB = (totalDiskBytes / (1024 * 1024)).toFixed(2);
+          const subRes = await selectSimpleMenu({
+            title: "ML MODEL CACHE MANAGEMENT",
+            subtitle: `Total ML Storage Used: ${totalDiskMB} MB | Models Tracked: ${combinedModels.length}`,
+            items: modelItems,
+          });
+
+          if (subRes.action === "back" || subRes.value === "back") {
+            modelMgmtRunning = false;
+            break;
+          }
+
+          const selectedModel = subRes.value;
+          const selectedInfo = getModelStorageInfo(selectedModel);
+
+          if (selectedInfo.status === "not_downloaded") {
+            console.clear();
+            console.log(`\n  [*] Model "${selectedModel}" is not downloaded on local disk.\n`);
+            await waitForEnter();
+            continue;
+          }
+
+          const actionRes = await selectSimpleMenu({
+            title: `MODEL ACTION: ${selectedModel}`,
+            subtitle: `Status: ${selectedInfo.status.toUpperCase()} | Size: ${selectedInfo.sizeMB} MB`,
+            items: [
+              { label: `[PURGE] Delete model weights from disk (${selectedInfo.sizeMB} MB)`, value: "delete", info: `Delete ${selectedInfo.dir} permanently` },
+              { label: "< Cancel / Back", value: "cancel" },
+            ],
+          });
+
+          if (actionRes.action === "select" && actionRes.value === "delete") {
+            const delRes = deleteModelCache(selectedModel);
+            console.clear();
+            if (delRes.deleted) {
+              console.log(`\n  \x1b[32m[OK] Model "${selectedModel}" deleted successfully (${delRes.freedMB} MB freed).\x1b[0m\n`);
+            } else {
+              console.error(`\n  \x1b[31m[ERROR] Failed to delete model: ${delRes.reason}\x1b[0m\n`);
+            }
+            await waitForEnter();
+          }
+        }
+        break;
+      }
       case "benchmark": {
         const modeRes = await selectSimpleMenu({
           title: "BENCHMARK MODE",
@@ -1188,6 +1350,16 @@ export async function runCli() {
               label: "Full Benchmark (~32s, 21 queries on all 28 docs)",
               value: "full",
               info: "Full 28-doc corpus, per-query answer token metrics, bootstrap CIs, grid sweep. Writes dev_docs/benchmark_results.md.",
+            },
+            {
+              label: "[GPU PROFILER] GPU Inference Bottleneck Trace",
+              value: "gpu_profile",
+              info: "Profile GPU DirectML tensor execution stages, kernel launch overhead & VRAM throughput.",
+            },
+            {
+              label: "[CPU vs GPU] Dual-Run Comparison Benchmark",
+              value: "cpu_vs_gpu",
+              info: "Run identical workload on CPU then GPU and compare throughput, latency & speedup.",
             },
             {
               label: "Graph & Notebook Linking Verification (Layer 1+3 Agent Graph Links)",
@@ -1264,6 +1436,56 @@ export async function runCli() {
           });
 
           console.log("\n  \x1b[32m[OK] AGENT-DRIVEN GRAPH LINKING VERIFIED SUCCESSFULLY!\x1b[0m\n");
+          await waitForEnter();
+          break;
+        }
+
+        if (modeRes.value === "gpu_profile") {
+          console.clear();
+          const line = "─".repeat(PANEL_WIDTH - 2);
+          console.log(`\x1b[36m╭${line}╮\x1b[0m`);
+          console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37mGPU PROFILER BENCHMARK\x1b[0m${" ".repeat(PANEL_WIDTH - 28)}\x1b[36m│\x1b[0m`);
+          console.log(`\x1b[36m│\x1b[0m  \x1b[90m${"Profiling DirectML tensor execution stages & VRAM throughput".padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
+          console.log(`\x1b[36m╰${line}╯\x1b[0m\n`);
+
+          const savedConfig = getConfig();
+          try {
+            const { runGpuProfileBenchmark } = await import("./benchmarks/gpu_profile_benchmark.js");
+            await runGpuProfileBenchmark({
+              modelName: savedConfig.embeddingModel,
+              batchSize: savedConfig.batchSize || 32,
+              totalItems: 512,
+            });
+          } catch (err) {
+            console.error(`  \x1b[31m[ERROR] GPU Profile benchmark failed: ${err.message}\x1b[0m\n`);
+          }
+          // Restore original device config
+          updateConfig({ executionDevice: savedConfig.executionDevice });
+          await waitForEnter();
+          break;
+        }
+
+        if (modeRes.value === "cpu_vs_gpu") {
+          console.clear();
+          const line = "─".repeat(PANEL_WIDTH - 2);
+          console.log(`\x1b[36m╭${line}╮\x1b[0m`);
+          console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37mCPU vs GPU COMPARISON BENCHMARK\x1b[0m${" ".repeat(PANEL_WIDTH - 37)}\x1b[36m│\x1b[0m`);
+          console.log(`\x1b[36m│\x1b[0m  \x1b[90m${"Identical workload on CPU then GPU — automatic device switching".padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
+          console.log(`\x1b[36m╰${line}╯\x1b[0m\n`);
+
+          const savedConfig = getConfig();
+          try {
+            const { runCpuVsGpuComparison } = await import("./benchmarks/gpu_profile_benchmark.js");
+            await runCpuVsGpuComparison({
+              modelName: savedConfig.embeddingModel,
+              batchSize: savedConfig.batchSize || 32,
+              totalItems: 512,
+            });
+          } catch (err) {
+            console.error(`  \x1b[31m[ERROR] CPU vs GPU benchmark failed: ${err.message}\x1b[0m\n`);
+          }
+          // Restore original device config
+          updateConfig({ executionDevice: savedConfig.executionDevice });
           await waitForEnter();
           break;
         }
@@ -1386,5 +1608,12 @@ export async function runCli() {
 }
 
 if (process.argv[1] && process.argv[1].includes("cli.js")) {
-  runCli().catch((err) => console.error("CLI error:", err));
+  if (typeof global.gc !== "function") {
+    const { spawn } = await import("node:child_process");
+    const args = ["--expose-gc", ...process.argv.slice(1)];
+    const child = spawn(process.execPath, args, { stdio: "inherit" });
+    child.on("exit", (code) => process.exit(code));
+  } else {
+    runCli().catch((err) => console.error("CLI error:", err));
+  }
 }
