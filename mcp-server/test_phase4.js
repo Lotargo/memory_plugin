@@ -56,9 +56,9 @@ Dynamic port scanning ensures zero conflicts on ports 8765-8785.
   });
 
   assert(existsSync(snapshotPath), "Snapshot file should exist on disk");
-  assert.strictEqual(exported.documents.length, 1, "Snapshot should contain 1 document");
-  assert.strictEqual(exported.sections.length, 2, "Snapshot should contain 2 sections");
-  assert(exported.blobs.length >= 1, "Snapshot should contain exported blobs");
+  assert.strictEqual(exported.snapshot.documents.length, 1, "Snapshot should contain 1 document");
+  assert.strictEqual(exported.snapshot.sections.length, 2, "Snapshot should contain 2 sections");
+  assert(exported.snapshot.blobs.length >= 1, "Snapshot should contain exported blobs");
 
   // Test restoration into fresh DB
   const FRESH_DB_PATH = join(TEST_DIR, "fresh_memory.sqlite");

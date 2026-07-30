@@ -31,6 +31,7 @@ export async function getExtractor(modelName = null, progressCallback = null) {
   env.allowRemoteModels = true;
   env.remoteHost = "https://huggingface.co";
   env.remotePathTemplate = "{model}/resolve/{revision}/";
+  env.sharp = false;
 
   const pipelineOpts = { quantized: true };
   if (progressCallback) {
@@ -112,6 +113,11 @@ export async function getReranker(modelName = "Xenova/bge-reranker-base", progre
 
   const { pipeline, env } = await import("@xenova/transformers");
   env.cacheDir = MODELS_DIR;
+  env.allowLocalModels = true;
+  env.allowRemoteModels = true;
+  env.remoteHost = "https://huggingface.co";
+  env.remotePathTemplate = "{model}/resolve/{revision}/";
+  env.sharp = false;
 
   const pipelineOpts = { quantized: true };
   if (progressCallback) {
