@@ -35,6 +35,27 @@ export function extractTitle(markdown, fallbackName = "Untitled Document") {
   return fallbackName;
 }
 
+export function stripMarkdownBadgesAndNoise(text) {
+  if (!text) return "";
+  let cleaned = text;
+
+  // 1. Remove markdown link-wrapped badges: [![alt](image_url)](link_url)
+  cleaned = cleaned.replace(/\[\s*!\[[^\]]*\]\([^)]+\)\s*\]\([^)]+\)/g, "");
+
+  // 2. Remove standalone markdown image badges: ![alt](https://img.shields.io/...) or badge URLs
+  cleaned = cleaned.replace(/!\[[^\]]*\]\([^)]*(?:shields\.io|badge|actions\/workflows|codecov|travis-ci)[^)]*\)/gi, "");
+
+  // 3. Remove raw HTML img badge tags
+  cleaned = cleaned.replace(/<img[^>]*(?:shields\.io|badge|workflows|badge\.svg)[^>]*>/gi, "");
+
+  // 4. Remove empty HTML anchor containers often surrounding badges
+  cleaned = cleaned.replace(/<a[^>]*>\s*<\/a>/gi, "");
+
+  // 5. Normalize excessive blank lines
+  cleaned = cleaned.replace(/\n\s*\n\s*\n+/g, "\n\n").trim();
+  return cleaned;
+}
+
 export function normalizeContent({ content, type = "text", path = null, title = null }) {
   let markdown = "";
   let docTitle = title;
@@ -67,6 +88,9 @@ export function normalizeContent({ content, type = "text", path = null, title = 
     markdown = typeof content === "string" ? content.trim() : String(content);
     docTitle = title || extractTitle(markdown, "Direct Note");
   }
+
+  // Apply noise and badge stripping to all developer documentation
+  markdown = stripMarkdownBadgesAndNoise(markdown);
 
   return {
     markdown,

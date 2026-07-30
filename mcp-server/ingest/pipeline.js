@@ -30,7 +30,10 @@ export async function ingestDocument({
 
   if (generateEmbeddings) {
     for (const micro of hierarchy.microChunks) {
-      const vec = await embedText(micro.content, false);
+      const contextualText = micro.breadcrumbs
+        ? `${micro.content}\n\nContext: ${docTitle} > ${micro.breadcrumbs}`
+        : `${micro.content}\n\nContext: ${docTitle}`;
+      const vec = await embedText(contextualText, false);
       micro.vector = vectorToBuffer(vec);
     }
   } else {

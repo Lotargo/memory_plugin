@@ -183,7 +183,7 @@ export function createSmallChunks(mediumBlock, sectionId, docId) {
 
   // RULE FOR TABLES
   if (mediumBlock.block_type === "table") {
-    if (tokenCount <= 250) {
+    if (tokenCount <= 350) {
       makeChunk(content);
       return smallChunks;
     }
@@ -201,7 +201,7 @@ export function createSmallChunks(mediumBlock, sectionId, docId) {
     }
 
     const headerStr = headerLines.join("\n");
-    const chunkSize = 5;
+    const chunkSize = 8;
     for (let i = 0; i < dataLines.length; i += chunkSize) {
       const rowBatch = dataLines.slice(i, i + chunkSize);
       const tableChunkText = `${headerStr}\n${rowBatch.join("\n")}`;
@@ -212,7 +212,7 @@ export function createSmallChunks(mediumBlock, sectionId, docId) {
 
   // RULE FOR CODE BLOCKS
   if (mediumBlock.block_type === "code") {
-    if (tokenCount <= 200) {
+    if (tokenCount <= 350) {
       makeChunk(content);
       return smallChunks;
     }
@@ -225,12 +225,12 @@ export function createSmallChunks(mediumBlock, sectionId, docId) {
     const fenceFooter = isFenced && (lastLine.startsWith("```") || lastLine.startsWith("~~~")) ? lastLine : "";
 
     const bodyLines = isFenced ? codeLines.slice(1, -1) : codeLines;
-    
+
     const astBlocks = [];
     let currentAstBlock = [];
 
     for (const line of bodyLines) {
-      const isBoundary = /^\s*(?:export\s+|async\s+)?(?:function|class|const|let|var|def|pub\s+fn|fn|struct|interface|enum)\s+/.test(line);
+      const isBoundary = /^\s*(?:export\s+|async\s+)?(?:function|class|def|pub\s+fn|fn|struct|interface|enum)\s+/.test(line);
       if (isBoundary && currentAstBlock.length > 0) {
         astBlocks.push(currentAstBlock.join("\n"));
         currentAstBlock = [];
@@ -248,14 +248,36 @@ export function createSmallChunks(mediumBlock, sectionId, docId) {
     return smallChunks;
   }
 
-  // STANDARD SENTENCE SEGMENTATION
+  // STANDARD SENTENCE SEGMENTATION WITH SAFE SENTENCE-WINDOWING (100-180 TOKENS, 1 SENTENCE OVERLAP)
   const sentences = splitSentencesMultilingual(content);
-  if (sentences.length === 0) {
+  if (sentences.length === 0 || tokenCount <= 180) {
     makeChunk(content);
-  } else {
-    for (const sentence of sentences) {
-      makeChunk(sentence);
+    return smallChunks;
+  }
+
+  const TARGET_WINDOW_TOKENS = 150;
+  let currentWindow = [];
+  let currentTokens = 0;
+
+  for (let i = 0; i < sentences.length; i++) {
+    const sentence = sentences[i];
+    const sTokens = estimateTokens(sentence);
+
+    if (currentTokens + sTokens > TARGET_WINDOW_TOKENS && currentWindow.length > 0) {
+      makeChunk(currentWindow.join(" "));
+      
+      // Safe Overlap: Keep the last sentence of the previous window if available
+      const lastSentence = currentWindow[currentWindow.length - 1];
+      currentWindow = [lastSentence, sentence];
+      currentTokens = estimateTokens(lastSentence) + sTokens;
+    } else {
+      currentWindow.push(sentence);
+      currentTokens += sTokens;
     }
+  }
+
+  if (currentWindow.length > 0) {
+    makeChunk(currentWindow.join(" "));
   }
 
   return smallChunks;

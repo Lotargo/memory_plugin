@@ -208,13 +208,14 @@ The benchmark suite (`mcp-server/benchmarks/`) is the canonical way to evaluate 
 The search quality of `@lotargo/memory_plugin` is evaluated across real-world multi-document technical repositories using Mean Reciprocal Rank (MRR@5), Recall@5, and Normalized Discounted Cumulative Gain (NDCG@5).
 
 #### Current Benchmark Performance (Instruction-Tuned Paradigm)
+*Model: Xenova/multilingual-e5-small over full 32-document technical corpus (21 queries).*
 
 | Retrieval Strategy | MRR@5 | Recall@5 | NDCG@5 |
 |---|:---:|:---:|:---:|
-| BM25 Lexical Search Only | 0.6667 | 66.67% | 0.6667 |
-| Dense ONNX Vector Only | 0.9259 | 100.00% | 0.9482 |
-| Hybrid RRF ($k=60$) | 1.0000 | 100.00% | 1.0000 |
-| **Hybrid RSF ($\alpha=0.5$)** | **1.0000** | **100.00%** | **1.0000** |
+| BM25 Lexical Search Only | 0.5873 | 66.67% | 0.6077 |
+| Dense ONNX Vector Only | 0.8333 | 85.71% | 0.8396 |
+| Hybrid RRF ($k=60$) | 0.9048 | 90.48% | 0.9048 |
+| **Hybrid RSF ($\alpha=0.5$)** | **0.9206** | **95.24%** | **0.9286** |
 
 For complete benchmark methodology, baseline comparisons, mathematical formulations, and category breakdowns, refer to [BENCHMARKS.md](./BENCHMARKS.md).
 

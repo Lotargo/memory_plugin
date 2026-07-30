@@ -92,14 +92,14 @@ Query categories include:
 ---
 
 ### Optimized Results (Model-Aware Instruction Tuning & Dynamic Intent Prompting)
-*Model: Xenova/multilingual-e5-small with dynamic task instruction formatting.*
+*Model: Xenova/multilingual-e5-small over full 32-document technical corpus (21 queries).*
 
 | Retrieval Strategy | MRR@5 | Recall@5 | NDCG@5 | Performance Gain vs Baseline |
 |---|:---:|:---:|:---:|:---:|
-| BM25 Lexical Search Only | 0.6667 | 66.67% | 0.6667 | Baseline |
-| Dense Vector Only | 0.9259 | 100.00% | 0.9482 | +53.1% Vector MRR |
-| Hybrid RRF ($k=60$) | 1.0000 | 100.00% | 1.0000 | +61.7% RRF MRR |
-| Hybrid RSF ($\alpha=0.5$) | **1.0000** | **100.00%** | **1.0000** | **+58.1% RSF MRR** |
+| BM25 Lexical Search Only | 0.5873 | 66.67% | 0.6077 | Baseline |
+| Dense Vector Only | 0.8333 | 85.71% | 0.8396 | +41.8% Vector MRR |
+| Hybrid RRF ($k=60$) | 0.9048 | 90.48% | 0.9048 | +46.3% RRF MRR |
+| **Hybrid RSF ($\alpha=0.5$)** | **0.9206** | **95.24%** | **0.9286** | **+56.7% RSF MRR** |
 
 ---
 
@@ -107,13 +107,13 @@ Query categories include:
 
 | Category | Query Count (N) | BM25 MRR@5 | Dense Vector MRR@5 | Hybrid RSF MRR@5 | RSF Recall@5 |
 |---|:---:|:---:|:---:|:---:|:---:|
-| Semantic RU -> EN | 7 | 0.3333 | 0.7778 | 1.0000 | 100.00% |
-| Cross-Lingual Concepts | 7 | 0.5000 | 1.0000 | 1.0000 | 100.00% |
+| Semantic RU -> EN | 7 | 0.3571 | 0.8571 | 0.9048 | 100.00% |
+| Cross-Lingual Concepts | 7 | 0.4048 | 0.6429 | 0.8571 | 85.71% |
 | Direct Code & Keyword | 7 | 1.0000 | 1.0000 | 1.0000 | 100.00% |
 
 ---
 
 ## 7. Conclusions
 
-1. **Model-Aware Instruction Tuning**: Supplying domain-specific task instructions (`Instruct: <instruction>\nQuery: <text>`) for E5 models and model-specific prefixes for BGE models eliminates task drift, raising dense vector MRR@5 from 0.6048 to 0.9259.
-2. **Hybrid RSF Convergence**: Relative Score Fusion ($\alpha=0.5$) achieves 1.0000 MRR@5 and 100% Recall@5 across all evaluated technical query categories.
+1. **Model-Aware Instruction Tuning**: Supplying domain-specific task instructions (`Instruct: <instruction>\nQuery: <text>`) for E5 models and model-specific prefixes for BGE models eliminates task drift, raising dense vector MRR@5 from 0.6048 to 0.8333.
+2. **Hybrid RSF Convergence**: Relative Score Fusion ($\alpha=0.5$) achieves **0.9206 MRR@5** and **95.24% Recall@5** across the full 32-document technical repository benchmark.

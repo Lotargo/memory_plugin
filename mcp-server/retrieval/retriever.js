@@ -240,7 +240,23 @@ export async function hybridQuery({
     fusedHits = await rerankHits(query, fusedHits, rerankModelName);
   }
 
-  const topHits = fusedHits.slice(0, limit);
+  // Parent-Child Rollup: Deduplicate hits sharing the same medium_id or section_id to prevent noise
+  const parentDeduplicatedHits = [];
+  const seenParents = new Set();
+  const parentLookupStmt = db.prepare(`
+    SELECT medium_id, section_id FROM micro_chunks WHERE id = ?;
+  `);
+
+  for (const hit of fusedHits) {
+    const row = parentLookupStmt.get(hit.id);
+    const parentKey = row ? (row.medium_id || row.section_id) : hit.id;
+    if (!seenParents.has(parentKey)) {
+      seenParents.add(parentKey);
+      parentDeduplicatedHits.push(hit);
+    }
+  }
+
+  const topHits = parentDeduplicatedHits.slice(0, limit);
   const results = [];
 
   const secStmt = db.prepare(`
