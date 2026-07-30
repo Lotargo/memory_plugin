@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/hero.jpg" alt="@lotargo/memory_plugin" width="480" style="max-width: 100%; border-radius: 12px; margin-bottom: 16px;">
+
 # @lotargo/memory_plugin
 
 [![npm version](https://img.shields.io/npm/v/@lotargo/memory_plugin)](https://www.npmjs.com/package/@lotargo/memory_plugin)
@@ -13,11 +15,7 @@ Automatically remembers durable user facts, ingests complex document repositorie
 
 </div>
 
-<div align="center">
-
-<img src="assets/hero.jpg" alt="@lotargo/memory_plugin" width="480" style="max-width: 100%; border-radius: 12px; margin-bottom: 16px;">
-
-<div align="center">
+---
 
 ## Why @lotargo/memory_plugin?
 
@@ -65,24 +63,6 @@ Standard AI coding assistants lose context as soon as a chat session closes or a
 - **Content-Addressable Storage (CAS)**: Local S3-style compressed blob store for raw original documents.
 - **Dual-Source Model Failover**: Automatic HuggingFace CDN model downloading with fallback to GitHub Repository Mirror in case of rate-limits or HF outages.
 - **Embedded Web Admin Dashboard**: Interactive single-page app served on `http://localhost:8765` with dynamic port resolution.
-
----
-
-## CPU-First Design Philosophy & Model Selection
-
-### Why Pure CPU Execution? (No GPU / WebGPU Dependency)
-`@lotargo/memory_plugin` was intentionally engineered as a **pure CPU-first, zero-overhead extension**.
-
-During early R&D, WebGPU (`onnxruntime-web` / WGPU) and GPU execution providers were evaluated and partially prototyped. However, GPU execution requires heavy OS-dependent graphics drivers, massive native binary bundles (CUDA / Vulkan toolchains), and platform-specific native compilation. This breaks the core mission of an instant, lightweight, zero-config plugin.
-
-By focusing on optimized CPU inference:
-- Installs in seconds with **zero native C++ compilation (`node-gyp`)**.
-- Runs reliably across any Linux, macOS (Apple Silicon / Intel), or Windows environment.
-- Operates with minimal CPU and memory footprint directly alongside your active IDE.
-
-### Model Choices in CLI: Default Micro vs Heavy Models
-- **`Xenova/multilingual-e5-small` (Default)**: Optimized specifically for CPU execution (~47M parameters, ~120 MB quantized). Delivers sub-millisecond vector inference and state-of-the-art accuracy with negligible RAM usage.
-- **Larger Models (`multilingual-e5-large`, `bge-m3`)**: Available in `memory-cli` as **experimental options**. These models are designed for high-performance workstations equipped with powerful multi-core CPUs and abundant RAM. For standard daily coding, the default micro model is recommended.
 
 ---
 
