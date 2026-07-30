@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import { testDualLayerArchitecture } from "./test_dual_layer.js";
 import { runIngestionBenchmark } from "./stress_ingestion.js";
 import { evaluateSearchQualityComparison } from "./quality_evaluator.js";
+import { getDeviceInfo } from "../ml/model_manager.js";
+import { getConfig } from "../config/config_manager.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPORT_PATH = join(__dirname, "..", "..", "dev_docs", "benchmark_results.md");
@@ -123,11 +125,15 @@ async function runFullBenchmarkSuite() {
   const memBaselineLabel = ingestMetrics.ramBaseline || "pre-loop";
 
   // 4. Generate Comprehensive Markdown Report
+  const deviceInfo = await getDeviceInfo();
+  const activeCfg = getConfig();
+  const engineLabel = `\`${activeCfg.embeddingModel}\` (ONNX, ${deviceInfo.isGpuActive ? `GPU: ${deviceInfo.displayName}` : "CPU"})`;
+
   const markdownReport = `# memory_plugin Local Hybrid RAG Rigorous Benchmark Report
 
 **Generated At**: ${new Date().toISOString()}  
 **Total Benchmark Duration**: ${totalTimeSec} seconds  
-**Embedding Engine**: \`Xenova/multilingual-e5-small\` (ONNX Quantized 384-d vectors, FULL CPU Inference Enabled)  
+**Embedding Engine**: ${engineLabel}  
 **Corpus**: ${corpusSourceCount} Documents (${networkDocCount} fetched from GitHub, ${localDocCount} local fallback)  
 **Match Policy**: Strictly on \`expectedDocIds\` derived from corpus source-id (NOT substring match)  
 **Statistical Inference**: Paired-t (reciprocal rank) & 1000-iteration bootstrap 95% percentile CI

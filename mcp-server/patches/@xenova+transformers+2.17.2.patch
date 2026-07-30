@@ -1,0 +1,58 @@
+diff --git a/node_modules/@xenova/transformers/src/utils/tensor.js b/node_modules/@xenova/transformers/src/utils/tensor.js
+index 469054c..af0240e 100644
+--- a/node_modules/@xenova/transformers/src/utils/tensor.js
++++ b/node_modules/@xenova/transformers/src/utils/tensor.js
+@@ -58,14 +58,51 @@ export class Tensor {
+         if (args[0] instanceof ONNXTensor) {
+             // Create shallow copy
+             Object.assign(this, args[0]);
++            // onnxruntime-common >= 1.18 exposes `data` and `location` as prototype getters,
++            // which Object.assign does not copy. Copy them explicitly.
++            if (this.data === undefined) {
++                Object.defineProperty(this, 'data', {
++                    value: args[0].data,
++                    writable: true,
++                    enumerable: true,
++                    configurable: true,
++                });
++            }
++            if (this.location === undefined) {
++                Object.defineProperty(this, 'location', {
++                    value: args[0].location,
++                    writable: true,
++                    enumerable: true,
++                    configurable: true,
++                });
++            }
+ 
+         } else {
+             // Create new tensor
+-            Object.assign(this, new ONNXTensor(
++            const ortTensor = new ONNXTensor(
+                 /** @type {DataType} */(args[0]),
+                 /** @type {Exclude<import('./maths.js').AnyTypedArray, Uint8ClampedArray>} */(args[1]),
+                 args[2]
+-            ));
++            );
++            Object.assign(this, ortTensor);
++            // onnxruntime-common >= 1.18 exposes `data` and `location` as prototype getters,
++            // which Object.assign does not copy. Copy them explicitly.
++            if (this.data === undefined) {
++                Object.defineProperty(this, 'data', {
++                    value: ortTensor.data,
++                    writable: true,
++                    enumerable: true,
++                    configurable: true,
++                });
++            }
++            if (this.location === undefined) {
++                Object.defineProperty(this, 'location', {
++                    value: ortTensor.location,
++                    writable: true,
++                    enumerable: true,
++                    configurable: true,
++                });
++            }
+         }
+ 
+         return new Proxy(this, {

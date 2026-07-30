@@ -7,6 +7,7 @@ import { deleteDocument } from "./ingest/pipeline.js";
 import { readMemoryRaw, readMemory, writeMemory, GLOBAL_KEY, projectName } from "./memory.js";
 import { getCorpusCacheSize, clearCorpusCache } from "./benchmarks/fetch_real_corpus.js";
 import { SMOKE_DOC_IDS } from "./benchmarks/quality_evaluator.js";
+import { getDeviceInfo } from "./ml/model_manager.js";
 
 const EMBEDDING_PRESETS = [
   "Xenova/multilingual-e5-small",
@@ -97,12 +98,18 @@ async function getQuickStats() {
   return { docCount, chunkCount, factCount };
 }
 
-function printHeaderPanel(title, stats) {
+function printHeaderPanel(title, stats, deviceInfo = null) {
   const line = "─".repeat(PANEL_WIDTH - 2);
   console.log(`\x1b[36m╭${line}╮\x1b[0m`);
   console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37m${title.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
   const subtitle = `Storage: ${stats.docCount} Docs | ${stats.chunkCount} Chunks | ${stats.factCount} Facts`;
   console.log(`\x1b[36m│\x1b[0m  \x1b[90m${subtitle.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
+  if (deviceInfo) {
+    const label = deviceInfo.isGpuActive ? "GPU" : "CPU";
+    const color = deviceInfo.isGpuActive ? "\x1b[33m" : "\x1b[90m";
+    const deviceStr = `${label}: ${deviceInfo.displayName} [${deviceInfo.availableProviders.join(", ")}]`;
+    console.log(`\x1b[36m│\x1b[0m  ${color}${deviceStr.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
+  }
   console.log(`\x1b[36m╰${line}╯\x1b[0m`);
 }
 
@@ -111,6 +118,14 @@ function printQuickInfoBox(infoText) {
   console.log(`\x1b[90m ╭─ INFO ${line}╮\x1b[0m`);
   console.log(`\x1b[90m │\x1b[0m  \x1b[36m${infoText.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[90m│\x1b[0m`);
   console.log(`\x1b[90m ╰${"─".repeat(PANEL_WIDTH - 2)}╯\x1b[0m`);
+}
+
+function formatTimestamp(val) {
+  if (!val) return "";
+  if (typeof val === "number") {
+    return new Date(val).toISOString().replace("T", " ").substring(0, 16);
+  }
+  return String(val).substring(0, 16);
 }
 
 function padVisible(str, width, align = "left") {
@@ -284,7 +299,7 @@ function renderBenchmarkResultsTable(results) {
   }
 }
 
-function selectBlockMenu({ title, stats, blocks, initialIndex = 0 }) {
+function selectBlockMenu({ title, stats, blocks, initialIndex = 0, deviceInfo = null }) {
   return new Promise((resolve) => {
     const allItems = [];
     blocks.forEach((block) => {
@@ -303,7 +318,7 @@ function selectBlockMenu({ title, stats, blocks, initialIndex = 0 }) {
 
     function render() {
       console.clear();
-      printHeaderPanel(title, stats);
+      printHeaderPanel(title, stats, deviceInfo);
       console.log(" \x1b[90mControls: ↑ / ↓ - Navigate   [ENTER] - Select   [BACKSPACE] - Back\x1b[0m\n");
 
       let currentItemGlobalIndex = 0;
@@ -634,6 +649,12 @@ export async function runCli() {
         title: "Engine & Hybrid Search Settings",
         items: [
           {
+            label: "Execution Device",
+            badge: config.executionDevice.toUpperCase(),
+            value: "device",
+            info: `CPU or GPU (DML). "auto" picks best available. GPU only helps large models.`,
+          },
+          {
             label: "Fusion Algorithm",
             badge: config.fusionAlgorithm.toUpperCase(),
             value: "algo",
@@ -708,11 +729,14 @@ export async function runCli() {
       },
     ];
 
+    const deviceInfo = await getDeviceInfo();
+
     const res = await selectBlockMenu({
       title: "MEMORY PLUGIN RAG ENGINE CONTROL PANEL",
       stats,
       blocks: mainBlocks,
       initialIndex: selectedIndex,
+      deviceInfo,
     });
 
     if (res.action === "back") {
@@ -725,6 +749,26 @@ export async function runCli() {
     selectedIndex = res.index;
 
     switch (res.value) {
+      case "device": {
+        const deviceItems = [
+          { label: "Auto (Best Available)", value: "auto", info: "Prefer GPU (DML/CUDA), fallback to CPU" },
+          { label: "CPU Only", value: "cpu", info: "Force CPU inference. Best for small models (e5-small)." },
+          { label: "DirectML GPU", value: "dml", info: "Force Windows GPU via DirectML. Best for large models." },
+        ];
+        const initialDevIdx = Math.max(0, deviceItems.findIndex((i) => i.value === config.executionDevice));
+        const subRes = await selectSimpleMenu({
+          title: "SELECT EXECUTION DEVICE",
+          subtitle: "GPU helps large models, CPU is faster for small models.",
+          items: deviceItems,
+          initialIndex: initialDevIdx,
+        });
+        if (subRes.action === "select") {
+          updateConfig({ executionDevice: subRes.value });
+          console.log(`\n  [OK] Execution device set to "${subRes.value}". Restart CLI to apply.\n`);
+          await waitForEnter();
+        }
+        break;
+      }
       case "algo": {
         const algoItems = [
           { label: "RSF (Relative Score Fusion)", value: "rsf", info: "Normalized Score Scaling (Recommended)" },
@@ -916,7 +960,7 @@ export async function runCli() {
 
           const docItems = docs.map((doc) => ({
             label: doc.title || doc.path || "Untitled Document",
-            badge: doc.created_at ? doc.created_at.substring(0, 16) : "",
+            badge: formatTimestamp(doc.created_at),
             hint: doc.id ? `ID: ${doc.id.substring(0, 8)}...` : "",
             info: `Path: ${doc.path || "N/A"}`,
             value: doc,
@@ -958,7 +1002,7 @@ export async function runCli() {
             console.log(`  Title:          ${targetDoc.title || "Untitled"}`);
             console.log(`  ID:             ${targetDoc.id}`);
             console.log(`  Path:           ${targetDoc.path || "N/A"}`);
-            console.log(`  Created:        ${targetDoc.created_at}`);
+            console.log(`  Created:        ${formatTimestamp(targetDoc.created_at)}`);
             console.log(`  Sections Count: ${secCount}`);
             console.log(`  Micro-Chunks:   ${chunkCount}`);
             if (sampleSections.length > 0) {

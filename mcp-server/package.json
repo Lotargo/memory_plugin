@@ -8,6 +8,7 @@
     "memory-cli": "cli.js"
   },
   "scripts": {
+    "postinstall": "patch-package",
     "cli": "node cli.js",
     "test": "node test_phase4.js",
     "benchmark": "node benchmarks/run_benchmarks.js"
@@ -15,6 +16,15 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@xenova/transformers": "^2.17.2",
+    "onnxruntime-node": "^1.27.0",
     "zod": "^4.1.0"
+  },
+  "overrides": {
+    "onnxruntime-node": "$onnxruntime-node",
+    "onnxruntime-common": "1.27.0",
+    "onnxruntime-web": "1.27.0"
+  },
+  "devDependencies": {
+    "patch-package": "^8.0.1"
   }
 }

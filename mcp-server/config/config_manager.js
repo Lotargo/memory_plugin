@@ -10,6 +10,7 @@ export const DEFAULT_CONFIG = {
   embeddingModel: "Xenova/multilingual-e5-small",
   rerankerModel: "none",   // "none" | "Xenova/bge-reranker-base" | custom HF model
   rerankerEnabled: false,
+  executionDevice: "auto", // "auto" | "dml" (DirectML/Windows GPU) | "cpu"
 };
 
 let cachedConfig = null;
