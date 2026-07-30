@@ -59,24 +59,24 @@ Executing server command: node /home/jules/.nvm/versions/node/v22.22.1/lib/node_
 --> Sending tools/call (id=4)
 <-- Received Response for id=4
 [PASS] recall response: --- app ---
-1. [2026-07-30 14:30] The workspace is configured to use strict typing and linting checks.
+1. [2026-07-30 21:05] The workspace is configured to use strict typing and linting checks.
 --> Sending tools/call (id=5)
 <-- Received Response for id=5
-[PASS] ingest_document response: {'status': 'success', 'docId': 'doc_533a3c3339a8', 'title': 'Target Application Spec', 'sectionsCount': 1, 'microChunksCount': 1, 'deduplicated': False}
+[PASS] ingest_document response: {'status': 'success', 'docId': 'doc_6d84176d5301', 'title': 'Target Application Spec', 'sectionsCount': 1, 'microChunksCount': 1, 'deduplicated': False}
 --> Sending tools/call (id=6)
 <-- Received Response for id=6
-[PASS] link_knowledge response: {'linkId': 'link_4e73ac64-687', 'factKey': 'app', 'factText': 'strict typing and linting', 'docId': 'doc_533a3c3339a8', 'docTitle': 'Target Application Spec', 'startLine': None, 'endLine': None, 'relationType': 'IMPLEMENTS'}
+[PASS] link_knowledge response: {'linkId': 'link_2bd0dbb0-97b', 'factKey': 'app', 'factText': 'strict typing and linting', 'docId': 'doc_6d84176d5301', 'docTitle': 'Target Application Spec', 'startLine': None, 'endLine': None, 'relationType': 'IMPLEMENTS'}
 --> Sending tools/call (id=7)
 <-- Received Response for id=7
 [PASS] query_knowledge_base response: [Active Model: Xenova/multilingual-e5-small | Fusion: RSF]
 
 ### [1] Target Application Spec > Target Application Spec (Target Application Spec)
-Score: 0.9495
+Score: 0.9545
 
 The system architecture utilizes type-checking and unified modules to combat potential regressions.
 --> Sending tools/call (id=8)
 <-- Received Response for id=8
-[PASS] manage_knowledge_base stats response: {'documents': 1, 'sections': 1, 'micro_chunks': 1, 'graph_edges': 5}
+[PASS] manage_knowledge_base stats response: {'documents': 1, 'sections': 1, 'micro_chunks': 1, 'graph_edges': 4}
 --> Sending tools/call (id=9)
 <-- Received Response for id=9
 [PASS] manage_knowledge_base list response count: 1
@@ -89,7 +89,7 @@ The system architecture utilizes type-checking and unified modules to combat pot
 [PASS] Forget operation verified successfully.
 --> Sending tools/call (id=12)
 <-- Received Response for id=12
-[PASS] manage_knowledge_base delete response: {'deleted': True, 'docId': 'doc_533a3c3339a8', 'title': 'Target Application Spec'}
+[PASS] manage_knowledge_base delete response: {'deleted': True, 'docId': 'doc_6d84176d5301', 'title': 'Target Application Spec'}
 
 === ALL MCP TOOLS SUCCESSFULLY TESTED AND VERIFIED! ===
 ```
@@ -106,8 +106,8 @@ The built-in benchmark runner evaluated ingestion speed, disk footprints, and se
 - **Total Medium Sections**: 281
 - **Total Micro-Chunks**: 1202
 - **Calculated Embeddings**: 1202 vectors (384 dimensions)
-- **Ingestion Duration**: **53.06s**
-- **Vectorization CPU Speed**: **22.65 vectors/sec**
+- **Ingestion Duration**: **63.45s**
+- **Vectorization CPU Speed**: **18.94 vectors/sec**
 - **SQLite DB Footprint**: **5.14 MB**
 - **CAS Blob Archive Size**: **0.1 MB**
 
@@ -116,13 +116,13 @@ The built-in benchmark runner evaluated ingestion speed, disk footprints, and se
 | Search Strategy            | MRR@5 (Mean Reciprocal Rank) | Recall@5 (Completeness) |   NDCG@5   |
 | -------------------------- | :--------------------------: | :---------------------: | :--------: |
 | **BM25 Lexical Only**      |            0.6706            |         76.19%          |   0.6934   |
-| **Dense ONNX Vector Only** |            0.8127            |         100.00%         |   0.8588   |
-| **Hybrid RRF (k=60)**      |            0.8730            |         95.24%          |   0.8934   |
-| **Hybrid RSF (alpha=0.5)** |          **0.9206**          |       **100.00%**       | **0.9410** |
+| **Dense ONNX Vector Only** |            0.8135            |         100.00%         |   0.8612   |
+| **Hybrid RRF (k=10)**      |            0.8810            |         95.24%          |   0.8997   |
+| **Hybrid RSF (alpha=0.5)** |          **0.9286**          |       **100.00%**       | **0.9473** |
 
 #### Search Analysis:
 
-1.  **RSF Superiority**: Relative Score Fusion (RSF) outperforms other strategies by bringing heterogeneous BM25 and vector score ranges to a normalized $[0, 1]$ interval before fusing. This leads to a stellar MRR of **0.9206**.
+1.  **RSF Superiority**: Relative Score Fusion (RSF) outperforms other strategies by bringing heterogeneous BM25 and vector score ranges to a normalized $[0, 1]$ interval before fusing. This leads to an exceptional MRR of **0.9286**.
 2.  **Cross-Lingual Capability**: Russian language queries search English documentation accurately thanks to the E5 multilingual models.
 3.  **Lexical Fail-safes**: BM25 retains a perfect **1.00 MRR** on precise code identifiers and parameters, preventing dense vector search from returning unrelated but semantically similar modules.
 
@@ -146,4 +146,4 @@ The built-in benchmark runner evaluated ingestion speed, disk footprints, and se
 
 ## 6. Conclusion
 
-The `@lotargo/memory_plugin` represents a robust and highly performant persistent memory architecture. Our automated and empirical evaluation demonstrates perfect layer isolation and excellent hybrid retrieval quality (MRR=0.92). It is highly recommended to activate this plugin globally across dev-agent workspaces to ensure durable context gathering.
+The `@lotargo/memory_plugin` represents a robust and highly performant persistent memory architecture. Our automated and empirical evaluation demonstrates perfect layer isolation and excellent hybrid retrieval quality (MRR=0.9286). It is highly recommended to activate this plugin globally across dev-agent workspaces to ensure durable context gathering.

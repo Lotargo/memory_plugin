@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/hero.jpg" alt="@lotargo/memory_plugin" width="480" style="max-width: 100%; border-radius: 12px; margin-bottom: 16px;">
+<img src="https://raw.githubusercontent.com/Lotargo/memory_pugin/main/assets/hero.jpg" alt="@lotargo/memory_plugin" width="480" style="max-width: 100%; border-radius: 12px; margin-bottom: 16px;">
 
 # @lotargo/memory_plugin
 
@@ -68,12 +68,24 @@ Standard AI coding assistants lose context as soon as a chat session closes or a
 
 ## Supported Platforms
 
-| Platform                     | Status    | Mechanism                                                                   |
-| ---------------------------- | --------- | --------------------------------------------------------------------------- |
-| **Antigravity / Gemini CLI** | Supported | MCP Server (`~/.gemini/config/mcp_config.json` & `.agents/mcp_config.json`) |
-| **OpenCode**                 | Native    | Native plugin + MCP Server (`~/.config/opencode/opencode.json`)             |
-| **Claude Code**              | Supported | MCP Server (`~/.claude.json`)                                               |
-| **Codex**                    | Supported | MCP Server (`~/.codex/config.toml`)                                         |
+| Platform                     | Status       | Mechanism                                                                   |
+| ---------------------------- | ------------ | --------------------------------------------------------------------------- |
+| **Antigravity / Gemini CLI** | Supported    | MCP Server (`~/.gemini/config/mcp_config.json` & `.agents/mcp_config.json`) |
+| **OpenCode**                 | Native       | Native plugin + MCP Server (`~/.config/opencode/opencode.json`)             |
+| **Claude Code**              | Supported    | MCP Server (`~/.claude.json`)                                               |
+| **Codex**                    | Supported    | MCP Server (`~/.codex/config.toml`)                                         |
+| **Google Jules**             | Experimental | MCP Server via global install (`npm install -g @lotargo/memory_plugin`)     |
+
+### Google Jules Integration (Experimental)
+
+The plugin has been verified inside the **Google Jules** cloud workspace environment.
+
+- **Setup Method**: Environment pre-installation via global command:
+  ```bash
+  npm install -g @lotargo/memory_plugin
+  ```
+- **Verification**: Google Jules automatically discovers the registered MCP server upon workspace initialization and seamlessly interacts with memory & RAG tools (`remember`, `recall`, `ingest_document`, `query_knowledge_base`).
+- **Current Limitation**: There is currently no integrated Cloud DB backend. All memory stores and vector indexes operate locally within the workspace environment. Cross-session cloud synchronization of persistent memories and document indexes across different Jules runs is planned for upcoming releases.
 
 ---
 
@@ -219,14 +231,22 @@ The search quality of `@lotargo/memory_plugin` is evaluated across real-world mu
 
 _Model: Xenova/multilingual-e5-small over full 32-document technical corpus (21 queries)._
 
-| Retrieval Strategy            |   MRR@5    |  Recall@5  |   NDCG@5   |
-| ----------------------------- | :--------: | :--------: | :--------: |
-| BM25 Lexical Search Only      |   0.5873   |   66.67%   |   0.6077   |
-| Dense ONNX Vector Only        |   0.8333   |   85.71%   |   0.8396   |
-| Hybrid RRF ($k=60$)           |   0.9048   |   90.48%   |   0.9048   |
-| **Hybrid RSF ($\alpha=0.5$)** | **0.9206** | **95.24%** | **0.9286** |
+| Retrieval Strategy            |   MRR@5    |  Recall@5   |   NDCG@5   |
+| ----------------------------- | :--------: | :---------: | :--------: |
+| BM25 Lexical Search Only      |   0.6706   |   76.19%    |   0.6934   |
+| Dense ONNX Vector Only        |   0.8135   |   100.00%   |   0.8612   |
+| Hybrid RRF ($k=10$)           |   0.8810   |   95.24%    |   0.8997   |
+| **Hybrid RSF ($\alpha=0.5$)** | **0.9286** | **100.00%** | **0.9473** |
 
-For complete benchmark methodology, baseline comparisons, mathematical formulations, and category breakdowns, refer to [BENCHMARKS.md](./BENCHMARKS.md).
+---
+
+## Documentation & Reports
+
+Detailed technical documentation, architectural specifications, integration test reports, and mathematical benchmarks are available in the [`docs/`](./docs) directory:
+
+- [**Verification Report (`MEMORY_PLUGIN_REPORT.md`)**](./docs/MEMORY_PLUGIN_REPORT.md): Summary verification report covering MCP Tool Registry, JSON-RPC integration testing, layer isolation validation, and search precision.
+- [**Comprehensive Technical Report (`MEMORY_PLUGIN_COMPREHENSIVE_REPORT.md`)**](./docs/MEMORY_PLUGIN_COMPREHENSIVE_REPORT.md): Full scientific-technical analysis of system architecture, dual-layer model, hardware environment specifications, mathematical search formulations, bootstrap 95% CIs, and event-loop profiling.
+- [**Benchmark Methodology & Guide (`BENCHMARKS.md`)**](./docs/BENCHMARKS.md): Guide to automated benchmark execution, hyperparameter sweeps (RSF $\alpha$, RRF $k$), search quality metrics, and performance tracking across releases.
 
 ---
 
