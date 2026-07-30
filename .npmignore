@@ -7,9 +7,10 @@ mcp-server/package.json
 mcp-server/test*.js
 mcp-server/benchmarks/**
 
-# Dev docs and exports
+# Dev docs, assets, and exports
 dev_docs/
 docs/
+assets/
 scripts/
 exports/
 *.log
@@ -18,4 +19,3 @@ reoort_jules.md
 # Git
 .git/
 .gitignore
-
