@@ -28,7 +28,8 @@
     "mcp-server/memory.js",
     "mcp-server/setup.js",
     "mcp-server/preinstall.js",
-    "skills"
+    "skills",
+    "assets"
   ],
   "keywords": [
     "opencode",

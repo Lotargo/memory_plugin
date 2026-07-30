@@ -4,56 +4,41 @@
 
 This document presents the empirical evaluation methodology, model configurations, and benchmark results for the local hybrid Retrieval-Augmented Generation (RAG) engine implemented in `@lotargo/memory_plugin`.
 
-The evaluation compares initial baseline performance against an optimized instruction-tuned paradigm across dense vector retrieval, lexical keyword search (SQLite FTS5 BM25), and Relative Score Fusion (RSF).
+The evaluation compares initial baseline performance against an optimized model-aware protocol and asymmetric prefixing paradigm across dense vector retrieval, lexical keyword search (SQLite FTS5 BM25), and Relative Score Fusion (RSF).
 
 ---
 
 ## 2. Model & Engine Specifications
 
-The benchmark evaluates dense embeddings, cross-encoders, and hybrid fusion across four model architectures:
+The benchmark evaluation is conducted on the primary default model architecture:
 
 1. **Xenova/multilingual-e5-small** (Default Micro Model)
    - Parameters: ~47M
    - Vector Dimension ($d$): 384
    - Quantized ONNX Footprint: ~120 MB
-   - Primary Protocol: Prefix-based (`query: ` / `passage: `) with dynamic task instructions (`Instruct: <instruction>\nQuery: <text>`).
-
-2. **Xenova/multilingual-e5-large** (Large Multilingual Model)
-   - Parameters: ~560M
-   - Vector Dimension ($d$): 1024
-   - Quantized ONNX Footprint: ~560 MB
-   - Primary Protocol: Prefix-based with dynamic task instructions.
-
-3. **Xenova/bge-m3** (BAAI Multilingual M3 Model)
-   - Parameters: ~560M
-   - Vector Dimension ($d$): 1024
-   - Quantized ONNX Footprint: ~570 MB
-   - Primary Protocol: Prompt prefix (`Represent this sentence for searching relevant passages: <text>`) without passage prefixes.
-
-4. **Xenova/all-MiniLM-L6-v2** (Baseline Compact Model)
-   - Parameters: ~22M
-   - Vector Dimension ($d$): 384
-   - Quantized ONNX Footprint: ~23 MB
-   - Primary Protocol: Raw text without prefix.
-
-5. **Xenova/bge-reranker-base** (Cross-Encoder Candidate Re-ranker)
-   - Parameters: ~278M
-   - Quantized ONNX Footprint: ~270 MB
-   - Secondary Pass: Pairwise cross-attention re-ranking over candidate top-N hits.
+   - Primary Protocol: Prefix-based (`passage: ` for indexing, `query: ` for search). Dynamic task instructions (`Instruct: <instruction>\nQuery: <text>`) apply ONLY to `*-instruct` model variants; for standard non-instruct E5 models, any instruction field passed by an agent is safely ignored.
 
 ---
 
 ## 3. Mathematical Formulations
 
-### Lexical BM25 Score
+### Lexical BM25 Score (SQLite FTS5)
 $$\text{Score}_{\text{BM25}}(D, Q) = \sum_{i=1}^{n} \text{IDF}(q_i) \cdot \frac{f(q_i, D) \cdot (k_1 + 1)}{f(q_i, D) + k_1 \cdot \left(1 - b + b \cdot \frac{|D|}{\text{avgdl}}\right)}$$
 where $k_1 = 1.2$, $b = 0.75$.
 
 ### Dense Vector Cosine Similarity
-$$\text{Sim}_{\text{cos}}(\mathbf{u}, \mathbf{v}) = \frac{\mathbf{u} \cdot \mathbf{v}}{\|\mathbf{u}\|_2 \|\mathbf{v}\|_2}$$
+$$\text{Sim}_{\text{cos}}(\mathbf{u}, \mathbf{v}) = \frac{\mathbf{u} \cdot \mathbf{v}}{\|\mathbf{u}\|_2 \|\mathbf{v}\|_2} = \frac{\sum_{i=1}^{d} u_i v_i}{\sqrt{\sum_{i=1}^{d} u_i^2} \sqrt{\sum_{i=1}^{d} v_i^2}}$$
+
+### Reciprocal Rank Fusion (RRF)
+$$\text{Score}_{\text{RRF}}(d) = \sum_{m \in M} \frac{1}{k + r_m(d)}$$
+where $k = 60$, and $r_m(d)$ represents document $d$'s rank in retrieval method $m$.
 
 ### Relative Score Fusion (RSF)
-$$\text{Score}_{\text{RSF}}(d) = \alpha \cdot \frac{\text{Sim}_{\text{cos}}(d) - \min(\text{Sim})}{\max(\text{Sim}) - \min(\text{Sim}) + \epsilon} + (1 - \alpha) \cdot \frac{\text{BM25}(d) - \min(\text{BM25})}{\max(\text{BM25}) - \min(\text{BM25}) + \epsilon}$$
+$$\text{Norm}_{\text{semantic}}(d) = \frac{\text{Sim}_{\text{cos}}(d) - \min(\text{Sim})}{\max(\text{Sim}) - \min(\text{Sim}) + \epsilon}$$
+
+$$\text{Norm}_{\text{lexical}}(d) = \frac{\max(\text{Rank}_{\text{FTS}}) - \text{Rank}_{\text{FTS}}(d)}{\max(\text{Rank}_{\text{FTS}}) - \min(\text{Rank}_{\text{FTS}}) + \epsilon}$$
+
+$$\text{Score}_{\text{RSF}}(d) = \alpha \cdot \text{Norm}_{\text{semantic}}(d) + (1 - \alpha) \cdot \text{Norm}_{\text{lexical}}(d)$$
 where $\alpha = 0.5$, $\epsilon = 10^{-6}$.
 
 ### Evaluation Metrics
@@ -79,8 +64,8 @@ Query categories include:
 
 ## 5. Comparative Evaluation Results
 
-### Baseline Results (Prior to Model-Aware Task Instruction Tuning)
-*Model: Xenova/multilingual-e5-small with static query formatting.*
+### Baseline Results (Prior to Model-Aware Prefixing Optimization)
+*Model: Xenova/multilingual-e5-small without asymmetric passage/query prefix enforcement.*
 
 | Retrieval Strategy | MRR@5 | Recall@5 | NDCG@5 |
 |---|:---:|:---:|:---:|
@@ -91,7 +76,7 @@ Query categories include:
 
 ---
 
-### Optimized Results (Model-Aware Instruction Tuning & Dynamic Intent Prompting)
+### Optimized Results (Model-Aware Prefixing & Exact Asymmetric E5 Protocol)
 *Model: Xenova/multilingual-e5-small over full 32-document technical corpus (21 queries).*
 
 | Retrieval Strategy | MRR@5 | Recall@5 | NDCG@5 | Performance Gain vs Baseline |
@@ -115,5 +100,5 @@ Query categories include:
 
 ## 7. Conclusions
 
-1. **Model-Aware Instruction Tuning**: Supplying domain-specific task instructions (`Instruct: <instruction>\nQuery: <text>`) for E5 models and model-specific prefixes for BGE models eliminates task drift, raising dense vector MRR@5 from 0.6048 to 0.8333.
+1. **Model-Aware Prefixing & Protocol Handling**: Enforcing precise asymmetric prefixing (`passage: ` for indexing, `query: ` for search in standard E5 models, prompt prefixes for BGE, and dynamic `Instruct: ` blocks specifically for `*-instruct` models) eliminates task drift, raising dense vector MRR@5 from 0.6048 to 0.8333.
 2. **Hybrid RSF Convergence**: Relative Score Fusion ($\alpha=0.5$) achieves **0.9206 MRR@5** and **95.24% Recall@5** across the full 32-document technical repository benchmark.

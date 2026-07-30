@@ -9,6 +9,8 @@ mcp-server/benchmarks/**
 
 # Dev docs and exports
 dev_docs/
+docs/
+scripts/
 exports/
 *.log
 reoort_jules.md
