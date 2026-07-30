@@ -658,6 +658,18 @@ export async function runCli() {
             value: "reranker",
             info: config.rerankerEnabled ? `Reranker active: ${config.rerankerModel}` : "Optional Cross-Encoder re-ranking pass",
           },
+          {
+            label: "Vector Batch Size",
+            badge: `${config.batchSize || 12} Chunks`,
+            value: "batch_size",
+            info: `Ingestion batch size: ${config.batchSize || 12} micro-chunks per ONNX pass`,
+          },
+          {
+            label: "CPU WASM Threads",
+            badge: config.onnxThreads > 0 ? `${config.onnxThreads} Threads` : "AUTO (CPU Cores)",
+            value: "onnx_threads",
+            info: config.onnxThreads > 0 ? `ONNX execution threads manually set to ${config.onnxThreads}` : "Auto-detect optimal physical CPU threads",
+          },
         ],
       },
       {
@@ -829,6 +841,51 @@ export async function runCli() {
             updateConfig({ rerankerEnabled: true, rerankerModel: chosenRk });
             await waitForEnter();
           }
+        }
+        break;
+      }
+      case "batch_size": {
+        const batchItems = [
+          { label: "Batch Size 1 (Single Item)", value: 1, info: "Process micro-chunks strictly 1 by 1" },
+          { label: "Batch Size 4", value: 4, info: "Small batch size" },
+          { label: "Batch Size 8", value: 8, info: "Medium batch size" },
+          { label: "Batch Size 12 (Default Recommended)", value: 12, info: "Optimal balance between throughput and tensor memory" },
+          { label: "Batch Size 16", value: 16, info: "High throughput batch size" },
+          { label: "Batch Size 24", value: 24, info: "Large batch size" },
+          { label: "Batch Size 32", value: 32, info: "Maximum batch size" },
+        ];
+        const currentBatch = config.batchSize || 12;
+        const initialBatchIdx = Math.max(0, batchItems.findIndex((i) => i.value === currentBatch));
+        const subRes = await selectSimpleMenu({
+          title: "SELECT VECTOR BATCH SIZE",
+          subtitle: "Number of micro-chunks vectorized per ONNX inference pass",
+          items: batchItems,
+          initialIndex: initialBatchIdx,
+        });
+        if (subRes.action === "select") {
+          updateConfig({ batchSize: subRes.value });
+        }
+        break;
+      }
+      case "onnx_threads": {
+        const threadItems = [
+          { label: "0 - Auto (Detect CPU Cores)", value: 0, info: "Automatically match physical CPU cores (up to 8)" },
+          { label: "1 Thread (Single-Threaded)", value: 1, info: "Restrict ONNX WASM to 1 thread" },
+          { label: "2 Threads", value: 2, info: "Use 2 WASM threads" },
+          { label: "4 Threads", value: 4, info: "Use 4 WASM threads" },
+          { label: "8 Threads", value: 8, info: "Use 8 WASM threads" },
+          { label: "16 Threads", value: 16, info: "Use 16 WASM threads" },
+        ];
+        const currentThreads = config.onnxThreads || 0;
+        const initialThreadIdx = Math.max(0, threadItems.findIndex((i) => i.value === currentThreads));
+        const subRes = await selectSimpleMenu({
+          title: "SELECT CPU ONNX WASM THREADS",
+          subtitle: "Number of WASM worker threads for ONNX Runtime",
+          items: threadItems,
+          initialIndex: initialThreadIdx,
+        });
+        if (subRes.action === "select") {
+          updateConfig({ onnxThreads: subRes.value });
         }
         break;
       }

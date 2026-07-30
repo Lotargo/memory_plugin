@@ -10,6 +10,8 @@ export const DEFAULT_CONFIG = {
   embeddingModel: "Xenova/multilingual-e5-small",
   rerankerModel: "none",   // "none" | "Xenova/bge-reranker-base" | custom HF model
   rerankerEnabled: false,
+  batchSize: 12,           // Ingestion vector batch size [1 - 32] (default 12)
+  onnxThreads: 0,          // ONNX WASM threads: 0 = auto-detect CPU cores, or 1-16
 };
 
 let cachedConfig = null;

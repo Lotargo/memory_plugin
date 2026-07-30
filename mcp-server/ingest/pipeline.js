@@ -3,8 +3,9 @@ import { getDatabase, BLOBS_DIR } from "../db/database.js";
 import { saveBlob, deleteBlob } from "../storage/blob_store.js";
 import { normalizeContent } from "./normalizer.js";
 import { buildTripleHierarchy } from "./chunker.js";
-import { embedText, vectorToBuffer } from "../ml/model_manager.js";
+import { embedText, embedBatch, vectorToBuffer } from "../ml/model_manager.js";
 import { buildGraphEdges, saveGraphEdges } from "../graph/graph_extractor.js";
+import { getConfig } from "../config/config_manager.js";
 
 export async function ingestDocument({
   content,
@@ -28,13 +29,27 @@ export async function ingestDocument({
 
   const hierarchy = buildTripleHierarchy(markdown, docId, docTitle);
 
-  if (generateEmbeddings) {
-    for (const micro of hierarchy.microChunks) {
-      const contextualText = micro.breadcrumbs
+  if (generateEmbeddings && hierarchy.microChunks.length > 0) {
+    const BATCH_SIZE = getConfig().batchSize || 12;
+
+    // Smart Batching: Sort micro-chunks by character/token length to minimize ONNX zero-padding overhead
+    const indexedItems = hierarchy.microChunks.map((micro, idx) => ({
+      index: idx,
+      text: micro.breadcrumbs
         ? `${micro.content}\n\nContext: ${docTitle} > ${micro.breadcrumbs}`
-        : `${micro.content}\n\nContext: ${docTitle}`;
-      const vec = await embedText(contextualText, false);
-      micro.vector = vectorToBuffer(vec);
+        : `${micro.content}\n\nContext: ${docTitle}`,
+    }));
+
+    indexedItems.sort((a, b) => a.text.length - b.text.length);
+
+    for (let i = 0; i < indexedItems.length; i += BATCH_SIZE) {
+      const batch = indexedItems.slice(i, i + BATCH_SIZE);
+      const batchTexts = batch.map((item) => item.text);
+      const batchVecs = await embedBatch(batchTexts, false);
+      for (let j = 0; j < batchVecs.length; j++) {
+        const origIdx = batch[j].index;
+        hierarchy.microChunks[origIdx].vector = vectorToBuffer(batchVecs[j]);
+      }
     }
   } else {
     for (const micro of hierarchy.microChunks) {

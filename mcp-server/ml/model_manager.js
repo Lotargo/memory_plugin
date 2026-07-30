@@ -1,3 +1,4 @@
+import os from "node:os";
 import { MODELS_DIR } from "../db/database.js";
 
 let extractorInstance = null;
@@ -7,6 +8,15 @@ let rerankerInstance = null;
 let loadedRerankerName = null;
 
 import { getConfig } from "../config/config_manager.js";
+
+function getOptimalThreadCount() {
+  const userSetting = getConfig().onnxThreads;
+  if (typeof userSetting === "number" && userSetting > 0) {
+    return userSetting;
+  }
+  const totalCores = os.availableParallelism ? os.availableParallelism() : os.cpus().length;
+  return Math.max(1, Math.min(totalCores, 8));
+}
 
 export async function getExtractor(modelName = null, progressCallback = null) {
   const targetModel = modelName || getConfig().embeddingModel || "Xenova/multilingual-e5-small";
@@ -33,7 +43,18 @@ export async function getExtractor(modelName = null, progressCallback = null) {
   env.remotePathTemplate = "{model}/resolve/{revision}/";
   env.sharp = false;
 
-  const pipelineOpts = { quantized: true };
+  const numThreads = getOptimalThreadCount();
+  if (env.backends?.onnx?.wasm) {
+    env.backends.onnx.wasm.numThreads = numThreads;
+  }
+
+  const pipelineOpts = {
+    quantized: true,
+    session_options: {
+      graphOptimizationLevel: "all",
+      executionMode: "sequential",
+    },
+  };
   if (progressCallback) {
     pipelineOpts.progress_callback = progressCallback;
   }
@@ -104,6 +125,33 @@ export async function embedText(text, isQuery = false, modelName = null, progres
   });
 
   return new Float32Array(output.data);
+}
+
+export async function embedBatch(texts, isQuery = false, modelName = null, progressCallback = null, instruction = null) {
+  if (!texts || texts.length === 0) return [];
+  const targetModel = modelName || getConfig().embeddingModel || "Xenova/multilingual-e5-small";
+  const extractor = await getExtractor(targetModel, progressCallback);
+
+  const formattedTexts = texts.map((text) => formatInputText(text, isQuery, targetModel, instruction));
+
+  const output = await extractor(formattedTexts, {
+    pooling: "mean",
+    normalize: true,
+  });
+
+  const dims = output.dims;
+  const batchSize = dims[0];
+  const vectorDim = dims[dims.length - 1];
+  const flatData = output.data;
+
+  const results = [];
+  for (let i = 0; i < batchSize; i++) {
+    const start = i * vectorDim;
+    const end = start + vectorDim;
+    results.push(new Float32Array(flatData.subarray(start, end)));
+  }
+
+  return results;
 }
 
 export async function getReranker(modelName = "Xenova/bge-reranker-base", progressCallback = null) {
