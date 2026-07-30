@@ -244,10 +244,12 @@ export async function hybridQuery({
   const results = [];
 
   const secStmt = db.prepare(`
-    SELECT s.id, s.heading, s.breadcrumbs, s.content, d.title as doc_title, d.path as doc_path
+    SELECT s.id as section_id, s.heading, s.breadcrumbs, s.content as section_content,
+           med.content as medium_content, d.title as doc_title, d.path as doc_path
     FROM micro_chunks m
     JOIN sections s ON m.section_id = s.id
     JOIN documents d ON m.doc_id = d.id
+    LEFT JOIN medium_chunks med ON m.medium_id = med.id
     WHERE m.id = ?;
   `);
 
@@ -257,7 +259,7 @@ export async function hybridQuery({
 
     let symbols = [];
     if (includeGraphContext) {
-      symbols = getRelatedSymbols(db, detail.id);
+      symbols = getRelatedSymbols(db, detail.section_id);
     }
 
     results.push({
@@ -267,7 +269,8 @@ export async function hybridQuery({
       heading: detail.heading,
       breadcrumbs: detail.breadcrumbs,
       snippet: hit.content,
-      full_section_content: detail.content,
+      paragraph_context: detail.medium_content || hit.content,
+      full_section_content: detail.section_content,
       score: parseFloat((hit.score || 0).toFixed(4)),
       rsf_score: hit.rsf_score ? parseFloat(hit.rsf_score.toFixed(4)) : null,
       rrf_score: hit.rrf_score ? parseFloat(hit.rrf_score.toFixed(4)) : null,

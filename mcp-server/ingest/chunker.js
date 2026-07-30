@@ -1,8 +1,11 @@
+import { splitSentencesMultilingual } from "./sentence_segmenter.js";
+
 export function estimateTokens(text) {
   if (!text) return 0;
   return Math.ceil(text.length / 4);
 }
 
+// 1. BIG LEVEL: Heading & Section Hierarchy Parser
 export function parseSections(markdown, docTitle = "Document") {
   const lines = markdown.split("\n");
   const sections = [];
@@ -26,7 +29,6 @@ export function parseSections(markdown, docTitle = "Document") {
   }
 
   for (const line of lines) {
-    const headerMatch = line.match(/^(#{1 mourn|#{1,6})\s+(.+)$/);
     const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
 
     if (headingMatch) {
@@ -60,77 +62,234 @@ export function parseSections(markdown, docTitle = "Document") {
   return sections;
 }
 
-export function createMicroChunks(section, sectionId, docId, targetChunkTokens = 200, overlapTokens = 30) {
-  const maxChars = targetChunkTokens * 4;
-  const overlapChars = overlapTokens * 4;
-
+// 2. MEDIUM LEVEL: Logical Paragraphs & Structural Block Extractor
+export function extractMediumBlocks(section, sectionId, docId) {
   const content = section.content;
-  const microChunks = [];
+  if (!content || content.trim().length === 0) return [];
 
-  if (content.length <= maxChars) {
-    microChunks.push({
-      id: `${sectionId}_m0`,
-      section_id: sectionId,
-      doc_id: docId,
-      content,
-      breadcrumbs: section.breadcrumbs,
-      token_count: estimateTokens(content),
-    });
-    return microChunks;
-  }
+  const lines = content.split("\n");
+  const mediumBlocks = [];
+  let blockIndex = 0;
 
-  const paragraphs = content.split(/\n\s*\n/);
-  let currentChunk = "";
-  let chunkIndex = 0;
+  let currentLines = [];
+  let currentBlockType = "paragraph"; // 'paragraph', 'code', 'table', 'list', 'blockquote'
 
-  for (const para of paragraphs) {
-    if ((currentChunk + "\n\n" + para).length > maxChars && currentChunk.length > 0) {
-      microChunks.push({
-        id: `${sectionId}_m${chunkIndex++}`,
+  function pushCurrentBlock() {
+    const blockContent = currentLines.join("\n").trim();
+    if (blockContent.length > 0) {
+      mediumBlocks.push({
+        id: `${sectionId}_m${blockIndex++}`,
         section_id: sectionId,
         doc_id: docId,
-        content: currentChunk.trim(),
         breadcrumbs: section.breadcrumbs,
-        token_count: estimateTokens(currentChunk),
+        content: blockContent,
+        block_type: currentBlockType,
+        token_count: estimateTokens(blockContent),
       });
+    }
+    currentLines = [];
+    currentBlockType = "paragraph";
+  }
 
-      const tail = currentChunk.slice(-overlapChars);
-      currentChunk = tail + "\n\n" + para;
-    } else {
-      currentChunk = currentChunk ? currentChunk + "\n\n" + para : para;
+  let inFencedCode = false;
+  let codeFenceMarker = "";
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Check code fence
+    const fenceMatch = line.match(/^(\s*)(```|~~~)/);
+    if (fenceMatch) {
+      if (!inFencedCode) {
+        if (currentLines.length > 0) pushCurrentBlock();
+        inFencedCode = true;
+        codeFenceMarker = fenceMatch[2];
+        currentBlockType = "code";
+        currentLines.push(line);
+      } else {
+        currentLines.push(line);
+        if (line.includes(codeFenceMarker)) {
+          inFencedCode = false;
+          pushCurrentBlock();
+        }
+      }
+      continue;
+    }
+
+    if (inFencedCode) {
+      currentLines.push(line);
+      continue;
+    }
+
+    // Check table line
+    const isTableLine = /^\s*\|.*\|\s*$/.test(line);
+    if (isTableLine) {
+      if (currentBlockType !== "table" && currentLines.length > 0) {
+        pushCurrentBlock();
+      }
+      currentBlockType = "table";
+      currentLines.push(line);
+      continue;
+    } else if (currentBlockType === "table") {
+      pushCurrentBlock();
+    }
+
+    // Check list item line
+    const isListLine = /^\s*([*+-]|\d+\.)\s+/.test(line);
+    if (isListLine) {
+      if (currentBlockType !== "list" && currentBlockType !== "paragraph" && currentLines.length > 0) {
+        pushCurrentBlock();
+      }
+      currentBlockType = "list";
+      currentLines.push(line);
+      continue;
+    }
+
+    // Check empty line
+    if (line.trim().length === 0) {
+      if (currentLines.length > 0) {
+        pushCurrentBlock();
+      }
+      continue;
+    }
+
+    currentLines.push(line);
+  }
+
+  pushCurrentBlock();
+  return mediumBlocks;
+}
+
+// 3. SMALL LEVEL: Sentence & Smart AST/Table Chunk Extractor
+export function createSmallChunks(mediumBlock, sectionId, docId) {
+  const content = mediumBlock.content;
+  const tokenCount = mediumBlock.token_count || estimateTokens(content);
+  const smallChunks = [];
+  let smallIdx = 0;
+
+  function makeChunk(chunkText, extraMeta = {}) {
+    if (!chunkText || chunkText.trim().length === 0) return;
+    smallChunks.push({
+      id: `${mediumBlock.id}_s${smallIdx++}`,
+      medium_id: mediumBlock.id,
+      section_id: sectionId,
+      doc_id: docId,
+      content: chunkText.trim(),
+      breadcrumbs: mediumBlock.breadcrumbs,
+      token_count: estimateTokens(chunkText),
+      ...extraMeta,
+    });
+  }
+
+  // RULE FOR TABLES
+  if (mediumBlock.block_type === "table") {
+    if (tokenCount <= 250) {
+      makeChunk(content);
+      return smallChunks;
+    }
+
+    const lines = content.split("\n");
+    const headerLines = [];
+    const dataLines = [];
+
+    for (const l of lines) {
+      if (headerLines.length < 2 && (l.includes("|---") || l.includes("|:--") || headerLines.length === 0)) {
+        headerLines.push(l);
+      } else {
+        dataLines.push(l);
+      }
+    }
+
+    const headerStr = headerLines.join("\n");
+    const chunkSize = 5;
+    for (let i = 0; i < dataLines.length; i += chunkSize) {
+      const rowBatch = dataLines.slice(i, i + chunkSize);
+      const tableChunkText = `${headerStr}\n${rowBatch.join("\n")}`;
+      makeChunk(tableChunkText);
+    }
+    return smallChunks;
+  }
+
+  // RULE FOR CODE BLOCKS
+  if (mediumBlock.block_type === "code") {
+    if (tokenCount <= 200) {
+      makeChunk(content);
+      return smallChunks;
+    }
+
+    const codeLines = content.split("\n");
+    const firstLine = codeLines[0] || "";
+    const lastLine = codeLines[codeLines.length - 1] || "";
+    const isFenced = firstLine.startsWith("```") || firstLine.startsWith("~~~");
+    const fenceHeader = isFenced ? firstLine : "";
+    const fenceFooter = isFenced && (lastLine.startsWith("```") || lastLine.startsWith("~~~")) ? lastLine : "";
+
+    const bodyLines = isFenced ? codeLines.slice(1, -1) : codeLines;
+    
+    const astBlocks = [];
+    let currentAstBlock = [];
+
+    for (const line of bodyLines) {
+      const isBoundary = /^\s*(?:export\s+|async\s+)?(?:function|class|const|let|var|def|pub\s+fn|fn|struct|interface|enum)\s+/.test(line);
+      if (isBoundary && currentAstBlock.length > 0) {
+        astBlocks.push(currentAstBlock.join("\n"));
+        currentAstBlock = [];
+      }
+      currentAstBlock.push(line);
+    }
+    if (currentAstBlock.length > 0) {
+      astBlocks.push(currentAstBlock.join("\n"));
+    }
+
+    for (const block of astBlocks) {
+      const fullChunk = fenceHeader ? `${fenceHeader}\n${block}\n${fenceFooter}` : block;
+      makeChunk(fullChunk);
+    }
+    return smallChunks;
+  }
+
+  // STANDARD SENTENCE SEGMENTATION
+  const sentences = splitSentencesMultilingual(content);
+  if (sentences.length === 0) {
+    makeChunk(content);
+  } else {
+    for (const sentence of sentences) {
+      makeChunk(sentence);
     }
   }
 
-  if (currentChunk.trim().length > 0) {
-    microChunks.push({
-      id: `${sectionId}_m${chunkIndex++}`,
-      section_id: sectionId,
-      doc_id: docId,
-      content: currentChunk.trim(),
-      breadcrumbs: section.breadcrumbs,
-      token_count: estimateTokens(currentChunk),
-    });
-  }
+  return smallChunks;
+}
 
+export function createMicroChunks(section, sectionId, docId) {
+  const mediumBlocks = extractMediumBlocks(section, sectionId, docId);
+  const microChunks = [];
+  for (const med of mediumBlocks) {
+    const smalls = createSmallChunks(med, sectionId, docId);
+    microChunks.push(...smalls);
+  }
   return microChunks;
 }
 
+// 4. TRIPLE HIERARCHY BUILDER: Big -> Medium -> Small Reference Tree
 export function buildTripleHierarchy(markdown, docId, docTitle = "Document") {
   const sectionsData = parseSections(markdown, docTitle);
   const sections = [];
+  const mediumChunks = [];
   const microChunks = [];
   const tocTree = [];
 
   sectionsData.forEach((sec, idx) => {
     const sectionId = `${docId}_s${idx}`;
-    sections.push({
+    const sectionObj = {
       id: sectionId,
       doc_id: docId,
       heading: sec.heading,
       breadcrumbs: sec.breadcrumbs,
       content: sec.content,
       token_count: sec.token_count,
-    });
+    };
+    sections.push(sectionObj);
 
     tocTree.push({
       section_id: sectionId,
@@ -138,13 +297,19 @@ export function buildTripleHierarchy(markdown, docId, docTitle = "Document") {
       breadcrumbs: sec.breadcrumbs,
     });
 
-    const micros = createMicroChunks(sec, sectionId, docId);
-    microChunks.push(...micros);
+    const mediums = extractMediumBlocks(sec, sectionId, docId);
+    mediumChunks.push(...mediums);
+
+    for (const med of mediums) {
+      const smalls = createSmallChunks(med, sectionId, docId);
+      microChunks.push(...smalls);
+    }
   });
 
   return {
     toc: JSON.stringify(tocTree),
     sections,
+    mediumChunks,
     microChunks,
   };
 }

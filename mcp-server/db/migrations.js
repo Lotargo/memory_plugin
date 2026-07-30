@@ -89,6 +89,27 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 3,
+    name: "003_medium_chunks_hierarchy",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS medium_chunks (
+            id TEXT PRIMARY KEY,
+            section_id TEXT NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
+            doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+            content TEXT NOT NULL,
+            block_type TEXT NOT NULL,
+            token_count INTEGER NOT NULL,
+            created_at INTEGER
+        );
+      `);
+
+      try {
+        db.exec(`ALTER TABLE micro_chunks ADD COLUMN medium_id TEXT REFERENCES medium_chunks(id) ON DELETE CASCADE;`);
+      } catch (e) {}
+    },
+  },
 ];
 
 export function runMigrations(db) {
@@ -100,12 +121,28 @@ export function runMigrations(db) {
       db.exec("BEGIN IMMEDIATE;");
       try {
         migration.up(db);
-        db.exec(`PRAGMA user_version = ${migration.version};`);
         db.exec("COMMIT;");
+        db.exec(`PRAGMA user_version = ${migration.version};`);
       } catch (err) {
         db.exec("ROLLBACK;");
         throw new Error(`Migration ${migration.name} failed: ${err.message}`);
       }
     }
   }
+
+  // Defensive table & column check for medium_chunks hierarchy
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS medium_chunks (
+        id TEXT PRIMARY KEY,
+        section_id TEXT NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
+        doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+        content TEXT NOT NULL,
+        block_type TEXT NOT NULL,
+        token_count INTEGER NOT NULL,
+        created_at INTEGER
+    );
+  `);
+  try {
+    db.exec(`ALTER TABLE micro_chunks ADD COLUMN medium_id TEXT REFERENCES medium_chunks(id) ON DELETE CASCADE;`);
+  } catch (e) {}
 }

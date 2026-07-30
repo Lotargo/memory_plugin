@@ -76,9 +76,19 @@ export async function ingestDocument({
       insertSectionStmt.run(sec.id, sec.doc_id, sec.heading, sec.breadcrumbs, sec.content, sec.token_count);
     }
 
+    if (hierarchy.mediumChunks && hierarchy.mediumChunks.length > 0) {
+      const insertMediumStmt = db.prepare(`
+        INSERT INTO medium_chunks (id, section_id, doc_id, content, block_type, token_count, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?);
+      `);
+      for (const med of hierarchy.mediumChunks) {
+        insertMediumStmt.run(med.id, med.section_id, med.doc_id, med.content, med.block_type, med.token_count, now);
+      }
+    }
+
     const insertMicroStmt = db.prepare(`
-      INSERT INTO micro_chunks (id, section_id, doc_id, content, vector, token_count)
-      VALUES (?, ?, ?, ?, ?, ?);
+      INSERT INTO micro_chunks (id, section_id, doc_id, content, vector, token_count, medium_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?);
     `);
     const insertFtsStmt = db.prepare(`
       INSERT INTO micro_chunks_fts (id, content, breadcrumbs)
@@ -86,7 +96,7 @@ export async function ingestDocument({
     `);
 
     for (const micro of hierarchy.microChunks) {
-      insertMicroStmt.run(micro.id, micro.section_id, micro.doc_id, micro.content, micro.vector, micro.token_count);
+      insertMicroStmt.run(micro.id, micro.section_id, micro.doc_id, micro.content, micro.vector, micro.token_count, micro.medium_id || null);
       insertFtsStmt.run(micro.id, micro.content, micro.breadcrumbs);
     }
 

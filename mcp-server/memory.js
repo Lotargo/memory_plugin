@@ -29,8 +29,10 @@ export async function ensureDir() {
   const storageDir = join(MEMORY_DIR, "storage");
   const blobsDir = join(storageDir, "blobs");
   const modelsDir = join(storageDir, "models");
+  const exportsDir = join(MEMORY_DIR, "exports");
   if (!existsSync(blobsDir)) await mkdir(blobsDir, { recursive: true });
   if (!existsSync(modelsDir)) await mkdir(modelsDir, { recursive: true });
+  if (!existsSync(exportsDir)) await mkdir(exportsDir, { recursive: true });
 }
 
 export function projectName(worktree, directory) {

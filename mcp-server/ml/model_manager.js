@@ -17,6 +17,15 @@ export async function getExtractor(modelName = null, progressCallback = null) {
 
   const { pipeline, env } = await import("@xenova/transformers");
 
+  // Fix ONNX Runtime Node.js WASM execution provider warning
+  try {
+    const { executionProviders } = await import("@xenova/transformers/src/backends/onnx.js");
+    const wasmIdx = executionProviders.indexOf("wasm");
+    if (wasmIdx !== -1) {
+      executionProviders.splice(wasmIdx, 1);
+    }
+  } catch {}
+
   env.cacheDir = MODELS_DIR;
   env.allowLocalModels = true;
   env.allowRemoteModels = true;
@@ -49,30 +58,38 @@ export function formatInputText(text, isQuery = false, modelName = null, instruc
   const targetModel = modelName || getConfig().embeddingModel || "Xenova/multilingual-e5-small";
   const name = targetModel.toLowerCase();
 
+  let cleanText = text.trim();
+  if (cleanText.startsWith("passage: ")) {
+    cleanText = cleanText.substring(9).trim();
+  } else if (cleanText.startsWith("query: ")) {
+    cleanText = cleanText.substring(7).trim();
+  }
+
   // 1. E5 Model Family (multilingual-e5-small, multilingual-e5-large, etc.)
   if (name.includes("e5")) {
+    const isInstructModel = name.includes("-instruct");
     if (isQuery) {
-      if (instruction && instruction.trim()) {
-        return `Instruct: ${instruction.trim()}\nQuery: ${text}`;
+      if (instruction && instruction.trim() && isInstructModel) {
+        return `Instruct: ${instruction.trim()}\nQuery: ${cleanText}`;
       }
-      return `query: ${text}`;
+      return `query: ${cleanText}`;
     }
-    return `passage: ${text}`;
+    return `passage: ${cleanText}`;
   }
 
   // 2. BGE Model Family (bge-m3, bge-small-en-v1.5, etc.)
   if (name.includes("bge")) {
     if (isQuery) {
       if (instruction && instruction.trim()) {
-        return `Represent this sentence for searching relevant passages: ${instruction.trim()} ${text}`;
+        return `Represent this sentence for searching relevant passages: ${instruction.trim()} ${cleanText}`;
       }
-      return `Represent this sentence for searching relevant passages: ${text}`;
+      return `Represent this sentence for searching relevant passages: ${cleanText}`;
     }
-    return text;
+    return cleanText;
   }
 
   // 3. MiniLM / Standard models (no prefixes)
-  return text;
+  return cleanText;
 }
 
 export async function embedText(text, isQuery = false, modelName = null, progressCallback = null, instruction = null) {

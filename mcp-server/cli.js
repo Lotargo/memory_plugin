@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import readline from "readline";
+import { join } from "node:path";
 import { getConfig, updateConfig, resetConfig } from "./config/config_manager.js";
 import { hybridQuery } from "./retrieval/retriever.js";
 import { getDatabase } from "./db/database.js";
@@ -674,6 +675,21 @@ export async function runCli() {
             value: "rag_docs",
             info: "Inspect ingested Markdown/code docs & delete chunks from SQLite",
           },
+          {
+            label: "[SNAPSHOT EXPORT] Export RAG Base Snapshot",
+            value: "export_snapshot",
+            info: "Export full RAG database, vectors & blobs into a snapshot file (.json or .json.gz)",
+          },
+          {
+            label: "[SNAPSHOT IMPORT] Import RAG Base Snapshot",
+            value: "import_snapshot",
+            info: "Import RAG database, vectors & blobs from a snapshot file (.json or .json.gz)",
+          },
+          {
+            label: "[HARD RESET] Purge RAG Base & Blob Storage",
+            value: "hard_reset",
+            info: "Permanently delete all documents, sections, vectors, FTS indexes, and blobs",
+          },
         ],
       },
       {
@@ -940,6 +956,7 @@ export async function runCli() {
             subtitle: targetDoc.title || targetDoc.path,
             items: [
               { label: "[INFO] View Details & Sections", value: "info", info: "Inspect micro-chunks and sections count" },
+              { label: "[EXPORT JSON] Export Full Hierarchy to Pretty JSON", value: "export_json", info: "Export multiline JSON with doc metadata & all 3 hierarchy levels" },
               { label: "[DELETE] Delete Document from RAG Base", value: "delete", info: "Purge document, FTS5 index & vectors" },
               { label: "< Cancel / Back", value: "cancel" },
             ],
@@ -967,12 +984,136 @@ export async function runCli() {
             }
             console.log("\n");
             await waitForEnter();
+          } else if (actionRes.action === "select" && actionRes.value === "export_json") {
+            const { exportDocumentToFile } = await import("./ingest/exporter.js");
+            const outFile = exportDocumentToFile(targetDoc.id, null, db);
+            console.clear();
+            console.log(`\n  \x1b[32m[OK] Full document JSON exported to:\x1b[0m`);
+            console.log(`  \x1b[36m${outFile}\x1b[0m\n`);
+            await waitForEnter();
           } else if (actionRes.action === "select" && actionRes.value === "delete") {
             await deleteDocument(targetDoc.id, db);
             console.clear();
             console.log(`\n  [OK] Document "${targetDoc.title || targetDoc.path}" deleted from RAG base.\n`);
             await waitForEnter();
           }
+        }
+        break;
+      }
+      case "export_snapshot": {
+        const { exportSnapshot } = await import("./admin/snapshot.js");
+        const { MEMORY_DIR } = await import("./memory.js");
+        const defaultPath = join(MEMORY_DIR, "exports", `rag_snapshot_${Date.now()}.json.gz`);
+        const pathRes = await readTextInput("Enter Output Snapshot Path (.json or .json.gz)", defaultPath);
+        if (pathRes.action === "submit" && pathRes.value) {
+          console.clear();
+          console.log(`\n  [EXPORT] Exporting full snapshot to: \x1b[36m${pathRes.value}\x1b[0m...\n`);
+          try {
+            const res = await exportSnapshot({ outputPath: pathRes.value });
+            console.log(`  \x1b[32m[OK] Snapshot exported successfully!\x1b[0m`);
+            console.log(`  Documents:    ${res.snapshot.documents ? res.snapshot.documents.length : 0}`);
+            console.log(`  Micro-Chunks: ${res.snapshot.micro_chunks ? res.snapshot.micro_chunks.length : 0}`);
+            console.log(`  Blobs:        ${res.snapshot.blobs ? res.snapshot.blobs.length : 0}`);
+            console.log(`  Output:       ${res.outputPath}\n`);
+          } catch (err) {
+            console.error(`  \x1b[31m[ERROR] Snapshot export failed: ${err.message}\x1b[0m\n`);
+          }
+          await waitForEnter();
+        }
+        break;
+      }
+      case "import_snapshot": {
+        const { importSnapshot, listAvailableSnapshots } = await import("./admin/snapshot.js");
+        const availableSnapshots = listAvailableSnapshots();
+
+        let chosenPath = null;
+
+        if (availableSnapshots.length > 0) {
+          const menuItems = availableSnapshots.map((s) => ({
+            label: s.name,
+            badge: `${s.sizeMB} MB`,
+            hint: s.dateStr,
+            info: `Path: ${s.path}`,
+            value: s.path,
+          }));
+
+          menuItems.push({
+            label: "[MANUAL ENTRY] Enter Custom Snapshot File Path...",
+            value: "manual",
+            info: "Type or paste an absolute file path to a .json or .json.gz snapshot file",
+          });
+          menuItems.push({ label: "< Cancel / Back", value: "back" });
+
+          const subRes = await selectSimpleMenu({
+            title: "SELECT SNAPSHOT FOR IMPORT",
+            subtitle: `Found ${availableSnapshots.length} snapshot files in exports directory`,
+            items: menuItems,
+          });
+
+          if (subRes.action === "back" || subRes.value === "back") {
+            break;
+          }
+
+          if (subRes.value === "manual") {
+            const inputRes = await readTextInput("Enter Input Snapshot Path (.json or .json.gz)");
+            if (inputRes.action === "submit" && inputRes.value) {
+              chosenPath = inputRes.value;
+            } else {
+              break;
+            }
+          } else {
+            chosenPath = subRes.value;
+          }
+        } else {
+          const inputRes = await readTextInput("Enter Input Snapshot Path (.json or .json.gz)");
+          if (inputRes.action === "submit" && inputRes.value) {
+            chosenPath = inputRes.value;
+          } else {
+            break;
+          }
+        }
+
+        if (chosenPath) {
+          console.clear();
+          console.log(`\n  [IMPORT] Importing snapshot from: \x1b[36m${chosenPath}\x1b[0m...\n`);
+          try {
+            const res = await importSnapshot({ snapshotPathOrData: chosenPath });
+            console.log(`  \x1b[32m[OK] Snapshot imported successfully!\x1b[0m`);
+            console.log(`  Documents:    ${res.documents}`);
+            console.log(`  Sections:     ${res.sections}`);
+            console.log(`  Medium-Chunks:${res.medium_chunks}`);
+            console.log(`  Micro-Chunks: ${res.micro_chunks}`);
+            console.log(`  Blobs:        ${res.blobs}\n`);
+          } catch (err) {
+            console.error(`  \x1b[31m[ERROR] Snapshot import failed: ${err.message}\x1b[0m\n`);
+          }
+          await waitForEnter();
+        }
+        break;
+      }
+      case "hard_reset": {
+        const confirmRes = await selectSimpleMenu({
+          title: "HARD RESET DATABASE & BLOB STORAGE",
+          subtitle: `Permanently purge all ${stats.docCount} docs, ${stats.chunkCount} chunks & blobs`,
+          items: [
+            {
+              label: "[CONFIRM HARD RESET] Purge All Documents, Vectors & Blobs",
+              value: "confirm",
+              info: "WARNING: Irreversible deletion of all SQLite documents, micro-chunks, and CAS blobs!",
+            },
+            { label: "< Cancel / Back", value: "cancel" },
+          ],
+        });
+
+        if (confirmRes.action === "select" && confirmRes.value === "confirm") {
+          const { hardResetDatabase } = await import("./admin/snapshot.js");
+          const res = hardResetDatabase();
+          console.clear();
+          console.log(`\n  \x1b[32m[OK] HARD RESET COMPLETED SUCCESSFULLY!\x1b[0m`);
+          console.log(`  Purged Documents: ${res.purgedDocuments}`);
+          console.log(`  Purged Chunks:    ${res.purgedChunks}`);
+          console.log(`  Purged Blobs:     ${res.purgedBlobs}\n`);
+          await waitForEnter();
         }
         break;
       }
