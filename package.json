@@ -1,9 +1,12 @@
 {
   "name": "@lotargo/memory_plugin",
-  "version": "1.0.3",
+  "version": "1.1.4",
   "description": "Persistent memory agent for coding AI tools — remembers user preferences and project context across sessions. Works with Antigravity, OpenCode, Claude Code, and Codex.",
   "type": "module",
   "main": "opencode-plugin/index.js",
+  "scripts": {
+    "preinstall": "node mcp-server/preinstall.js || true"
+  },
   "bin": {
     "memory_plugin": "mcp-server/index.js",
     "memory-agent": "mcp-server/index.js",
@@ -11,7 +14,20 @@
   },
   "files": [
     "opencode-plugin",
-    "mcp-server",
+    "mcp-server/admin",
+    "mcp-server/benchmarks",
+    "mcp-server/config",
+    "mcp-server/db",
+    "mcp-server/graph",
+    "mcp-server/ingest",
+    "mcp-server/ml",
+    "mcp-server/retrieval",
+    "mcp-server/storage",
+    "mcp-server/cli.js",
+    "mcp-server/index.js",
+    "mcp-server/memory.js",
+    "mcp-server/setup.js",
+    "mcp-server/preinstall.js",
     "skills"
   ],
   "keywords": [
@@ -32,6 +48,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@xenova/transformers": "^2.17.2",
     "zod": "^4.1.0"
   }
 }
