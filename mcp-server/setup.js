@@ -176,6 +176,12 @@ export async function runSetup() {
     promptResults.forEach((r) => {
       if (r.status === "enabled") {
         console.log(`  [OK] ${r.name}: enabled global prompt instruction in ${r.filePath}`);
+      } else if (r.status === "created_new_file") {
+        console.log(`  [OK] ${r.name}: created ${r.filePath} with global prompt instruction`);
+      } else if (r.status === "up_to_date") {
+        console.log(`  [OK] ${r.name}: global prompt already up to date (${r.filePath})`);
+      } else if (r.status === "failed") {
+        console.log(`  [WARN] ${r.name}: failed to enable global prompt (${r.error})`);
       }
     });
   } catch (err) {
