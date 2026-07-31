@@ -629,6 +629,24 @@ function waitForEnter() {
 }
 
 export async function runCli() {
+  const cliArgs = process.argv.slice(2);
+  if (cliArgs.includes("--enable-prompt") || cliArgs.includes("enable-prompt")) {
+    const { enableGlobalPrompt } = await import("./prompt_manager.js");
+    const results = await enableGlobalPrompt();
+    console.log("\n  [OK] Global prompt enabled across client configurations:\n");
+    results.forEach((r) => console.log(`  - ${r.name}: ${r.filePath} (${r.status})`));
+    console.log("");
+    return;
+  }
+  if (cliArgs.includes("--disable-prompt") || cliArgs.includes("disable-prompt")) {
+    const { disableGlobalPrompt } = await import("./prompt_manager.js");
+    const results = await disableGlobalPrompt();
+    console.log("\n  [OK] Global prompt disabled across client configurations:\n");
+    results.forEach((r) => console.log(`  - ${r.name}: ${r.filePath} (${r.status})`));
+    console.log("");
+    return;
+  }
+
   let running = true;
   let selectedIndex = 0;
 
@@ -728,6 +746,21 @@ export async function runCli() {
             label: "[HARD RESET] Purge RAG Base & Blob Storage",
             value: "hard_reset",
             info: "Permanently delete all documents, sections, vectors, FTS indexes, and blobs",
+          },
+        ],
+      },
+      {
+        title: "Global Prompt & Integration Management",
+        items: [
+          {
+            label: "[PROMPT ENABLE] Enable Global Prompt (Antigravity / Codex / Claude)",
+            value: "enable_prompt",
+            info: "Inject memory instructions into ~/.gemini/config/AGENTS.md, ~/.codex/AGENTS.md, ~/.claude/CLAUDE.md",
+          },
+          {
+            label: "[PROMPT DISABLE] Disable Global Prompt",
+            value: "disable_prompt",
+            info: "Remove memory instructions from global AGENTS.md / CLAUDE.md files",
           },
         ],
       },
@@ -1588,6 +1621,24 @@ export async function runCli() {
             await waitForEnter();
           }
         }
+        break;
+      }
+      case "enable_prompt": {
+        const { enableGlobalPrompt } = await import("./prompt_manager.js");
+        const results = await enableGlobalPrompt();
+        console.clear();
+        console.log("\n  [OK] Global prompt enabled across client configurations:\n");
+        results.forEach((r) => console.log(`  - ${r.name}: ${r.filePath} (${r.status})`));
+        await waitForEnter();
+        break;
+      }
+      case "disable_prompt": {
+        const { disableGlobalPrompt } = await import("./prompt_manager.js");
+        const results = await disableGlobalPrompt();
+        console.clear();
+        console.log("\n  [OK] Global prompt disabled across client configurations:\n");
+        results.forEach((r) => console.log(`  - ${r.name}: ${r.filePath} (${r.status})`));
+        await waitForEnter();
         break;
       }
       case "reset": {

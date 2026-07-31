@@ -153,7 +153,12 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
         },
       },
       "remember": {
-        description: "Save an important, durable fact to memory. Only use for high-signal information (name, goals, constraints, tech preferences, project conventions). Translate the fact into English before saving. scope: 'project' (default) or 'global'",
+        description:
+          "Save an important, durable fact to memory. Only use for high-signal information " +
+          "(name, goals, constraints, tech preferences, project conventions). " +
+          "Optionally link the fact to a Knowledge Base document or exact line range (docId, startLine, endLine). " +
+          "Translate the fact into English and keep it concise. " +
+          "scope: 'project' (default) or 'global'",
         args: {
           fact: { type: "string", description: "The fact to remember, written in English" },
           scope: {
@@ -161,25 +166,52 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
             description: "'project' (default) or 'global'",
             default: "project",
           },
+          docId: { type: "string", description: "Optional document ID, title, or path to link this fact to" },
+          startLine: { type: "number", description: "Optional starting line number in target document" },
+          endLine: { type: "number", description: "Optional ending line number in target document" },
+          relationType: {
+            type: "string",
+            description: "Relation type (e.g. 'RULES_FOR', 'IMPLEMENTS', 'REFERENCES')",
+            default: "LINKS_TO",
+          },
         },
-        async execute({ fact, scope }, { worktree, directory }) {
+        async execute({ fact, scope, docId, startLine, endLine, relationType }, { worktree, directory }) {
           const key = scopeKey(scope || "project", worktree, directory);
           const entries = await readMemory(key);
           const factNormalized = fact.toLowerCase().trim();
-          if (entries.some((e) => {
+          if (!entries.some((e) => {
             const idx = e.indexOf("] ");
             return idx !== -1 && e.slice(idx + 2).toLowerCase().trim() === factNormalized;
           })) {
-            return "Already saved";
+            entries.push(`- [${today()}] ${fact}`);
+            await writeMemory(key, entries);
           }
-          entries.push(`- [${today()}] ${fact}`);
-          await writeMemory(key, entries);
-          await notify(client, "Memory updated");
-          return "Memory updated";
+
+          let linkInfo = "";
+          if (docId) {
+            try {
+              const { linkFactToDocument } = await import("../mcp-server/graph/knowledge_linker.js");
+              const linkRes = linkFactToDocument({
+                factKey: key,
+                factText: fact,
+                docId,
+                startLine,
+                endLine,
+                relationType: relationType || "LINKS_TO",
+              });
+              const linesStr = startLine ? `:L${startLine}${endLine ? `-${endLine}` : ""}` : "";
+              linkInfo = ` [Linked to Doc: "${linkRes.docTitle}"${linesStr}]`;
+            } catch (err) {
+              linkInfo = ` (Note: Fact saved, but document link failed: ${err.message})`;
+            }
+          }
+
+          await notify(client, "Memory updated" + linkInfo);
+          return "Memory updated" + linkInfo;
         },
       },
       "recall": {
-        description: "Показать запомненные факты (scope: project | global | all, по умолчанию все)",
+        description: "Show saved facts with any Agent-linked Knowledge Base documents/lines. scope: 'project', 'global', or 'all' (default)",
         args: {
           scope: {
             type: "string",
@@ -190,11 +222,37 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
         async execute({ scope }, { worktree, directory }) {
           const project = projectName(worktree, directory);
           const results = [];
+
+          let getLinksForFact;
+          try {
+            const linker = await import("../mcp-server/graph/knowledge_linker.js");
+            getLinksForFact = linker.getLinksForFact;
+          } catch (e) {}
+
+          const formatFactWithLinks = (factText, key) => {
+            let line = factText;
+            if (getLinksForFact) {
+              try {
+                const links = getLinksForFact(key, factText);
+                if (links && links.length > 0) {
+                  const docStr = links
+                    .map((l) => {
+                      const range = l.start_line ? `:L${l.start_line}${l.end_line ? `-${l.end_line}` : ""}` : "";
+                      return `${l.doc_title || l.doc_path}${range}`;
+                    })
+                    .join(", ");
+                  line += ` 🔗 [Linked Docs: ${docStr}]`;
+                }
+              } catch (e) {}
+            }
+            return line;
+          };
+
           if (scope !== "project") {
             const global = await readMemoryRaw(GLOBAL_KEY);
             if (global.length) {
               results.push("--- Global ---");
-              global.forEach((e, i) => results.push(`${i + 1}. ${e}`));
+              global.forEach((e, i) => results.push(`${i + 1}. ${formatFactWithLinks(e, GLOBAL_KEY)}`));
             }
           }
           if (scope !== "global") {
@@ -202,7 +260,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
             if (local.length) {
               if (results.length) results.push("");
               results.push(`--- ${project} ---`);
-              local.forEach((e, i) => results.push(`${i + 1}. ${e}`));
+              local.forEach((e, i) => results.push(`${i + 1}. ${formatFactWithLinks(e, project)}`));
             }
           }
           return results.length ? results.join("\n") : "Memory is empty.";
@@ -235,6 +293,232 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           const result = removed.length ? "Memory updated" : "Not found.";
           if (removed.length) await notify(client, "Memory updated");
           return result;
+        },
+      },
+      "link_knowledge": {
+        description:
+          "Explicitly link a Notebook memory fact to a Knowledge Base document, section, or line range. " +
+          "Creates Agent-driven Graph Edges connecting memory to RAG documents.",
+        args: {
+          action: {
+            type: "string",
+            description: "Action type: 'link' (default), 'list_links', 'get_doc_links'",
+            default: "link",
+          },
+          factText: { type: "string", description: "Memory fact text or keyword" },
+          docId: { type: "string", description: "Document ID, title, or file path" },
+          scope: { type: "string", description: "'project' (default) or 'global'", default: "project" },
+          startLine: { type: "number", description: "Starting line number in target document" },
+          endLine: { type: "number", description: "Ending line number in target document" },
+          relationType: {
+            type: "string",
+            description: "Relation type (e.g. 'RULES_FOR', 'IMPLEMENTS', 'EXPLAINS')",
+            default: "LINKS_TO",
+          },
+        },
+        async execute({ action, factText, docId, scope, startLine, endLine, relationType }, { worktree, directory }) {
+          const { linkFactToDocument, getLinksForDoc, listAllLinks } = await import("../mcp-server/graph/knowledge_linker.js");
+          const key = scopeKey(scope || "project", worktree, directory);
+          const act = action || "link";
+
+          if (act === "link") {
+            if (!factText || !docId) {
+              throw new Error("factText and docId are required parameters for link action");
+            }
+            const res = linkFactToDocument({
+              factKey: key,
+              factText,
+              docId,
+              startLine,
+              endLine,
+              relationType: relationType || "LINKS_TO",
+            });
+            return JSON.stringify(res, null, 2);
+          }
+
+          if (act === "get_doc_links") {
+            if (!docId) throw new Error("docId parameter is required for get_doc_links action");
+            const links = getLinksForDoc(docId);
+            return JSON.stringify(links, null, 2);
+          }
+
+          if (act === "list_links") {
+            const links = listAllLinks(key);
+            return JSON.stringify(links, null, 2);
+          }
+
+          throw new Error(`Unknown action: ${act}`);
+        },
+      },
+      "ingest_document": {
+        description:
+          "Ingest a document into the RAG knowledge base. " +
+          "Accepts local file paths, web URLs, or raw Markdown/text content. " +
+          "Processes document through 3-tier hierarchy chunking (Big/Medium/Small), " +
+          "computes dense vectors, and extracts GraphRAG code symbols.",
+        args: {
+          content: { type: "string", description: "Raw text content, file path, or web URL" },
+          type: { type: "string", description: "Input content type: 'text', 'file', 'url'", default: "text" },
+          title: { type: "string", description: "Document title" },
+          path: { type: "string", description: "Original document file path" },
+          generateEmbeddings: { type: "boolean", description: "Compute dense vector embeddings", default: true },
+        },
+        async execute({ content, type, title, path, generateEmbeddings }) {
+          const { ingestDocument } = await import("../mcp-server/ingest/pipeline.js");
+          const result = await ingestDocument({
+            content,
+            type: type || "text",
+            title: title || null,
+            path: path || null,
+            generateEmbeddings: generateEmbeddings !== false,
+          });
+          return JSON.stringify(
+            {
+              status: "success",
+              docId: result.docId,
+              title: result.title,
+              sectionsCount: result.sectionsCount,
+              microChunksCount: result.microChunksCount,
+              deduplicated: result.deduplicated,
+            },
+            null,
+            2
+          );
+        },
+      },
+      "query_knowledge_base": {
+        description:
+          "Perform hybrid search (RSF/RRF BM25 full-text + dense vector similarity) across the RAG knowledge base. " +
+          "Returns top-ranked candidate document sections with breadcrumbs, GraphRAG defined code symbols, and relevance scores.",
+        args: {
+          query: { type: "string", description: "Search query in natural language or symbol name" },
+          limit: { type: "number", description: "Maximum number of sections to return", default: 5 },
+          instruction: {
+            type: "string",
+            description: "Optional task-specific retrieval instruction shaping embedding focus",
+          },
+          generateEmbeddings: { type: "boolean", description: "Use vector search alongside BM25", default: true },
+        },
+        async execute({ query, limit, instruction, generateEmbeddings }) {
+          const { hybridQuery } = await import("../mcp-server/retrieval/retriever.js");
+          const { getConfig } = await import("../mcp-server/config/config_manager.js");
+          const activeConfig = getConfig();
+
+          const results = await hybridQuery({
+            query,
+            limit: limit || 5,
+            generateEmbeddings: generateEmbeddings !== false,
+            instruction: instruction || null,
+          });
+
+          if (!results || results.length === 0) {
+            return `[Active Model: ${activeConfig.embeddingModel}]\nNo matching knowledge found for query.`;
+          }
+
+          const headerNote = `[Active Model: ${activeConfig.embeddingModel} | Fusion: ${activeConfig.fusionAlgorithm.toUpperCase()}]\n\n`;
+
+          const formatted = results
+            .map((r, i) => {
+              let header = `### [${i + 1}] ${r.doc_title || "Untitled"}`;
+              if (r.heading) header += ` > ${r.heading}`;
+              if (r.breadcrumbs) header += ` (${r.breadcrumbs})`;
+              let body = `Score: ${(r.score || 0).toFixed(4)}\n`;
+              if (r.defined_symbols && r.defined_symbols.length > 0) {
+                body += `Defined Symbols: ${r.defined_symbols.join(", ")}\n`;
+              }
+              body += `\n${r.snippet || r.full_section_content || ""}`;
+              return `${header}\n${body}`;
+            })
+            .join("\n\n---\n\n");
+
+          return headerNote + formatted;
+        },
+      },
+      "manage_knowledge_base": {
+        description:
+          "Manage the RAG knowledge base: inspect stats, list documents, read full raw document, delete documents, or export/import snapshots.",
+        args: {
+          action: {
+            type: "string",
+            description: "Management action: 'stats', 'list', 'read_document', 'delete', 'export_snapshot', 'import_snapshot'",
+          },
+          docId: { type: "string", description: "Document ID, title, or path (required for read_document and delete)" },
+          snapshotPath: { type: "string", description: "File path for snapshot export/import" },
+        },
+        async execute({ action, docId, snapshotPath }) {
+          const { getDatabase } = await import("../mcp-server/db/database.js");
+          const db = getDatabase();
+
+          if (action === "stats") {
+            const docCount = db.prepare("SELECT COUNT(*) as cnt FROM documents").get().cnt;
+            const secCount = db.prepare("SELECT COUNT(*) as cnt FROM sections").get().cnt;
+            const chunkCount = db.prepare("SELECT COUNT(*) as cnt FROM micro_chunks").get().cnt;
+            const edgeCount = db.prepare("SELECT COUNT(*) as cnt FROM graph_edges").get().cnt;
+            return JSON.stringify(
+              {
+                documents: docCount,
+                sections: secCount,
+                micro_chunks: chunkCount,
+                graph_edges: edgeCount,
+              },
+              null,
+              2
+            );
+          }
+
+          if (action === "list") {
+            const docs = db
+              .prepare("SELECT id, title, path, blob_hash, created_at FROM documents ORDER BY created_at DESC")
+              .all();
+            return JSON.stringify(docs, null, 2);
+          }
+
+          if (action === "read_document") {
+            if (!docId) throw new Error("docId parameter is required for read_document action");
+            const doc = db
+              .prepare("SELECT id, title, path, blob_hash, created_at FROM documents WHERE id = ? OR path = ? OR title = ?")
+              .get(docId, docId, docId);
+            if (!doc) {
+              throw new Error(`Document not found in knowledge base for docId: ${docId}`);
+            }
+            const { readBlob } = await import("../mcp-server/storage/blob_store.js");
+            const rawContent = await readBlob(doc.blob_hash);
+            return JSON.stringify(
+              {
+                id: doc.id,
+                title: doc.title,
+                path: doc.path,
+                created_at: doc.created_at,
+                content: rawContent,
+              },
+              null,
+              2
+            );
+          }
+
+          if (action === "delete") {
+            if (!docId) throw new Error("docId parameter is required for delete action");
+            const { deleteDocument } = await import("../mcp-server/ingest/pipeline.js");
+            const result = await deleteDocument(docId, db);
+            return JSON.stringify(result, null, 2);
+          }
+
+          if (action === "export_snapshot") {
+            const { exportSnapshot } = await import("../mcp-server/admin/snapshot.js");
+            const result = await exportSnapshot({ customDb: db, outputPath: snapshotPath || null });
+            return snapshotPath
+              ? `Snapshot exported successfully to ${snapshotPath}`
+              : JSON.stringify(result, null, 2);
+          }
+
+          if (action === "import_snapshot") {
+            if (!snapshotPath) throw new Error("snapshotPath parameter is required for import_snapshot action");
+            const { importSnapshot } = await import("../mcp-server/admin/snapshot.js");
+            const result = await importSnapshot({ customDb: db, snapshotPathOrData: snapshotPath });
+            return JSON.stringify(result, null, 2);
+          }
+
+          throw new Error(`Unknown action: ${action}`);
         },
       },
     },
