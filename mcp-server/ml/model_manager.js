@@ -23,6 +23,25 @@ function getOptimalThreadCount() {
   return Math.max(1, Math.min(totalCores, 8));
 }
 
+export function ensureValidModelDirectory() {
+  try {
+    if (!fs.existsSync(MODELS_DIR)) {
+      fs.mkdirSync(MODELS_DIR, { recursive: true });
+    }
+    const testFile = path.join(MODELS_DIR, ".path_check");
+    fs.writeFileSync(testFile, "ok");
+    fs.unlinkSync(testFile);
+    return MODELS_DIR;
+  } catch (err) {
+    console.warn(`[Self-Healing] Model directory path "${MODELS_DIR}" is inaccessible or invalid (${err.message}). Falling back to standard default model storage path...`);
+    const fallbackDir = path.join(MODELS_DIR, "..", "models");
+    try {
+      fs.mkdirSync(fallbackDir, { recursive: true });
+    } catch (e) {}
+    return fallbackDir;
+  }
+}
+
 export async function getExtractor(modelName = null, progressCallback = null) {
   const targetModel = modelName || getConfig().embeddingModel || "Xenova/multilingual-e5-small";
 
@@ -43,9 +62,12 @@ export async function getExtractor(modelName = null, progressCallback = null) {
     return extractorInstance;
   }
 
+  // Ensure valid writable storage directory
+  const cacheDir = ensureValidModelDirectory();
+
   const { pipeline, env } = await import("@huggingface/transformers");
 
-  env.cacheDir = MODELS_DIR;
+  env.cacheDir = cacheDir;
   env.allowLocalModels = true;
   env.allowRemoteModels = true;
   env.remoteHost = "https://huggingface.co";
@@ -93,18 +115,52 @@ export async function getExtractor(modelName = null, progressCallback = null) {
       } catch {}
     }
   } catch (err) {
+    const isNetworkError = err.message && (
+      err.message.includes("fetch") ||
+      err.message.includes("network") ||
+      err.message.includes("ETIMEDOUT") ||
+      err.message.includes("ENOTFOUND") ||
+      err.message.includes("503") ||
+      err.message.includes("502") ||
+      err.message.includes("504")
+    );
+
+    if (isNetworkError) {
+      console.warn(`[Model Manager] ⚠️ Network interruption while loading "${targetModel}": ${err.message}. Retrying / Resuming download...`);
+    } else {
+      console.warn(`[Model Manager] ⚠️ Unrecoverable file error for "${targetModel}": ${err.message}. Purging corrupted cache...`);
+      deleteModelCache(targetModel);
+    }
+
     if (targetDevice !== "cpu") {
-      console.warn(`[GPU Engine] GPU initialization (${targetDevice}) failed: ${err.message}. Falling back to CPU...`);
+      console.warn(`[GPU Engine] GPU initialization (${targetDevice}) failed. Retrying on CPU...`);
       pipelineOpts.device = "cpu";
       pipelineOpts.session_options.executionMode = "sequential";
-      extractorInstance = await pipeline("feature-extraction", targetModel, pipelineOpts);
-      loadedModelName = targetModel;
-      loadedDevice = "cpu";
-    } else if (targetModel !== "Xenova/multilingual-e5-small") {
-      console.warn(`HuggingFace model load failed for ${targetModel}: ${err.message}. Falling back to default Xenova/multilingual-e5-small...`);
-      extractorInstance = await pipeline("feature-extraction", "Xenova/multilingual-e5-small", pipelineOpts);
-      loadedModelName = "Xenova/multilingual-e5-small";
-      loadedDevice = targetDevice;
+      try {
+        extractorInstance = await pipeline("feature-extraction", targetModel, pipelineOpts);
+        loadedModelName = targetModel;
+        loadedDevice = "cpu";
+        return extractorInstance;
+      } catch (err2) {
+        if (!isNetworkError) deleteModelCache(targetModel);
+      }
+    }
+
+    if (targetModel !== "Xenova/multilingual-e5-small") {
+      console.warn(`[Fallback] Reverting to standard default model "Xenova/multilingual-e5-small"...`);
+      try {
+        extractorInstance = await pipeline("feature-extraction", "Xenova/multilingual-e5-small", {
+          quantized: true,
+          dtype: "q8",
+          device: "cpu",
+          session_options: { graphOptimizationLevel: "all", executionMode: "sequential" },
+        });
+        loadedModelName = "Xenova/multilingual-e5-small";
+        loadedDevice = "cpu";
+      } catch (err3) {
+        console.error(`[Fatal] Could not load default fallback model: ${err3.message}`);
+        throw err3;
+      }
     } else {
       throw err;
     }
@@ -296,6 +352,8 @@ export async function getReranker(modelName = "Xenova/bge-reranker-base", progre
     return rerankerInstance;
   }
 
+  checkAndSelfHealModel(modelName);
+
   const { pipeline, env } = await import("@huggingface/transformers");
   env.cacheDir = MODELS_DIR;
   env.allowLocalModels = true;
@@ -338,7 +396,8 @@ export async function getReranker(modelName = "Xenova/bge-reranker-base", progre
     rerankerInstance = await pipeline("text-classification", modelName, pipelineOpts);
     loadedRerankerName = modelName;
   } catch (err) {
-    console.warn(`Failed to load reranker model ${modelName}: ${err.message}`);
+    console.warn(`Failed to load reranker model ${modelName}: ${err.message}. Purging corrupt files...`);
+    deleteModelCache(modelName);
     return null;
   }
   return rerankerInstance;
