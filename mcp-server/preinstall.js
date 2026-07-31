@@ -1,7 +1,11 @@
 import { execSync } from "child_process";
 
+// Skip preinstall entirely in CI / Docker / Jules containers
+if (process.env.CI || process.env.CONTINUOUS_INTEGRATION || process.env.DEBIAN_FRONTEND === "noninteractive" || process.cwd().startsWith("/app")) {
+  process.exit(0);
+}
+
 // Only run graceful process termination during explicit global npm updates
-// Skip if running interactively or inside active MCP sessions to avoid EOF drops
 if (process.env.npm_config_global === "true" || process.env.MEMORY_PREINSTALL_FORCE === "true") {
   try {
     const currentPid = process.pid;

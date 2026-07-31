@@ -55,9 +55,13 @@ Standard AI coding assistants lose context as soon as a chat session closes or a
 
 ### Installation
 
-Run the unified setup command to configure all detected AI environments automatically:
+Run the setup command to configure all detected AI environments automatically:
 
 ```bash
+# Recommended: Global installation & setup (works across local CLI, Jules, Docker, and CI)
+npm install -g @lotargo/memory_plugin && memory_plugin setup
+
+# Or via npx
 npx @lotargo/memory_plugin setup
 ```
 
@@ -65,16 +69,16 @@ To target a specific environment:
 
 ```bash
 # Antigravity / Gemini CLI
-npx @lotargo/memory_plugin setup --antigravity
+npm install -g @lotargo/memory_plugin && memory_plugin setup --antigravity
 
 # OpenCode
-npx @lotargo/memory_plugin setup --opencode
+npm install -g @lotargo/memory_plugin && memory_plugin setup --opencode
 
 # Claude Code
-npx @lotargo/memory_plugin setup --claude
+npm install -g @lotargo/memory_plugin && memory_plugin setup --claude
 
 # Codex
-npx @lotargo/memory_plugin setup --codex
+npm install -g @lotargo/memory_plugin && memory_plugin setup --codex
 ```
 
 ---
