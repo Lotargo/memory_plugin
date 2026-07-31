@@ -8,7 +8,9 @@ const END_MARKER = "<!-- END MEMORY AGENT PROMPT -->";
 
 export const PROMPT_BLOCK = `${START_MARKER}
 [SYSTEM INSTRUCTION: PERSONAL CONTEXT & MEMORY AGENT]
-When starting a session or when personal/project context is relevant, use \`recall\` from \`memory-agent\` to load saved facts, user preferences, and project guidelines. Use \`remember\` to save any durable high-signal facts provided by the user.
+1. MANDATORY FIRST STEP (SESSION INITIALIZATION): At the very start of every session or conversation, your VERY FIRST ACTION MUST BE to execute \`recall\` from \`memory-agent\` to load all saved facts, user preferences, personal context, and project guidelines BEFORE performing any other tasks or reading code.
+2. PROACTIVE SAVING DIRECTIVE: You MUST automatically and proactively call \`remember\` from \`memory-agent\` whenever the user shares durable facts, personal preferences, coding guidelines, technology choices, or project architecture decisions. Do NOT wait for explicit user commands like "remember this".
+3. SIGNAL FILTER: Save only high-signal facts (name, language, roles, constraints, tech stack preferences, architecture decisions, conventions). Translate facts into clear, concise English when saving. Do NOT save transient details or one-off conversation turns.
 ${END_MARKER}`;
 
 export function getGlobalPromptTargets() {

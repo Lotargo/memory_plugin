@@ -1,7 +1,8 @@
-import { readFile, writeFile, mkdir } from "fs/promises";
+import { readFile, writeFile, mkdir, cp, readdir } from "fs/promises";
 import { existsSync } from "fs";
-import { join } from "path";
+import { join, dirname } from "path";
 import { homedir } from "os";
+import { fileURLToPath } from "url";
 
 export async function runSetup() {
   const args = process.argv.slice(2);
@@ -115,9 +116,12 @@ export async function runSetup() {
       };
       await writeFile(geminiConfigFile, JSON.stringify(config, null, 2));
 
-      // Local workspace config (.agents/mcp_config.json) if in project
+      // Local workspace config (.agents/mcp_config.json) only if .agents exists or --local flag is set
       const cwd = process.cwd();
-      if (existsSync(join(cwd, ".agents")) || existsSync(join(cwd, "package.json")) || existsSync(join(cwd, ".git"))) {
+      const hasAgentsDir = existsSync(join(cwd, ".agents"));
+      const isLocalRequested = args.includes("--local");
+
+      if (hasAgentsDir || isLocalRequested) {
         const localAgentsDir = join(cwd, ".agents");
         await mkdir(localAgentsDir, { recursive: true });
         const localMcpFile = join(localAgentsDir, "mcp_config.json");
@@ -133,9 +137,10 @@ export async function runSetup() {
           args: ["-y", "@lotargo/memory_plugin"],
         };
         await writeFile(localMcpFile, JSON.stringify(localConfig, null, 2));
+        console.log("  [OK] Antigravity: configured MCP server in ~/.gemini/config/mcp_config.json and .agents/mcp_config.json");
+      } else {
+        console.log("  [OK] Antigravity: configured MCP server in ~/.gemini/config/mcp_config.json");
       }
-
-      console.log("  [OK] Antigravity: configured MCP server in ~/.gemini/config/mcp_config.json and .agents/mcp_config.json");
       configuredCount++;
     } catch (err) {
       console.log("  [SKIP] Antigravity setup skipped:", err.message);
@@ -175,6 +180,44 @@ export async function runSetup() {
     });
   } catch (err) {
     console.log("  [SKIP] Global prompt setup skipped:", err.message);
+  }
+
+  // 6. Global & Local Skill Installation (Antigravity, Codex, Claude Code)
+  try {
+    const packageDir = dirname(dirname(fileURLToPath(import.meta.url)));
+    const packageSkillsDir = join(packageDir, "skills");
+    if (existsSync(packageSkillsDir)) {
+      const opencodeDir = process.env.OPENCODE_CONFIG_DIR || join(home, ".config", "opencode");
+      const targets = [
+        { name: "OpenCode", dir: join(opencodeDir, "skills") },
+        { name: "Antigravity", dir: join(home, ".gemini", "config", "skills") },
+        { name: "Codex", dir: join(home, ".codex", "skills") },
+        { name: "Claude Code", dir: join(home, ".claude", "skills") },
+      ];
+      const cwd = process.cwd();
+      if (existsSync(join(cwd, ".agents"))) {
+        targets.push({ name: "Antigravity (local)", dir: join(cwd, ".agents", "skills") });
+      }
+
+      for (const target of targets) {
+        try {
+          await mkdir(target.dir, { recursive: true });
+          const entries = await readdir(packageSkillsDir, { withFileTypes: true });
+          for (const entry of entries) {
+            if (entry.isDirectory()) {
+              const src = join(packageSkillsDir, entry.name);
+              const dest = join(target.dir, entry.name);
+              await cp(src, dest, { recursive: true });
+            }
+          }
+          console.log(`  [OK] ${target.name}: installed skills to ${target.dir}`);
+        } catch (e) {
+          console.log(`  [SKIP] ${target.name} skill installation skipped:`, e.message);
+        }
+      }
+    }
+  } catch (err) {
+    console.log("  [SKIP] Skill installation skipped:", err.message);
   }
 
   console.log(`\nSetup complete. Configured ${configuredCount} environment(s).\n`);

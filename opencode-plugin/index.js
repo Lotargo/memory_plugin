@@ -1,14 +1,31 @@
-const { readFile, writeFile, mkdir } = await import("fs/promises");
+const { readFile, writeFile, mkdir, cp, readdir } = await import("fs/promises");
 const { existsSync } = await import("fs");
-const { join, basename } = await import("path");
+const { join, basename, dirname } = await import("path");
 const { homedir } = await import("os");
+const { fileURLToPath } = await import("url");
 
 const CONFIG_DIR = process.env.OPENCODE_CONFIG_DIR || join(homedir(), ".config", "opencode");
 const MEMORY_DIR = join(CONFIG_DIR, "memory");
+const SKILLS_DIR = join(CONFIG_DIR, "skills");
 const GLOBAL_KEY = "global";
 
 async function ensureDir() {
   if (!existsSync(MEMORY_DIR)) await mkdir(MEMORY_DIR, { recursive: true });
+  try {
+    const pluginDir = dirname(fileURLToPath(import.meta.url));
+    const packageSkillsDir = join(pluginDir, "..", "skills");
+    if (existsSync(packageSkillsDir)) {
+      await mkdir(SKILLS_DIR, { recursive: true });
+      const entries = await readdir(packageSkillsDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const src = join(packageSkillsDir, entry.name);
+          const dest = join(SKILLS_DIR, entry.name);
+          await cp(src, dest, { recursive: true });
+        }
+      }
+    }
+  } catch (e) {}
 }
 
 function projectName(worktree, directory) {
@@ -74,12 +91,15 @@ async function notify(client, message, variant = "success") {
 }
 
 const MEMORY_INSTRUCTION =
+  "MANDATORY FIRST STEP (READ MEMORIES FIRST):\n" +
+  "At the start of every session, you MUST thoroughly review all saved memories provided below BEFORE performing any user task or editing code.\n" +
+  "PROACTIVE MEMORY DIRECTIVE:\n" +
+  "You MUST automatically and proactively call `remember` whenever the user shares durable facts, personal preferences, coding guidelines, tech stack choices, architecture decisions, or project conventions.\n" +
+  "Do NOT wait for explicit user commands like \"remember this\". Automatically capture high-signal facts in real time.\n" +
   "Use `remember` only for important, durable facts about the user and project.\n" +
-  "Save high-signal things like: name, language, role/goals, constraints, tech\n" +
-  "stack preferences, architecture decisions, project conventions.\n" +
-  "DO NOT save: transient details, one-off statements, full conversation turns,\n" +
-  "or anything unlikely to be useful in future sessions.\n" +
-  "When saving, translate the fact into English and keep it concise.\n" +
+  "Save high-signal items: user role, goals, constraints, tech stack preferences, architecture decisions, project conventions.\n" +
+  "DO NOT save: transient details, one-off statements, full conversation turns, or anything unlikely to be useful in future sessions.\n" +
+  "When saving, translate the fact into clear, concise English.\n" +
   "Use `scope: \"global\"` for personal facts, `scope: \"project\"` for project-specific facts.";
 
 function buildMemoryContext(globalFacts, projectFacts, projectKey) {

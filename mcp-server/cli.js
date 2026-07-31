@@ -1109,13 +1109,26 @@ export async function runCli() {
             break;
           }
 
-          const docItems = docs.map((doc) => ({
-            label: doc.title || doc.path || "Untitled Document",
-            badge: doc.created_at ? doc.created_at.substring(0, 16) : "",
-            hint: doc.id ? `ID: ${doc.id.substring(0, 8)}...` : "",
-            info: `Path: ${doc.path || "N/A"}`,
-            value: doc,
-          }));
+          const docItems = docs.map((doc) => {
+            const rawDate = doc.created_at || doc.updated_at || "";
+            let formattedDate = "";
+            if (rawDate) {
+              try {
+                const d = typeof rawDate === "number" ? new Date(rawDate) : new Date(String(rawDate));
+                formattedDate = isNaN(d.getTime()) ? String(rawDate).substring(0, 16) : d.toISOString().replace("T", " ").substring(0, 16);
+              } catch (e) {
+                formattedDate = String(rawDate).substring(0, 16);
+              }
+            }
+            const docIdStr = doc.id != null ? String(doc.id) : "";
+            return {
+              label: doc.title || doc.path || "Untitled Document",
+              badge: formattedDate,
+              hint: docIdStr ? `ID: ${docIdStr.substring(0, 8)}...` : "",
+              info: `Path: ${doc.path || "N/A"}`,
+              value: doc,
+            };
+          });
           docItems.push({ label: "< Back to Main Menu", value: "back" });
 
           const docRes = await selectSimpleMenu({

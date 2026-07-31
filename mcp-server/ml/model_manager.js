@@ -148,13 +148,17 @@ export async function getExtractor(modelName = null, progressCallback = null) {
 
     if (targetModel !== "Xenova/multilingual-e5-small") {
       console.warn(`[Fallback] Reverting to standard default model "Xenova/multilingual-e5-small"...`);
+      resetExtractor();
       try {
-        extractorInstance = await pipeline("feature-extraction", "Xenova/multilingual-e5-small", {
+        const fallbackOpts = {
           quantized: true,
           dtype: "q8",
           device: "cpu",
           session_options: { graphOptimizationLevel: "all", executionMode: "sequential" },
-        });
+        };
+        if (progressCallback) fallbackOpts.progress_callback = progressCallback;
+
+        extractorInstance = await pipeline("feature-extraction", "Xenova/multilingual-e5-small", fallbackOpts);
         loadedModelName = "Xenova/multilingual-e5-small";
         loadedDevice = "cpu";
       } catch (err3) {
@@ -173,6 +177,38 @@ export function resetExtractor() {
   extractorInstance = null;
   loadedModelName = null;
   loadedDevice = null;
+}
+
+export function deleteModelCache(modelName) {
+  const info = getModelStorageInfo(modelName);
+  if (info.status === "not_downloaded" || !fs.existsSync(info.dir)) {
+    return { deleted: false, reason: "Model directory not found" };
+  }
+
+  resetExtractor();
+  if (global.gc) {
+    try { global.gc(); } catch (e) {}
+  }
+
+  try {
+    fs.rmSync(info.dir, { recursive: true, force: true });
+    const parentDir = path.dirname(info.dir);
+    if (fs.existsSync(parentDir) && fs.readdirSync(parentDir).length === 0) {
+      fs.rmdirSync(parentDir);
+    }
+    return { deleted: true, modelName, freedMB: info.sizeMB };
+  } catch (err) {
+    try {
+      const corruptPath = `${info.dir}.corrupt_${Date.now()}`;
+      fs.renameSync(info.dir, corruptPath);
+      setTimeout(() => {
+        try { fs.rmSync(corruptPath, { recursive: true, force: true }); } catch (e) {}
+      }, 1000);
+      return { deleted: true, modelName, freedMB: info.sizeMB };
+    } catch (renameErr) {
+      return { deleted: false, reason: `${err.message} (Rename fallback: ${renameErr.message})` };
+    }
+  }
 }
 
 export function formatInputText(text, isQuery = false, modelName = null, instruction = null) {
@@ -508,25 +544,6 @@ export function getModelStorageInfo(modelName) {
   }
 
   return { status: "partial", sizeMB, bytes: totalBytes, dir: modelDir };
-}
-
-export function deleteModelCache(modelName) {
-  const info = getModelStorageInfo(modelName);
-  if (info.status === "not_downloaded" || !fs.existsSync(info.dir)) {
-    return { deleted: false, reason: "Model directory not found" };
-  }
-
-  try {
-    fs.rmSync(info.dir, { recursive: true, force: true });
-    const parentDir = path.dirname(info.dir);
-    if (fs.existsSync(parentDir) && fs.readdirSync(parentDir).length === 0) {
-      fs.rmdirSync(parentDir);
-    }
-    resetExtractor();
-    return { deleted: true, modelName, freedMB: info.sizeMB };
-  } catch (err) {
-    return { deleted: false, reason: err.message };
-  }
 }
 
 export function listAllCachedModels() {

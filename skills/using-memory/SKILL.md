@@ -1,6 +1,6 @@
 ---
 name: using-memory
-description: Comprehensive guide for using the Memory & Hybrid RAG Knowledge Engine tools (remember, recall, forget, ingest_document, query_knowledge_base, manage_knowledge_base). Trigger whenever remembering user preferences/conventions, querying ingested documentation, indexing files/repos, or managing persistent knowledge.
+description: Comprehensive guide for using the Memory & Hybrid RAG Knowledge Engine tools (remember, recall, forget, link_knowledge, ingest_document, query_knowledge_base, manage_knowledge_base). Trigger proactively whenever user preferences, project conventions, technology stack choices, or architecture decisions are introduced, or when querying ingested documentation, indexing files/repos, or managing persistent knowledge.
 ---
 
 # Using Memory & Hybrid RAG Knowledge Engine
@@ -116,7 +116,8 @@ In such cases, use the **Full Raw Document Reading** mechanism:
 
 ## 4. Core Directives for AI Agents
 
-1. **Be Proactive**: When the user mentions a durable preference or constraint, save it immediately using `remember`.
-2. **Check Knowledge Base First**: If a user asks how a specific module, API, or project architecture works, call `query_knowledge_base` using concept-dense search phrases.
-3. **Inspect Ambiguous Docs Directly**: If querying produces low relevance scores on abstractly-named documents, call `manage_knowledge_base(action: "read_document")` to inspect the full text directly.
-4. **Keep Memory Clean**: If a preference changes, call `forget` on the outdated entry before saving the new one.
+1. **Read Memories First (MANDATORY)**: At the very start of any session or conversation, your VERY FIRST STEP MUST BE to execute `recall` to load all saved facts, user context, and project guidelines BEFORE performing any other task or code analysis.
+2. **Be Proactive**: When the user mentions a durable preference, personal fact, or constraint, save it immediately using `remember`. Do not wait for explicit user commands.
+3. **Check Knowledge Base First**: If a user asks how a specific module, API, or project architecture works, call `query_knowledge_base` using concept-dense search phrases.
+4. **Inspect Ambiguous Docs Directly**: If querying produces low relevance scores on abstractly-named documents, call `manage_knowledge_base(action: "read_document")` to inspect the full text directly.
+5. **Keep Memory Clean**: If a preference changes, call `forget` on the outdated entry before saving the new one.
