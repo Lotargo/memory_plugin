@@ -6,6 +6,7 @@ mcp-server/package.json
 # Tests and benchmarks
 mcp-server/test*.js
 mcp-server/benchmarks/**
+sdk/js/tests/**
 
 # Dev docs, assets, and exports
 dev_docs/

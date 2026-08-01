@@ -1,11 +1,27 @@
 {
   "name": "@lotargo/memory_plugin",
   "version": "1.2.9",
-  "description": "Persistent memory agent for coding AI tools — remembers user preferences and project context across sessions. Works with Antigravity, OpenCode, Claude Code, and Codex.",
+  "description": "Persistent memory agent for coding AI tools — remembers user preferences and project context across sessions. Works with Antigravity, OpenCode, Claude Code, and Codex. Ships a programmatic SDK (sdk/) for embedding into custom clients and LangChain agents.",
   "type": "module",
   "main": "opencode-plugin/index.js",
+  "exports": {
+    ".": "./opencode-plugin/index.js",
+    "./sdk": {
+      "types": "./sdk/js/index.d.ts",
+      "import": "./sdk/js/index.js",
+      "default": "./sdk/js/index.js"
+    },
+    "./sdk/js": {
+      "types": "./sdk/js/index.d.ts",
+      "import": "./sdk/js/index.js",
+      "default": "./sdk/js/index.js"
+    },
+    "./sdk/langchain": "./sdk/js/adapters/langchain.js",
+    "./package.json": "./package.json"
+  },
   "scripts": {
-    "preinstall": "node mcp-server/preinstall.js || true"
+    "preinstall": "node mcp-server/preinstall.js || true",
+    "sdk:test": "node sdk/js/tests/test_sdk.js"
   },
   "bin": {
     "memory_plugin": "mcp-server/index.js",
@@ -14,6 +30,9 @@
   },
   "files": [
     "opencode-plugin",
+    "sdk/js/index.js",
+    "sdk/js/index.d.ts",
+    "sdk/js/adapters/langchain.js",
     "mcp-server/admin",
     "mcp-server/benchmarks",
     "mcp-server/config",
@@ -55,5 +74,13 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@huggingface/transformers": "^3.3.3",
     "zod": "^4.1.0"
+  },
+  "peerDependencies": {
+    "@langchain/core": ">=0.3.0"
+  },
+  "peerDependenciesMeta": {
+    "@langchain/core": {
+      "optional": true
+    }
   }
 }
