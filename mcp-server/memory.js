@@ -72,6 +72,10 @@ export function memoryFileName(key) {
   return basename(memoryPath(key));
 }
 
+export function storeFilePath(key) {
+  return memoryPath(key);
+}
+
 function parseMeta(content) {
   const m = content.match(/<!-- path: (.+?) -->/);
   return { path: m ? m[1].trim() : null };

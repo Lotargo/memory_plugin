@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { getDatabase, BLOBS_DIR } from "../db/database.js";
 import { saveBlob, deleteBlob } from "../storage/blob_store.js";
 import { normalizeContent, fetchUrlContent } from "./normalizer.js";
@@ -28,6 +29,13 @@ export async function ingestDocument({
     effectiveType = "text";
     effectiveTitle = title || fetched.title;
     effectivePath = path || fetched.finalUrl || content;
+  } else if (type === "file") {
+    const filePath = effectivePath || content;
+    const needsRead = !content || content === filePath;
+    if (needsRead && filePath) {
+      content = await readFile(filePath, "utf-8");
+      effectivePath = filePath;
+    }
   }
 
   const { markdown, title: docTitle, metadata } = normalizeContent({ content, type: effectiveType, path: effectivePath, title: effectiveTitle });

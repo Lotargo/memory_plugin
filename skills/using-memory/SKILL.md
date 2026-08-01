@@ -1,6 +1,6 @@
 ---
 name: using-memory
-description: Comprehensive guide for using the Memory & Hybrid RAG Knowledge Engine tools (remember, recall, forget, link_knowledge, ingest_document, query_knowledge_base, manage_knowledge_base). Trigger proactively whenever user preferences, project conventions, technology stack choices, or architecture decisions are introduced, or when querying ingested documentation, indexing files/repos, or managing persistent knowledge.
+description: Comprehensive guide for using the Memory & Hybrid RAG Knowledge Engine tools (remember, recall, forget, update_fact, memory_info, link_knowledge, ingest_document, query_knowledge_base, manage_knowledge_base). Trigger proactively whenever user preferences, project conventions, technology stack choices, or architecture decisions are introduced, or when querying ingested documentation, indexing files/repos, or managing persistent knowledge.
 ---
 
 # Using Memory & Hybrid RAG Knowledge Engine
@@ -17,8 +17,13 @@ You have access to a persistent dual-layer memory engine supercharged with an **
 | Scenario / Intent | Target Tool | Key Parameters |
 |-------------------|-------------|----------------|
 | User shares identity, tech stack preference, or workflow rule | `remember` | `fact` (English), `scope`, optional `docId`, `startLine`, `endLine` |
-| User asks what you remember about them, the project, or linked docs | `recall` | `scope` ("all", "global", or "project") |
-| User corrects/updates an old saved fact | `forget` then `remember` | `query` (text or index number) |
+| User asks what you remember about them, the project, or linked docs | `recall` | `scope` ("all", "global", or "project"), optional `query`, `tags`, `since`, `until`, `project` |
+| User corrects/updates an old saved fact | `update_fact` | `id` (number/id/text), `newText`, `scope` |
+| Replace a fact but keep a version trail | `remember` | `fact`, `supersedes` (number/id/text) |
+| Protect a fact from accidental `forget` | `remember` | `keep: true` |
+| Set a time-to-live on a fact | `remember` | `ttl` ("90d", "2w", "24h", "12m") |
+| Filter facts by keyword / tags / date | `recall` | `query`, `tags`, `since`, `until` |
+| Show storage paths, versions, fact & RAG stats | `memory_info` | — |
 | Connect a Notebook fact to a document, section, or line range | `link_knowledge` | `factText`, `docId`, `startLine`, `endLine`, `relationType` |
 | User asks to index a documentation URL, file, or repository | `ingest_document` | `content` or `source_path`, `title`, `metadata` |
 | User asks a complex question about indexed docs or code | `query_knowledge_base` | `query`, `limit`, `generateEmbeddings` |
@@ -27,7 +32,7 @@ You have access to a persistent dual-layer memory engine supercharged with an **
 
 ---
 
-## 2. Layer 1 & 3: Notebook Store & Agent-Driven Knowledge Graph (`remember`, `recall`, `link_knowledge`)
+## 2. Layer 1 & 3: Notebook Store & Agent-Driven Knowledge Graph (`remember`, `recall`, `update_fact`, `forget`, `memory_info`, `link_knowledge`)
 
 ### Agent-Driven Knowledge Graph Architecture
 Automatic regex/heuristic algorithms alone CANNOT infer high-level semantic intent or cross-document relationships. **You (the AI Agent) are the primary architect of the Knowledge Graph.**
@@ -49,6 +54,43 @@ When `recall` is invoked, the engine returns saved facts along with their Agent-
 1. Use Fastify instead of Express for backend services 🔗 [Linked Docs: Project Architecture Specs:L5-7]
 2. PostgreSQL 16 is primary database 🔗 [Linked Docs: database_guide.md:L20-35]
 ```
+
+### Fact Line Format & Metadata
+Each fact is stored as a single Markdown line with an optional invisible HTML comment carrying metadata:
+```
+- [2026-08-02 06:08] user prefers TypeScript <!-- id:8f3a2c, ttl:90d, keep:1, tags:pref,arch -->
+```
+Supported metadata keys (set via `remember`, rendered as badges by `recall`):
+- `id` — auto-generated short id; stable reference for `update_fact` / `forget` / `supersedes`.
+- `ttl` — time-to-live ("90d", "2w", "24h", "12m", bare number = days). Expired facts are marked `[EXPIRED]` but never auto-deleted.
+- `keep` — protection flag; `forget` skips it unless `force: true`.
+- `tags` — comma-separated free-form tags for filtering.
+- `supersedes` / `supersededBy` — versioning: the old fact gets `[SUPERSEDED]` and is excluded from the injected memory block while staying in the store for history.
+
+### Remember Options (`remember`)
+- `ttl`: "90d", "2w", "24h", "12m" — mark the fact for expiry; it will show `[EXPIRED]` once past.
+- `keep: true`: protect the fact from `forget` (unless `force: true`).
+- `tags`: comma-separated tags for later filtering, e.g. `"pref,arch"`.
+- `supersedes`: number (as listed by `recall`), metadata `id`, or text of the fact this one replaces.
+
+### Filtering Facts (`recall`)
+- `query`: all space-separated terms must match (case-insensitive); searches text, id, tags, and date.
+- `tags`: comma-separated; returns facts with ANY matching tag.
+- `since` / `until`: "YYYY-MM-DD" (inclusive) to filter by fact date.
+- `project`: read a specific project's store from any working directory.
+- Output shows `[EXPIRED]`, `[KEEP]`, `[SUPERSEDED]` badges and the `Store file:` path.
+
+### Updating Facts (`update_fact`)
+When the user corrects an old fact, prefer `update_fact` over `forget`+`remember` — it rewrites the text while preserving the original date and all metadata (`ttl`, `keep`, `tags`, `supersedes`), and re-points any linked Knowledge Base documents.
+- `id`: recall index number, metadata `id`, or text of the fact.
+- `newText`: replacement text.
+- `scope`: "project" (default) or "global".
+
+### Protecting Facts (`forget` with `keep`)
+`forget` refuses to delete facts saved with `keep: true`; pass `force: true` to override. It still supports deleting by index number, range ("3-30"), or text.
+
+### Storage Diagnostics (`memory_info`)
+`memory_info` returns the package version, `MEMORY_DIR`, SQLite DB path, store-file locations, fact counts per store, and RAG stats (documents, sections, chunks, graph edges, links).
 
 ---
 
@@ -121,4 +163,4 @@ In such cases, use the **Full Raw Document Reading** mechanism:
 2. **Be Proactive**: When the user mentions a durable preference, personal fact, or constraint, save it immediately using `remember`. Do not wait for explicit user commands.
 3. **Check Knowledge Base First**: If a user asks how a specific module, API, or project architecture works, call `query_knowledge_base` using concept-dense search phrases.
 4. **Inspect Ambiguous Docs Directly**: If querying produces low relevance scores on abstractly-named documents, call `manage_knowledge_base(action: "read_document")` to inspect the full text directly.
-5. **Keep Memory Clean**: If a preference changes, call `forget` on the outdated entry before saving the new one.
+5. **Keep Memory Clean**: If a preference changes, call `update_fact` to edit it in place, or `remember` with `supersedes` to keep a version trail. Use `keep: true` for facts that must survive an accidental `forget`, and give ephemeral facts a `ttl` so stale ones surface as `[EXPIRED]`.

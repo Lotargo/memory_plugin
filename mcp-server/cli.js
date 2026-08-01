@@ -6,6 +6,7 @@ import { hybridQuery } from "./retrieval/retriever.js";
 import { getDatabase } from "./db/database.js";
 import { deleteDocument } from "./ingest/pipeline.js";
 import { readMemoryRaw, readMemory, writeMemory, GLOBAL_KEY, projectName, projectKey, listProjectStores, migrateLegacyStore, memoryFileName } from "./memory.js";
+import { parseFactEntry, factText, withMeta, displayFact, nextFactId, isKeepFact, isSuperseded, formatFactEntry, metaBadges } from "./fact_format.js";
 import { getCorpusCacheSize, clearCorpusCache } from "./benchmarks/fetch_real_corpus.js";
 import { SMOKE_DOC_IDS } from "./benchmarks/quality_evaluator.js";
 import { getModelStorageInfo, deleteModelCache, listAllCachedModels } from "./ml/model_manager.js";
@@ -628,6 +629,16 @@ function waitForEnter() {
   });
 }
 
+function promptText(question) {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(`\n  ${question}\n  > `, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+}
+
 export async function runCli() {
   const cliArgs = process.argv.slice(2);
   if (cliArgs.includes("--enable-prompt") || cliArgs.includes("enable-prompt")) {
@@ -1035,11 +1046,15 @@ export async function runCli() {
               }
 
               const file = memoryFileName(key);
-              const factItems = factList.map((fact, idx) => ({
-                label: `${idx + 1}. ${fact}`,
-                value: idx,
-                info: `Select to delete this fact from ${file}`,
-              }));
+              const factItems = factList.map((fact, idx) => {
+                const badges = metaBadges(fact);
+                return {
+                  label: `${idx + 1}. ${factText(fact)}`,
+                  value: idx,
+                  badge: badges.length ? badges.join(" ") : undefined,
+                  info: `Select to manage this fact from ${file}`,
+                };
+              });
               factItems.push({ label: "< Back", value: "back" });
 
               const factRes = await selectSimpleMenu({
@@ -1053,22 +1068,58 @@ export async function runCli() {
               }
 
               const selectedIdx = factRes.value;
-              const selectedFact = factList[selectedIdx];
+              const selectedEntry = rawEntries[selectedIdx];
+              const selDisplay = displayFact(selectedEntry);
+              const selBadges = metaBadges(selectedEntry);
+
+              const actionItems = [
+                { label: "[UPDATE] Edit fact text", value: "update", info: "Rewrite the fact, keeping its date and metadata" },
+              ];
+              if (isKeepFact(selectedEntry)) {
+                actionItems.push({ label: "[UNPROTECT] Remove keep protection", value: "unprotect", info: "Allow forget to delete it without force" });
+              } else {
+                actionItems.push({ label: "[PROTECT] Mark as important (keep)", value: "protect", info: "forget will skip it unless force=true" });
+              }
+              actionItems.push({ label: "[DELETE] Delete this fact from store", value: "delete", info: "Remove fact permanently" });
+              actionItems.push({ label: "< Cancel / Back", value: "cancel" });
 
               const actionRes = await selectSimpleMenu({
-                title: `FACT ACTION`,
-                subtitle: `Fact: "${selectedFact}"`,
-                items: [
-                  { label: "[DELETE] Delete this fact from store", value: "delete", info: "Remove fact permanently" },
-                  { label: "< Cancel / Back", value: "cancel" },
-                ],
+                title: "FACT ACTION",
+                subtitle: `Fact: "${selDisplay}"${selBadges.length ? " [" + selBadges.join("] [") + "]" : ""}`,
+                items: actionItems,
               });
 
               if (actionRes.action === "back" || actionRes.value === "cancel") {
                 return;
               }
 
-              if (actionRes.action === "select" && actionRes.value === "delete") {
+              if (actionRes.action === "select" && actionRes.value === "update") {
+                const p = parseFactEntry(selectedEntry);
+                const newText = await promptText(`New text for fact #${selectedIdx + 1}:`);
+                if (!newText) continue;
+                const newLine = formatFactEntry({ date: p.date, time: p.time, text: newText, meta: p.meta });
+                const updated = [...rawEntries];
+                updated[selectedIdx] = newLine;
+                await writeMemory(key, updated);
+                let links = 0;
+                try {
+                  const db = getDatabase();
+                  links = db
+                    .prepare("UPDATE knowledge_links SET fact_text = ? WHERE fact_key = ? AND fact_text = ?")
+                    .run(newText, key, factText(selectedEntry)).changes;
+                } catch (e) {}
+                console.clear();
+                console.log(`\n  [OK] Fact updated successfully${links ? `, ${links} doc link(s) updated` : ""}.\n`);
+                await waitForEnter();
+              } else if (actionRes.action === "select" && (actionRes.value === "protect" || actionRes.value === "unprotect")) {
+                const updated = [...rawEntries];
+                updated[selectedIdx] =
+                  actionRes.value === "protect" ? withMeta(selectedEntry, { keep: "1" }) : withMeta(selectedEntry, { keep: null });
+                await writeMemory(key, updated);
+                console.clear();
+                console.log(`\n  [OK] Fact ${actionRes.value === "protect" ? "protected" : "unprotected"} successfully.\n`);
+                await waitForEnter();
+              } else if (actionRes.action === "select" && actionRes.value === "delete") {
                 const updated = [...rawEntries];
                 updated.splice(selectedIdx, 1);
                 await writeMemory(key, updated);

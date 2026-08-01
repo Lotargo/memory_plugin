@@ -2,7 +2,34 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod/v4";
-import { ensureDir, readMemory, readMemoryRaw, writeMemory, today, MEMORY_DIR, GLOBAL_KEY, scopeKey, projectKey, projectName, canonicalPath, listProjectStores } from "./memory.js";
+import { ensureDir, readMemory, readMemoryRaw, writeMemory, today, MEMORY_DIR, GLOBAL_KEY, scopeKey, projectKey, projectName, canonicalPath, listProjectStores, storeFilePath } from "./memory.js";
+import {
+  parseFactEntry,
+  factText,
+  factMeta,
+  withMeta,
+  nextFactId,
+  isKeepFact,
+  displayFact,
+  formatFactEntry,
+  matchesQuery,
+  matchesTags,
+  inDateRange,
+} from "./fact_format.js";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+
+// Resolve a fact reference (1-based number, metadata id, or text) to an index.
+function resolveFactIndex(entries, ref) {
+  const trimmed = String(ref || "").trim();
+  if (!trimmed) return -1;
+  const num = parseInt(trimmed, 10);
+  if (/^\d+$/.test(trimmed) && num >= 1 && num <= entries.length) return num - 1;
+  const idIdx = entries.findIndex((e) => factMeta(e).id === trimmed);
+  if (idIdx !== -1) return idIdx;
+  const textIdx = entries.findIndex((e) => factText(e).toLowerCase().includes(trimmed.toLowerCase()));
+  return textIdx;
+}
 
 const cliArgs = process.argv.slice(2);
 
@@ -56,6 +83,11 @@ server.registerTool(
       "(name, goals, constraints, tech preferences, project conventions). " +
       "docId/startLine/endLine/relationType are OPTIONAL and only used to link the fact to a " +
       "Knowledge Base document or line range; omit them when no linking is needed. " +
+      "ttl is OPTIONAL (e.g. '90d', '2w', '24h') — expired facts are shown with [EXPIRED] but not auto-deleted. " +
+      "keep=true protects the fact from forget deletion unless force=true. " +
+      "tags is OPTIONAL comma-separated text for filtering. " +
+      "supersedes is OPTIONAL: a number (from recall), id, or text of a fact this one replaces; " +
+      "the target is then marked [SUPERSEDED]. " +
       "Translate the fact into English and keep it concise. " +
       "scope: 'project' (default) or 'global'",
     inputSchema: z.object({
@@ -65,17 +97,42 @@ server.registerTool(
       startLine: optNum().describe("Optional starting line number in target document"),
       endLine: optNum().describe("Optional ending line number in target document"),
       relationType: defStr("LINKS_TO").describe("Relation type (e.g. 'RULES_FOR', 'IMPLEMENTS', 'REFERENCES')"),
+      ttl: optStr().describe("Optional time-to-live, e.g. '90d', '2w', '24h', '12m'"),
+      keep: defBool(false).describe("Protect the fact from forget deletion unless force=true"),
+      tags: optStr().describe("Optional comma-separated tags, e.g. 'pref,arch'"),
+      supersedes: optStr().describe("Optional number, id, or text of the fact this one replaces"),
     }),
   },
-  async ({ fact, scope, docId, startLine, endLine, relationType }) => {
+  async ({ fact, scope, docId, startLine, endLine, relationType, ttl, keep, tags, supersedes }) => {
     const key = scopeKey(scope, null, null);
     const entries = await readMemory(key);
     const factNormalized = fact.toLowerCase().trim();
-    if (!entries.some((e) => {
-      const idx = e.indexOf("] ");
-      return idx !== -1 && e.slice(idx + 2).toLowerCase().trim() === factNormalized;
-    })) {
-      entries.push(`- [${today()}] ${fact}`);
+    let duplicate = false;
+    if (entries.some((e) => factText(e).toLowerCase().trim() === factNormalized)) {
+      duplicate = true;
+    }
+
+    let supersededInfo = "";
+    if (!duplicate) {
+      const [date, time] = today().split(" ");
+      const meta = { ttl, tags };
+      if (keep) meta.keep = "1";
+      if (supersedes) {
+        const targetIdx = resolveFactIndex(entries, supersedes);
+        if (targetIdx !== -1) {
+          const newId = nextFactId(entries);
+          const targetMeta = factMeta(entries[targetIdx]);
+          const targetId = targetMeta.id || nextFactId(entries);
+          entries[targetIdx] = withMeta(entries[targetIdx], { id: targetId, supersededBy: newId });
+          meta.id = newId;
+          meta.supersedes = targetId;
+          supersededInfo = ` [superseded: "${factText(entries[targetIdx]).slice(0, 60)}"]`;
+        } else {
+          supersededInfo = " (note: supersedes target not found)";
+        }
+      }
+      if (!meta.id) meta.id = nextFactId(entries);
+      entries.push(formatFactEntry({ date, time, text: fact, meta }));
       await writeMemory(key, entries);
     }
 
@@ -98,7 +155,7 @@ server.registerTool(
       }
     }
 
-    return { content: [{ type: "text", text: `Memory updated${linkInfo}` }] };
+    return { content: [{ type: "text", text: `Memory updated${supersededInfo}${linkInfo}` }] };
   }
 );
 
@@ -108,20 +165,27 @@ server.registerTool(
     description:
       "Show saved facts with any Agent-linked Knowledge Base documents/lines. " +
       "scope: 'project', 'global', 'all' (default), or 'list_projects'. " +
-      "Use project: '<directory path>' with scope 'project'/'all' to read facts of a specific project from any working directory.",
+      "Use project: '<directory path>' with scope 'project'/'all' to read facts of a specific project from any working directory. " +
+      "query filters by keyword (all space-separated terms must match). " +
+      "tags filters by comma-separated tags. since/until filter by date (YYYY-MM-DD, inclusive). " +
+      "Expired facts are shown with [EXPIRED], protected ones with [KEEP]. The response includes the store file paths.",
     inputSchema: z.object({
       scope: defStr("all").describe("'project', 'global', 'all', or 'list_projects'"),
       project: optStr().describe("Directory path of the project to read facts from (e.g. 'F:/projects/plugins/memory')"),
+      query: optStr().describe("Optional keyword filter; all space-separated terms must match"),
+      tags: optStr().describe("Optional comma-separated tag filter (any match)"),
+      since: optStr().describe("Optional start date filter, YYYY-MM-DD (inclusive)"),
+      until: optStr().describe("Optional end date filter, YYYY-MM-DD (inclusive)"),
     }),
   },
-  async ({ scope, project }) => {
+  async ({ scope, project, query, tags, since, until }) => {
     const { getLinksForFact } = await import("./graph/knowledge_linker.js");
     const results = [];
 
-    const formatFactWithLinks = (factText, key) => {
-      let line = factText;
+    const formatFactWithLinks = (factLine, key) => {
+      let line = displayFact(factLine);
       try {
-        const links = getLinksForFact(key, factText);
+        const links = getLinksForFact(key, factText(factLine));
         if (links && links.length > 0) {
           const docStr = links
             .map((l) => {
@@ -133,6 +197,17 @@ server.registerTool(
         }
       } catch (e) {}
       return line;
+    };
+
+    const collect = (entries, key) => {
+      const matched = entries.filter(
+        (e) => matchesQuery(e, query) && matchesTags(e, tags) && inDateRange(e, since, until)
+      );
+      if (!matched.length) return;
+      if (results.length) results.push("");
+      results.push(`--- ${key === GLOBAL_KEY ? "Global" : `Project: ${key === target ? label : key}`} ---`);
+      matched.forEach((e, i) => results.push(`${i + 1}. ${formatFactWithLinks(e, key)}`));
+      results.push(`Store file: ${storeFilePath(key)}`);
     };
 
     if (scope === "list_projects") {
@@ -147,7 +222,7 @@ server.registerTool(
         content: [
           {
             type: "text",
-            text: `Project Memory Stores:\n${lines.join("\n")}\n\nUse recall(scope: "project", project: "<path>") to read a specific store.`,
+            text: `Project Memory Stores:\n${lines.join("\n")}\n\nUse recall(scope: "project", project: "<path>") to read a specific store.\n\nMemory dir: ${MEMORY_DIR}`,
           },
         ],
       };
@@ -156,21 +231,19 @@ server.registerTool(
     const target = project ? canonicalPath(project) : projectKey(null, null);
     const label = project ? target : projectName();
     if (scope !== "project") {
-      const global = await readMemoryRaw(GLOBAL_KEY);
-      if (global.length) {
-        results.push("--- Global ---");
-        global.forEach((e, i) => results.push(`${i + 1}. ${formatFactWithLinks(e, GLOBAL_KEY)}`));
-      }
+      const global = await readMemory(GLOBAL_KEY);
+      collect(global, GLOBAL_KEY);
     }
     if (scope !== "global") {
-      const local = await readMemoryRaw(target);
-      if (local.length) {
-        if (results.length) results.push("");
-        results.push(`--- Project: ${label} ---`);
-        local.forEach((e, i) => results.push(`${i + 1}. ${formatFactWithLinks(e, target)}`));
-      }
+      const local = await readMemory(target);
+      collect(local, target);
     }
-    const text = results.length ? results.join("\n") : "Memory is empty.";
+    const filtered = Boolean(query || tags || since || until);
+    const text = results.length
+      ? `${results.join("\n")}\n\nMemory dir: ${MEMORY_DIR}`
+      : filtered
+        ? "No facts match the search."
+        : "Memory is empty.";
     return { content: [{ type: "text", text }] };
   }
 );
@@ -179,37 +252,140 @@ server.registerTool(
   "forget",
   {
     description:
-      "Delete a fact by number (from recall), by range (e.g. '3-30', inclusive), or by text search",
+      "Delete a fact by number (from recall), by range (e.g. '3-30', inclusive), or by text search. " +
+      "Protected facts (remember with keep=true) are skipped unless force=true.",
     inputSchema: z.object({
       query: z.string().describe("Number, range like '3-30', or text to search for"),
       scope: defStr("project").describe("'project' (default) or 'global'"),
+      force: defBool(false).describe("Also delete protected (keep) facts"),
     }),
   },
-  async ({ query, scope }) => {
+  async ({ query, scope, force }) => {
     const key = scopeKey(scope, null, null);
     const entries = await readMemory(key);
     const rangeMatch = /^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(query);
     const num = parseInt(query, 10);
-    let removed;
+    let indices = [];
     if (rangeMatch) {
       const from = parseInt(rangeMatch[1], 10);
       const to = parseInt(rangeMatch[2], 10);
       if (from > 0 && to >= from && to <= entries.length) {
-        removed = entries.splice(from - 1, to - from + 1);
+        for (let i = from - 1; i < to; i++) indices.push(i);
       }
     }
-    if (!removed && !isNaN(num) && num > 0 && num <= entries.length) {
-      removed = entries.splice(num - 1, 1);
+    if (!indices.length && !isNaN(num) && num > 0 && num <= entries.length) {
+      indices.push(num - 1);
     }
-    if (!removed) {
-      const filtered = entries.filter((e) => !e.toLowerCase().includes(query.toLowerCase()));
-      removed = entries.filter((e) => e.toLowerCase().includes(query.toLowerCase()));
-      entries.length = 0;
-      entries.push(...filtered);
+    if (!indices.length) {
+      const q = query.toLowerCase();
+      indices = entries.reduce((acc, e, i) => (e.toLowerCase().includes(q) ? acc.concat(i) : acc), []);
     }
-    await writeMemory(key, entries);
-    const text = removed.length ? "Memory updated" : "Not found.";
+    if (!indices.length) {
+      return { content: [{ type: "text", text: "Not found." }] };
+    }
+
+    const removable = indices.filter((i) => force || !isKeepFact(entries[i]));
+    const protectedCount = indices.length - removable.length;
+    if (removable.length) {
+      for (const i of removable.sort((a, b) => b - a)) entries.splice(i, 1);
+      await writeMemory(key, entries);
+    }
+    let text = removable.length ? "Memory updated" : "Nothing removed.";
+    if (protectedCount) text += ` (${protectedCount} protected fact(s) skipped; use force=true to override)`;
     return { content: [{ type: "text", text }] };
+  }
+);
+
+server.registerTool(
+  "update_fact",
+  {
+    description:
+      "Update the text of an existing fact by number (from recall), id, or text match, " +
+      "preserving its original date and metadata. Linked Knowledge Base documents are re-pointed to the new text.",
+    inputSchema: z.object({
+      id: z.string().describe("Number (from recall), metadata id, or text of the fact to update"),
+      newText: z.string().describe("New fact text"),
+      scope: defStr("project").describe("'project' (default) or 'global'"),
+    }),
+  },
+  async ({ id, newText, scope }) => {
+    const key = scopeKey(scope, null, null);
+    const entries = await readMemory(key);
+    const idx = resolveFactIndex(entries, id);
+    if (idx === -1) throw new Error(`Fact not found: ${id}`);
+    const p = parseFactEntry(entries[idx]);
+    const oldText = p ? p.text : entries[idx];
+    const newLine = formatFactEntry({ date: p.date, time: p.time, text: newText, meta: p.meta });
+    entries[idx] = newLine;
+    await writeMemory(key, entries);
+
+    let linksUpdated = 0;
+    try {
+      const { getDatabase } = await import("./db/database.js");
+      const db = getDatabase();
+      const res = db
+        .prepare(
+          "UPDATE knowledge_links SET fact_text = ? WHERE fact_key = ? AND fact_text = ?"
+        )
+        .run(newText, key, oldText);
+      linksUpdated = res.changes;
+    } catch (e) {}
+
+    return {
+      content: [
+        { type: "text", text: `Fact updated${linksUpdated ? `, ${linksUpdated} doc link(s) updated` : ""}` },
+      ],
+    };
+  }
+);
+
+server.registerTool(
+  "memory_info",
+  {
+    description:
+      "Show memory storage paths (store file locations, MEMORY_DIR, SQLite DB), fact counts, " +
+      "Knowledge Base stats, and the installed package version.",
+    inputSchema: z.object({}),
+  },
+  async () => {
+    const dbPath = join(MEMORY_DIR, "storage", "memory.sqlite");
+    const globalFile = storeFilePath(GLOBAL_KEY);
+    const projectFile = storeFilePath(projectKey(null, null));
+
+    let version = "unknown";
+    try {
+      version = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf-8")).version;
+    } catch (e) {}
+
+    let rag = {};
+    try {
+      const { getDatabase } = await import("./db/database.js");
+      const db = getDatabase();
+      rag.documents = db.prepare("SELECT COUNT(*) AS c FROM documents").get().c;
+      rag.sections = db.prepare("SELECT COUNT(*) AS c FROM sections").get().c;
+      rag.chunks = db.prepare("SELECT COUNT(*) AS c FROM micro_chunks").get().c;
+      rag.edges = db.prepare("SELECT COUNT(*) AS c FROM graph_edges").get().c;
+      rag.links = db.prepare("SELECT COUNT(*) AS c FROM knowledge_links").get().c;
+    } catch (e) {
+      rag.error = e.message;
+    }
+
+    const stores = await listProjectStores();
+    const lines = [
+      `Version: ${version}`,
+      `MEMORY_DIR: ${MEMORY_DIR}`,
+      `SQLite DB: ${dbPath}`,
+      `Global store: ${globalFile}`,
+      `Project store: ${projectFile}`,
+      `Project stores: ${stores.length}`,
+      `Facts (global): ${(await readMemoryRaw(GLOBAL_KEY)).length}`,
+      `Facts (project): ${(await readMemoryRaw(projectKey(null, null))).length}`,
+    ];
+    if (rag.error) lines.push(`RAG: unavailable (${rag.error})`);
+    else lines.push(
+      `RAG: ${rag.documents} doc(s), ${rag.sections} section(s), ${rag.chunks} chunk(s), ${rag.edges} edge(s), ${rag.links} memory link(s)`
+    );
+    return { content: [{ type: "text", text: lines.join("\n") }] };
   }
 );
 
@@ -277,12 +453,13 @@ server.registerTool(
     description:
       "Ingest a document into the RAG knowledge base. " +
       "Accepts local file paths, web URLs, or raw Markdown/text content. " +
+      "For type='file' the file is read from disk and indexed with a code-block wrapper. " +
       "For type='url' the page is fetched and its content is indexed (not just the URL). " +
       "Processes document through 3-tier hierarchy chunking (Big/Medium/Small), " +
       "computes dense vectors, and extracts GraphRAG code symbols.",
     inputSchema: z.object({
-      content: z.string().describe("Raw text content, file path, or web URL"),
-      type: z.enum(["text", "file", "url"]).nullish().transform((v) => v || "text").describe("Input content type: 'text', 'file', or 'url' (url fetches the page content)"),
+      content: z.string().describe("Raw text content, file path, or web URL. For type='file' this can be the file path (reads from disk) or the file content directly"),
+      type: z.enum(["text", "file", "url"]).nullish().transform((v) => v || "text").describe("Input content type: 'text' (raw content), 'file' (reads from disk, wraps in code block), or 'url' (fetches page content)"),
       title: optStr().describe("Document title"),
       path: optStr().describe("Original document file path"),
       generateEmbeddings: defBool(true).describe("Compute dense vector embeddings"),
