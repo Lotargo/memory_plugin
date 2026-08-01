@@ -1,14 +1,15 @@
 ---
 name: using-memory
-description: Comprehensive guide for using the Memory & Hybrid RAG Knowledge Engine tools (remember, recall, forget, update_fact, memory_info, link_knowledge, ingest_document, query_knowledge_base, manage_knowledge_base). Trigger proactively whenever user preferences, project conventions, technology stack choices, or architecture decisions are introduced, or when querying ingested documentation, indexing files/repos, or managing persistent knowledge.
+description: Comprehensive guide for using the Memory, Hybrid RAG Knowledge Engine & MCP Helper tools (remember, recall, forget, update_fact, memory_info, link_knowledge, ingest_document, query_knowledge_base, manage_knowledge_base, list-mcp-tools, mcp-reminder). Trigger proactively whenever user preferences, project conventions, technology stack choices, or architecture decisions are introduced, or when querying ingested documentation, indexing files/repos, managing persistent knowledge, or looking up available MCP tool integrations.
 ---
 
-# Using Memory & Hybrid RAG Knowledge Engine
+# Using Memory, Hybrid RAG Knowledge Engine & MCP Helper Tools
 
-You have access to a persistent dual-layer memory engine supercharged with an **Agent-Driven Knowledge Graph**:
+You have access to a persistent dual-layer memory engine supercharged with an **Agent-Driven Knowledge Graph** and general MCP integration helpers:
 1. **Layer 1: Notebook Store (Key-Value Facts)**: Stores high-signal personal preferences, project conventions, and durable rules in clean Markdown.
 2. **Layer 2: RAG Knowledge Base**: Indexes documentation, repositories, and technical guides for hybrid semantic retrieval.
 3. **Layer 3: Agent-Driven Knowledge Graph**: Connects Notebook facts (Layer 1) to specific Knowledge Base documents, sections, and **exact line ranges** (Layer 2).
+4. **Integration Layer (General MCP Helpers)**: Quickly discovers connected MCP servers and identifies appropriate tools for specific tasks.
 
 ---
 
@@ -28,7 +29,9 @@ You have access to a persistent dual-layer memory engine supercharged with an **
 | User asks to index a documentation URL, file, or repository | `ingest_document` | `content` or `source_path`, `title`, `metadata` |
 | User asks a complex question about indexed docs or code | `query_knowledge_base` | `query`, `limit`, `generateEmbeddings` |
 | Read full raw content of an ambiguous/abstract document | `manage_knowledge_base` | `action: "read_document"`, `docId` |
-| User asks to view database stats, list indexed docs, or export snapshots | `manage_knowledge_base` | `action` ("stats", "list", "read_document", "delete", "export_snapshot") |
+| User asks to view database stats, list indexed docs, or export snapshots | `manage_knowledge_base` | `action` ("stats", "list", "read_document", "delete", "export_snapshot", "import_snapshot") |
+| Discover available MCP servers and their specific purposes | `list-mcp-tools` | — |
+| Ask which MCP tool / server is suitable for a specific task | `mcp-reminder` | `task` (string, e.g., "db migration") |
 
 ---
 
@@ -113,7 +116,7 @@ Use this tool when adding technical documentation, API specs, architectural docu
 
 ### Hybrid Retrieval (`query_knowledge_base`)
 Use this tool BEFORE answering deep architectural or technical questions when indexed documents exist.
-- Performs **Hybrid RRF Fusion** combining SQLite FTS5 BM25 keyword matching with dense ONNX vector semantic search.
+- Performs **Hybrid RRF/RSF Fusion** combining SQLite FTS5 BM25 keyword matching with dense ONNX vector semantic search.
 - Returns candidate sections with breadcrumb paths and defined code symbols (classes, functions, types).
 
 #### Query Formulation Rules (CRITICAL for retrieval quality)
@@ -154,13 +157,28 @@ In such cases, use the **Full Raw Document Reading** mechanism:
 - Use `action: "list"` to see all ingested documents.
 - Use `action: "read_document"` with `docId` to read the complete raw text content of any document.
 - Use `action: "delete"` with `docId` to remove an outdated document and purge its CAS blob.
+- Use `action: "export_snapshot"` with `snapshotPath` to export a JSON backup of the RAG base.
+- Use `action: "import_snapshot"` with `snapshotPath` to import and merge a JSON backup into the current database.
 
 ---
 
-## 4. Core Directives for AI Agents
+## 4. General MCP Helpers (`list-mcp-tools`, `mcp-reminder`)
+
+### Discovering Connected MCP Servers (`list-mcp-tools`)
+When working in multi-server environments (e.g., OpenCode, Claude Code), you might have several auxiliary servers installed (for database, UI design, browser automation, etc.).
+- Use `list-mcp-tools` to immediately view all registered servers and their descriptions. This avoids guessing what other capabilities are available in the current workspace.
+
+### Contextual Tool Reminders (`mcp-reminder`)
+- If you are unsure which tool/server is best suited for the task at hand (e.g., how to do browser testing, or run a database migration), run `mcp-reminder(task: "your current task definition")`.
+- It analyzes your task and suggests appropriate servers (like `playwright` for testing, `supabase` for DB, or `stitch` for UI design).
+
+---
+
+## 5. Core Directives for AI Agents
 
 1. **Read Memories First (MANDATORY)**: At the very start of any session or conversation, your VERY FIRST STEP MUST BE to execute `recall` to load all saved facts, user context, and project guidelines BEFORE performing any other task or code analysis.
 2. **Be Proactive**: When the user mentions a durable preference, personal fact, or constraint, save it immediately using `remember`. Do not wait for explicit user commands.
-3. **Check Knowledge Base First**: If a user asks how a specific module, API, or project architecture works, call `query_knowledge_base` using concept-dense search phrases.
+3. **Check Knowledge Base First**: If a query is related to specialized documentation, APIs, or project architectures, call `query_knowledge_base` using concept-dense search phrases.
 4. **Inspect Ambiguous Docs Directly**: If querying produces low relevance scores on abstractly-named documents, call `manage_knowledge_base(action: "read_document")` to inspect the full text directly.
 5. **Keep Memory Clean**: If a preference changes, call `update_fact` to edit it in place, or `remember` with `supersedes` to keep a version trail. Use `keep: true` for facts that must survive an accidental `forget`, and give ephemeral facts a `ttl` so stale ones surface as `[EXPIRED]`.
+6. **Leverage MCP Servers**: Proactively list available tools using `list-mcp-tools` and query `mcp-reminder` if unsure of which platform tool can help you automate tasks.

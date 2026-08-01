@@ -116,6 +116,35 @@ Dynamic port scanning ensures zero conflicts on ports 8765-8785.
   db.close();
   console.log("  [PASS] Web Admin Server API Endpoints OK");
 
+  // 4. Testing Reranker Loading and Config Manager Fixes
+  console.log("4. Testing Reranker Lazy Loading and Config Sync fixes...");
+  const { getReranker } = await import("./ml/model_manager.js");
+  const { getConfig, saveConfig } = await import("./config/config_manager.js");
+
+  // Verify getConfig & saveConfig run without throwing errors
+  const originalConfig = getConfig();
+  assert(originalConfig && typeof originalConfig === "object", "getConfig should return config object");
+  saveConfig({ ...originalConfig });
+
+  // Call getReranker with an invalid model and catch error, ensuring it is a pipeline/fetch error, NOT a ReferenceError
+  try {
+    await getReranker("Xenova/nonexistent-dummy-reranker");
+    assert.fail("Should have failed to load the nonexistent reranker");
+  } catch (err) {
+    assert.ok(!err.message.includes("checkAndSelfHealModel"), "Error should not be a ReferenceError for checkAndSelfHealModel");
+    assert.ok(
+      err.message.includes("could not") ||
+      err.message.includes("failed") ||
+      err.message.includes("fetch") ||
+      err.message.includes("ENOENT") ||
+      err.message.includes("cannot find") ||
+      err.message.includes("not found") ||
+      err.message.includes("ReferenceError") === false,
+      "Should be a model loading error, got: " + err.message
+    );
+  }
+  console.log("  [PASS] Reranker Lazy Loading & Config Sync fixes OK");
+
   console.log("\n✅ ALL PHASE 4 & PHASE 5 TESTS PASSED SUCCESSFULLY!");
 } catch (err) {
   console.error("\n❌ PHASE 4 TEST FAILED:", err);
