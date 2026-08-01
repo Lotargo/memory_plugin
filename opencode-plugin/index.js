@@ -1,6 +1,6 @@
-const { readFile, writeFile, mkdir, cp, readdir } = await import("fs/promises");
+const { readFile, writeFile, mkdir, cp, readdir, unlink } = await import("fs/promises");
 const { existsSync } = await import("fs");
-const { join, basename, dirname } = await import("path");
+const { join, basename, dirname, resolve } = await import("path");
 const { homedir } = await import("os");
 const { fileURLToPath } = await import("url");
 
@@ -28,24 +28,86 @@ async function ensureDir() {
   } catch (e) {}
 }
 
+function canonicalPath(dir) {
+  let p = resolve(dir || process.cwd());
+  if (process.platform === "win32") {
+    p = p.replace(/\\/g, "/").replace(/^([a-zA-Z]):/, (_, d) => `${d.toLowerCase()}:`);
+  }
+  return p;
+}
+
+// Display label for a project (basename of the resolved directory).
 function projectName(worktree, directory) {
   const dir = worktree || directory;
-  return dir ? basename(dir) : "default";
+  return dir ? basename(resolve(dir)) : "default";
+}
+
+// Project store key = full directory path (removes basename collisions).
+function projectKey(worktree, directory) {
+  return canonicalPath(worktree || directory);
 }
 
 function scopeKey(scope, worktree, directory) {
-  return scope === "global" ? GLOBAL_KEY : projectName(worktree, directory);
+  return scope === "global" ? GLOBAL_KEY : projectKey(worktree, directory);
+}
+
+function slugify(key) {
+  return key.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
 function memoryPath(key) {
-  return join(MEMORY_DIR, `${key.replace(/[^a-zA-Z0-9_-]/g, "_")}.md`);
+  return join(MEMORY_DIR, `${slugify(key)}.md`);
+}
+
+function memoryFileName(key) {
+  return basename(memoryPath(key));
+}
+
+function parseMeta(content) {
+  const m = content.match(/<!-- path: (.+?) -->/);
+  return { path: m ? m[1].trim() : null };
+}
+
+function isSimpleKey(key) {
+  return /^[a-zA-Z0-9_-]+$/.test(key);
+}
+
+// Lazy migration: when reading a project path store that doesn't exist yet but a
+// legacy <basename>.md store (without path binding) does, claim it under the path.
+async function maybeMigrateLegacy(key) {
+  if (key === GLOBAL_KEY || isSimpleKey(key)) return null;
+  const legacyBasename = basename(key);
+  if (!legacyBasename) return null;
+  const legacyFp = join(MEMORY_DIR, `${legacyBasename}.md`);
+  if (slugify(key) === legacyBasename || !existsSync(legacyFp)) return null;
+  const content = await readFile(legacyFp, "utf-8");
+  if (parseMeta(content).path) return null; // already bound to another project
+  // Collision guard: a different path with the same basename is already bound,
+  // so this legacy store is ambiguous and must not be silently claimed.
+  const files = await readdir(MEMORY_DIR).catch(() => []);
+  for (const f of files) {
+    if (!f.endsWith(".md") || f === `${legacyBasename}.md` || f === `${GLOBAL_KEY}.md`) continue;
+    try {
+      const other = parseMeta(await readFile(join(MEMORY_DIR, f), "utf-8")).path;
+      if (other && basename(other) === legacyBasename) return null;
+    } catch (e) {}
+  }
+  const facts = content.split("\n").filter((l) => l.startsWith("- ["));
+  await writeMemory(key, facts);
+  try {
+    await unlink(legacyFp);
+  } catch (e) {}
+  return facts;
 }
 
 async function readMemory(key) {
   const fp = memoryPath(key);
-  if (!existsSync(fp)) return [];
-  const content = await readFile(fp, "utf-8");
-  return content.split("\n").filter((l) => l.startsWith("- ["));
+  if (existsSync(fp)) {
+    const content = await readFile(fp, "utf-8");
+    return content.split("\n").filter((l) => l.startsWith("- ["));
+  }
+  const migrated = await maybeMigrateLegacy(key);
+  return migrated || [];
 }
 
 async function readMemoryRaw(key) {
@@ -53,8 +115,58 @@ async function readMemoryRaw(key) {
 }
 
 async function writeMemory(key, entries) {
-  const header = `# ${key === GLOBAL_KEY ? "Global Memory" : `Memory: ${key}`}\n\n`;
-  await writeFile(memoryPath(key), header + entries.join("\n") + "\n");
+  const lines = [];
+  if (key === GLOBAL_KEY) {
+    lines.push("# Global Memory", "");
+  } else {
+    lines.push(`# Memory: ${basename(key) || key}`, "");
+    if (!isSimpleKey(key)) {
+      lines.push(`<!-- path: ${key} -->`, "");
+    }
+  }
+  const content = lines.join("\n") + "\n" + (entries.length ? entries.join("\n") + "\n" : "");
+  await writeFile(memoryPath(key), content);
+}
+
+async function listProjectStores() {
+  const stores = [];
+  const files = await readdir(MEMORY_DIR).catch(() => []);
+  for (const f of files) {
+    if (!f.endsWith(".md") || f === `${GLOBAL_KEY}.md`) continue;
+    let content = "";
+    try {
+      content = await readFile(join(MEMORY_DIR, f), "utf-8");
+    } catch (e) {
+      continue;
+    }
+    const facts = content.split("\n").filter((l) => l.startsWith("- ["));
+    const meta = parseMeta(content);
+    const key = meta.path || f.slice(0, -3);
+    stores.push({
+      key,
+      path: meta.path,
+      basename: basename(meta.path || key) || key,
+      file: f,
+      count: facts.length,
+      legacy: !meta.path,
+    });
+  }
+  stores.sort((a, b) => a.basename.localeCompare(b.basename));
+  return stores;
+}
+
+async function migrateLegacyStore(legacyKey, targetDir) {
+  const legacyFp = join(MEMORY_DIR, `${legacyKey.replace(/[^a-zA-Z0-9_-]/g, "_")}.md`);
+  if (!existsSync(legacyFp)) return { ok: false, reason: "not_found", key: legacyKey };
+  const content = await readFile(legacyFp, "utf-8");
+  if (parseMeta(content).path) return { ok: false, reason: "already_bound", key: legacyKey };
+  const targetKey = projectKey(targetDir, null);
+  const facts = content.split("\n").filter((l) => l.startsWith("- ["));
+  await writeMemory(targetKey, facts);
+  try {
+    await unlink(legacyFp);
+  } catch (e) {}
+  return { ok: true, key: targetKey, file: memoryPath(targetKey), facts: facts.length };
 }
 
 function today() {
@@ -128,7 +240,7 @@ const MCP_SERVERS = [
 
 export const MemoryPlugin = async ({ directory, worktree, client }) => {
   await ensureDir();
-  const projectKey = projectName(worktree, directory);
+  const projectKey = scopeKey("project", worktree, directory);
 
   return {
     "experimental.chat.messages.transform": async (_input, output) => {
@@ -231,16 +343,19 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
         },
       },
       "recall": {
-        description: "Show saved facts with any Agent-linked Knowledge Base documents/lines. scope: 'project', 'global', or 'all' (default)",
+        description:
+          "Show saved facts with any Agent-linked Knowledge Base documents/lines. " +
+          "scope: 'project', 'global', 'all' (default), or 'list_projects'. " +
+          "Use project: '<directory path>' to read facts of a specific project from any working directory.",
         args: {
           scope: {
             type: "string",
-            description: "project, global или all (по умолчанию)",
+            description: "project, global, all (по умолчанию) или list_projects",
             default: "all",
           },
+          project: { type: "string", description: "Directory path of the project to read facts from (e.g. 'F:/projects/plugins/memory')" },
         },
-        async execute({ scope }, { worktree, directory }) {
-          const project = projectName(worktree, directory);
+        async execute({ scope, project }, { worktree, directory }) {
           const results = [];
 
           let getLinksForFact;
@@ -268,6 +383,19 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
             return line;
           };
 
+          if (scope === "list_projects") {
+            return listProjectStores().then((stores) => {
+              if (!stores.length) return "No project memory stores found.";
+              const lines = stores.map(
+                (s, i) => `${i + 1}. ${s.basename} — ${s.count} fact(s) [${s.file}]${s.path ? ` (bound to ${s.path})` : " (unbound legacy store)"}`
+              );
+              return `Project Memory Stores:\n${lines.join("\n")}\n\nUse recall(scope: "project", project: "<path>") to read a specific store.`;
+            });
+          }
+
+          const target = project ? canonicalPath(project) : projectKey(worktree, directory);
+          const label = project ? target : projectName(worktree, directory);
+
           if (scope !== "project") {
             const global = await readMemoryRaw(GLOBAL_KEY);
             if (global.length) {
@@ -276,11 +404,11 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
             }
           }
           if (scope !== "global") {
-            const local = await readMemoryRaw(project);
+            const local = await readMemoryRaw(target);
             if (local.length) {
               if (results.length) results.push("");
-              results.push(`--- ${project} ---`);
-              local.forEach((e, i) => results.push(`${i + 1}. ${formatFactWithLinks(e, project)}`));
+              results.push(`--- Project: ${label} ---`);
+              local.forEach((e, i) => results.push(`${i + 1}. ${formatFactWithLinks(e, target)}`));
             }
           }
           return results.length ? results.join("\n") : "Memory is empty.";

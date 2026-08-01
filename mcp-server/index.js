@@ -2,7 +2,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod/v4";
-import { ensureDir, readMemory, readMemoryRaw, writeMemory, today, MEMORY_DIR, GLOBAL_KEY, scopeKey, projectName } from "./memory.js";
+import { ensureDir, readMemory, readMemoryRaw, writeMemory, today, MEMORY_DIR, GLOBAL_KEY, scopeKey, projectKey, projectName, canonicalPath, listProjectStores } from "./memory.js";
 
 const cliArgs = process.argv.slice(2);
 
@@ -92,13 +92,16 @@ server.registerTool(
 server.registerTool(
   "recall",
   {
-    description: "Show saved facts with any Agent-linked Knowledge Base documents/lines. scope: 'project', 'global', or 'all' (default)",
+    description:
+      "Show saved facts with any Agent-linked Knowledge Base documents/lines. " +
+      "scope: 'project', 'global', 'all' (default), or 'list_projects'. " +
+      "Use project: '<directory path>' with scope 'project'/'all' to read facts of a specific project from any working directory.",
     inputSchema: z.object({
-      scope: z.string().default("all").describe("'project', 'global', or 'all'"),
+      scope: z.string().default("all").describe("'project', 'global', 'all', or 'list_projects'"),
+      project: z.string().optional().describe("Directory path of the project to read facts from (e.g. 'F:/projects/plugins/memory')"),
     }),
   },
-  async ({ scope }) => {
-    const project = projectName(null, null);
+  async ({ scope, project }) => {
     const { getLinksForFact } = await import("./graph/knowledge_linker.js");
     const results = [];
 
@@ -119,6 +122,26 @@ server.registerTool(
       return line;
     };
 
+    if (scope === "list_projects") {
+      const stores = await listProjectStores();
+      if (!stores.length) {
+        return { content: [{ type: "text", text: "No project memory stores found." }] };
+      }
+      const lines = stores.map(
+        (s, i) => `${i + 1}. ${s.basename} — ${s.count} fact(s) [${s.file}]${s.path ? ` (bound to ${s.path})` : " (unbound legacy store)"}`
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Project Memory Stores:\n${lines.join("\n")}\n\nUse recall(scope: "project", project: "<path>") to read a specific store.`,
+          },
+        ],
+      };
+    }
+
+    const target = project ? canonicalPath(project) : projectKey(null, null);
+    const label = project ? target : projectName();
     if (scope !== "project") {
       const global = await readMemoryRaw(GLOBAL_KEY);
       if (global.length) {
@@ -127,11 +150,11 @@ server.registerTool(
       }
     }
     if (scope !== "global") {
-      const local = await readMemoryRaw(project);
+      const local = await readMemoryRaw(target);
       if (local.length) {
         if (results.length) results.push("");
-        results.push(`--- ${project} ---`);
-        local.forEach((e, i) => results.push(`${i + 1}. ${formatFactWithLinks(e, project)}`));
+        results.push(`--- Project: ${label} ---`);
+        local.forEach((e, i) => results.push(`${i + 1}. ${formatFactWithLinks(e, target)}`));
       }
     }
     const text = results.length ? results.join("\n") : "Memory is empty.";

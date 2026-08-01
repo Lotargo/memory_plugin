@@ -203,9 +203,16 @@ export async function hybridQuery({
   rerankerModel = null,
   rerankerEnabled = null,
   instruction = null,
+  generateEmbeddings = true,
 }) {
   const db = customDb || getDatabase();
   const activeConfig = getConfig();
+
+  // If embeddings are disabled (e.g. fast/offline test mode or model not cached),
+  // fall back to pure lexical search instead of attempting to load the model.
+  if (generateEmbeddings === false) {
+    fusionAlgorithm = "lexical_only";
+  }
 
   const algo = fusionAlgorithm || activeConfig.fusionAlgorithm || "rsf";
   const alphaWeight = alpha !== null && alpha !== undefined ? alpha : (activeConfig.alpha ?? 0.5);

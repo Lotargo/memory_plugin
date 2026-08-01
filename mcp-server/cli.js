@@ -5,7 +5,7 @@ import { getConfig, updateConfig, resetConfig } from "./config/config_manager.js
 import { hybridQuery } from "./retrieval/retriever.js";
 import { getDatabase } from "./db/database.js";
 import { deleteDocument } from "./ingest/pipeline.js";
-import { readMemoryRaw, readMemory, writeMemory, GLOBAL_KEY, projectName } from "./memory.js";
+import { readMemoryRaw, readMemory, writeMemory, GLOBAL_KEY, projectName, projectKey, listProjectStores, migrateLegacyStore, memoryFileName } from "./memory.js";
 import { getCorpusCacheSize, clearCorpusCache } from "./benchmarks/fetch_real_corpus.js";
 import { SMOKE_DOC_IDS } from "./benchmarks/quality_evaluator.js";
 import { getModelStorageInfo, deleteModelCache, listAllCachedModels } from "./ml/model_manager.js";
@@ -97,9 +97,9 @@ async function getQuickStats() {
 
   let factCount = 0;
   try {
-    const projName = projectName(null, null);
+    const projKey = projectKey(null, null);
     const globalF = await readMemoryRaw(GLOBAL_KEY);
-    const projF = await readMemoryRaw(projName);
+    const projF = await readMemoryRaw(projKey);
     factCount = (globalF ? globalF.length : 0) + (projF ? projF.length : 0);
   } catch (e) {}
 
@@ -368,7 +368,7 @@ console.log(`\x1b[36m └──${"─".repeat(PANEL_WIDTH - 4)}┘\x1b[0m\n`);
       } else if (key.name === "return") {
         cleanup();
         resolve({ action: "select", index: activeIndex, value: allItems[activeIndex].value });
-      } else if (key.name === "backspace" || key.name === "escape") {
+      } else if (key.name === "backspace" || key.name === "escape" || key.name === "delete") {
         cleanup();
         resolve({ action: "back" });
       }
@@ -440,7 +440,7 @@ function selectSimpleMenu({ title, subtitle = "", items, initialIndex = 0 }) {
       } else if (key.name === "return") {
         cleanup();
         resolve({ action: "select", index, value: items[index].value });
-      } else if (key.name === "backspace" || key.name === "escape") {
+      } else if (key.name === "backspace" || key.name === "escape" || key.name === "delete") {
         cleanup();
         resolve({ action: "back" });
       }
@@ -517,7 +517,7 @@ function adjustAlphaMenu(initialAlpha) {
       } else if (key.name === "return") {
         cleanup();
         resolve({ action: "save", value: alpha });
-      } else if (key.name === "backspace" || key.name === "escape") {
+      } else if (key.name === "backspace" || key.name === "escape" || key.name === "delete") {
         cleanup();
         resolve({ action: "cancel" });
       }
@@ -566,7 +566,7 @@ function readTextInput(promptText, defaultValue = "") {
       if (key.name === "return") {
         cleanup();
         resolve({ action: "submit", value: text.trim() });
-      } else if (key.name === "backspace") {
+      } else if (key.name === "backspace" || key.name === "delete") {
         if (text.length > 0) {
           text = text.slice(0, -1);
           render();
@@ -610,7 +610,7 @@ function waitForEnter() {
         cleanup();
         process.exit(0);
       }
-      if (key.name === "return" || key.name === "backspace" || key.name === "escape" || key.name === "space") {
+      if (key.name === "return" || key.name === "backspace" || key.name === "escape" || key.name === "delete" || key.name === "space") {
         cleanup();
         resolve();
       }
@@ -1014,10 +1014,75 @@ export async function runCli() {
       case "notebook": {
         let nbRunning = true;
         while (nbRunning) {
-          const projName = projectName(null, null);
+          const projKey = projectKey(null, null);
+          const projLabel = projectName(null, null);
+
+          async function browseFacts(key, title) {
+            let factRunning = true;
+            while (factRunning) {
+              const rawEntries = await readMemory(key);
+              const factList = await readMemoryRaw(key);
+
+              if (!factList || factList.length === 0) {
+                console.clear();
+                const line = "─".repeat(PANEL_WIDTH - 2);
+                console.log(`\x1b[36m╭${line}╮\x1b[0m`);
+                console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37mNOTEBOOK FACTS: STORE EMPTY\x1b[0m${" ".repeat(PANEL_WIDTH - 30)}\x1b[36m│\x1b[0m`);
+                console.log(`\x1b[36m╰${line}╯\x1b[0m`);
+                console.log(`\n  [*] Notebook store [${key}] has no saved facts.\n`);
+                await waitForEnter();
+                return;
+              }
+
+              const file = memoryFileName(key);
+              const factItems = factList.map((fact, idx) => ({
+                label: `${idx + 1}. ${fact}`,
+                value: idx,
+                info: `Select to delete this fact from ${file}`,
+              }));
+              factItems.push({ label: "< Back", value: "back" });
+
+              const factRes = await selectSimpleMenu({
+                title: `NOTEBOOK FACTS [${title}]`,
+                subtitle: `Total facts: ${factList.length}`,
+                items: factItems,
+              });
+
+              if (factRes.action === "back" || factRes.value === "back") {
+                return;
+              }
+
+              const selectedIdx = factRes.value;
+              const selectedFact = factList[selectedIdx];
+
+              const actionRes = await selectSimpleMenu({
+                title: `FACT ACTION`,
+                subtitle: `Fact: "${selectedFact}"`,
+                items: [
+                  { label: "[DELETE] Delete this fact from store", value: "delete", info: "Remove fact permanently" },
+                  { label: "< Cancel / Back", value: "cancel" },
+                ],
+              });
+
+              if (actionRes.action === "back" || actionRes.value === "cancel") {
+                return;
+              }
+
+              if (actionRes.action === "select" && actionRes.value === "delete") {
+                const updated = [...rawEntries];
+                updated.splice(selectedIdx, 1);
+                await writeMemory(key, updated);
+                console.clear();
+                console.log("\n  [OK] Fact deleted successfully.\n");
+                await waitForEnter();
+              }
+            }
+          }
+
           const scopeItems = [
             { label: "Global Memory", value: "global", badge: "global.md", info: "User facts stored across all projects" },
-            { label: `Project Memory (${projName})`, value: "project", badge: `${projName}.md`, info: `Facts specific to project ${projName}` },
+            { label: `Project Memory (${projLabel})`, value: "project", badge: memoryFileName(projKey), info: `Facts bound to ${projKey}` },
+            { label: "Project Stores (All Projects)", value: "projects", info: "List & browse every project memory store; bind legacy stores" },
             { label: "< Back to Main Menu", value: "back" },
           ];
           const scopeRes = await selectSimpleMenu({
@@ -1031,63 +1096,87 @@ export async function runCli() {
             break;
           }
 
-          const key = scopeRes.value === "global" ? GLOBAL_KEY : projName;
-          let factRunning = true;
-          while (factRunning) {
-            const rawEntries = await readMemory(key);
-            const factList = await readMemoryRaw(key);
+          if (scopeRes.value === "projects") {
+            let stores = await listProjectStores();
+            let storeRunning = true;
+            while (storeRunning) {
+              if (!stores.length) {
+                console.clear();
+                const line = "─".repeat(PANEL_WIDTH - 2);
+                console.log(`\x1b[36m╭${line}╮\x1b[0m`);
+                console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37mPROJECT STORES: NONE FOUND\x1b[0m${" ".repeat(PANEL_WIDTH - 32)}\x1b[36m│\x1b[0m`);
+                console.log(`\x1b[36m╰${line}╯\x1b[0m`);
+                console.log("\n  [*] No project memory stores found.\n");
+                await waitForEnter();
+                storeRunning = false;
+                break;
+              }
+              const storeItems = stores.map((s) => ({
+                label: `${s.basename} (${s.count})`,
+                badge: s.file,
+                hint: s.legacy ? "LEGACY" : "BOUND",
+                info: s.path ? `Bound to: ${s.path}` : `Unbound legacy store. View facts or bind to current dir: ${projKey}`,
+                value: s,
+              }));
+              storeItems.push({ label: "< Back", value: "back" });
 
-            if (!factList || factList.length === 0) {
-              console.clear();
-              const line = "─".repeat(PANEL_WIDTH - 2);
-              console.log(`\x1b[36m╭${line}╮\x1b[0m`);
-              console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37mNOTEBOOK FACTS: STORE EMPTY\x1b[0m${" ".repeat(PANEL_WIDTH - 30)}\x1b[36m│\x1b[0m`);
-              console.log(`\x1b[36m╰${line}╯\x1b[0m`);
-              console.log(`\n  [*] Notebook store [${key}] has no saved facts.\n`);
-              await waitForEnter();
-              factRunning = false;
-              break;
+              const storeRes = await selectSimpleMenu({
+                title: "PROJECT MEMORY STORES",
+                subtitle: `Total stores: ${stores.length}`,
+                items: storeItems,
+              });
+
+              if (storeRes.action === "back" || storeRes.value === "back") {
+                storeRunning = false;
+                break;
+              }
+
+              const store = storeRes.value;
+              let actionRunning = true;
+              while (actionRunning) {
+                const actionItems = [
+                  { label: "View facts", value: "view", info: `Browse ${store.count} fact(s) in ${store.file}` },
+                ];
+                if (store.legacy) {
+                  actionItems.push({
+                    label: "[MIGRATE] Bind to current directory",
+                    value: "migrate",
+                    info: `Rebind '${store.basename}' store from unbound legacy to ${projKey}`,
+                  });
+                }
+                actionItems.push({ label: "< Cancel / Back", value: "cancel" });
+
+                const actRes = await selectSimpleMenu({
+                  title: `STORE: ${store.basename}`,
+                  subtitle: store.path || "Unbound legacy store",
+                  items: actionItems,
+                });
+
+                if (actRes.action === "back" || actRes.value === "cancel") {
+                  actionRunning = false;
+                  break;
+                }
+                if (actRes.value === "view") {
+                  await browseFacts(store.key, store.basename);
+                } else if (actRes.value === "migrate") {
+                  const mig = await migrateLegacyStore(store.key, projKey);
+                  console.clear();
+                  if (mig.ok) {
+                    console.log(`\n  [OK] Legacy store '${store.basename}' bound to ${mig.key} (${mig.facts} fact(s)) [${mig.file}]\n`);
+                  } else {
+                    console.log(`\n  [*] Could not migrate: ${mig.reason}\n`);
+                  }
+                  await waitForEnter();
+                  stores = await listProjectStores();
+                  actionRunning = false;
+                  break;
+                }
+              }
             }
-
-            const factItems = factList.map((fact, idx) => ({
-              label: `${idx + 1}. ${fact}`,
-              value: idx,
-              info: `Select to delete this fact from ${key}.md`,
-            }));
-            factItems.push({ label: "< Back", value: "back" });
-
-            const factRes = await selectSimpleMenu({
-              title: `NOTEBOOK FACTS [${key.toUpperCase()}]`,
-              subtitle: `Total facts: ${factList.length}`,
-              items: factItems,
-            });
-
-            if (factRes.action === "back" || factRes.value === "back") {
-              factRunning = false;
-              break;
-            }
-
-            const selectedIdx = factRes.value;
-            const selectedFact = factList[selectedIdx];
-
-            const actionRes = await selectSimpleMenu({
-              title: `FACT ACTION`,
-              subtitle: `Fact: "${selectedFact}"`,
-              items: [
-                { label: "[DELETE] Delete this fact from store", value: "delete", info: "Remove fact permanently" },
-                { label: "< Cancel / Back", value: "cancel" },
-              ],
-            });
-
-            if (actionRes.action === "select" && actionRes.value === "delete") {
-              const updated = [...rawEntries];
-              updated.splice(selectedIdx, 1);
-              await writeMemory(key, updated);
-              console.clear();
-              console.log("\n  [OK] Fact deleted successfully.\n");
-              await waitForEnter();
-            }
+            continue;
           }
+
+          await browseFacts(scopeRes.value === "global" ? GLOBAL_KEY : projKey, scopeRes.value === "global" ? "GLOBAL" : projLabel);
         }
         break;
       }

@@ -3,14 +3,14 @@ import { rmSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { ensureDir, readMemory, readMemoryRaw, writeMemory, today, scopeKey } from "./memory.js";
-import { getDatabase } from "./db/database.js";
-import { ingestDocument } from "./ingest/pipeline.js";
-import { hybridQuery } from "./retrieval/retriever.js";
-import { readBlob, blobExists } from "./storage/blob_store.js";
-
 const TEST_DIR = join(tmpdir(), `memory_verification_${Date.now()}`);
 process.env.MEMORY_DIR = TEST_DIR;
+
+const { ensureDir, readMemory, readMemoryRaw, writeMemory, today, scopeKey } = await import("./memory.js");
+const { getDatabase } = await import("./db/database.js");
+const { ingestDocument } = await import("./ingest/pipeline.js");
+const { hybridQuery } = await import("./retrieval/retriever.js");
+const { readBlob, blobExists } = await import("./storage/blob_store.js");
 
 console.log("=== COMPREHENSIVE MEMORY & DOCUMENT RAG VERIFICATION ===");
 console.log(`Test Directory: ${TEST_DIR}`);
