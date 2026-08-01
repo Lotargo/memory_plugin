@@ -1,5 +1,5 @@
 import { readFile, writeFile, mkdir, unlink, readdir } from "fs/promises";
-import { existsSync } from "fs";
+import { existsSync, mkdirSync } from "fs";
 import { join, basename, resolve } from "path";
 import { homedir } from "os";
 
@@ -33,6 +33,17 @@ export async function ensureDir() {
   if (!existsSync(blobsDir)) await mkdir(blobsDir, { recursive: true });
   if (!existsSync(modelsDir)) await mkdir(modelsDir, { recursive: true });
   if (!existsSync(exportsDir)) await mkdir(exportsDir, { recursive: true });
+}
+
+export function ensureDirSync() {
+  if (!existsSync(MEMORY_DIR)) mkdirSync(MEMORY_DIR, { recursive: true });
+  const storageDir = join(MEMORY_DIR, "storage");
+  const blobsDir = join(storageDir, "blobs");
+  const modelsDir = join(storageDir, "models");
+  const exportsDir = join(MEMORY_DIR, "exports");
+  if (!existsSync(blobsDir)) mkdirSync(blobsDir, { recursive: true });
+  if (!existsSync(modelsDir)) mkdirSync(modelsDir, { recursive: true });
+  if (!existsSync(exportsDir)) mkdirSync(exportsDir, { recursive: true });
 }
 
 // Canonical absolute path key: forward slashes, lowercase drive letter on win32.

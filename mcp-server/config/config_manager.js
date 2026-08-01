@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { MEMORY_DIR, ensureDir } from "../memory.js";
+import { MEMORY_DIR, ensureDirSync } from "../memory.js";
 
 const CONFIG_FILE = path.join(MEMORY_DIR, "config.json");
 
@@ -23,7 +23,7 @@ export function getConfig() {
     return cachedConfig;
   }
 
-  ensureDir();
+  ensureDirSync();
 
   if (fs.existsSync(CONFIG_FILE)) {
     try {
@@ -42,7 +42,7 @@ export function getConfig() {
 }
 
 export function saveConfig(newConfig) {
-  ensureDir();
+  ensureDirSync();
   cachedConfig = Object.freeze({ ...DEFAULT_CONFIG, ...newConfig });
   try {
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(cachedConfig, null, 2), "utf-8");

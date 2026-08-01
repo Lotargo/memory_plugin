@@ -388,10 +388,10 @@ export async function getReranker(modelName = "Xenova/bge-reranker-base", progre
     return rerankerInstance;
   }
 
-  checkAndSelfHealModel(modelName);
+  const cacheDir = ensureValidModelDirectory();
 
   const { pipeline, env } = await import("@huggingface/transformers");
-  env.cacheDir = MODELS_DIR;
+  env.cacheDir = cacheDir;
   env.allowLocalModels = true;
   env.allowRemoteModels = true;
   env.remoteHost = "https://huggingface.co";
