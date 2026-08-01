@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getDatabase, BLOBS_DIR } from "../db/database.js";
 import { saveBlob, deleteBlob } from "../storage/blob_store.js";
-import { normalizeContent } from "./normalizer.js";
+import { normalizeContent, fetchUrlContent } from "./normalizer.js";
 import { buildTripleHierarchy } from "./chunker.js";
 import { embedText, embedBatch, vectorToBuffer } from "../ml/model_manager.js";
 import { buildGraphEdges, saveGraphEdges } from "../graph/graph_extractor.js";
@@ -18,13 +18,26 @@ export async function ingestDocument({
 }) {
   const db = customDb || getDatabase();
 
-  const { markdown, title: docTitle, metadata } = normalizeContent({ content, type, path, title });
+  let effectiveType = type;
+  let effectivePath = path;
+  let effectiveTitle = title;
+
+  if (type === "url") {
+    const fetched = await fetchUrlContent(String(content));
+    content = fetched.markdown;
+    effectiveType = "text";
+    effectiveTitle = title || fetched.title;
+    effectivePath = path || fetched.finalUrl || content;
+  }
+
+  const { markdown, title: docTitle, metadata } = normalizeContent({ content, type: effectiveType, path: effectivePath, title: effectiveTitle });
+  if (type === "url") metadata.source_type = "url";
 
   const blobRes = await saveBlob(markdown, customBlobDir);
   const blobHash = blobRes.hash;
 
   const docId = `doc_${randomUUID().replace(/-/g, "").substring(0, 12)}`;
-  const docPath = path || `virtual://${type}/${docId}`;
+  const docPath = effectivePath || `virtual://${type}/${docId}`;
   const now = Date.now();
 
   const hierarchy = buildTripleHierarchy(markdown, docId, docTitle);
@@ -151,6 +164,14 @@ export async function deleteDocument(docIdOrPath, customDb = null, customBlobDir
 
   const microChunks = db.prepare("SELECT id FROM micro_chunks WHERE doc_id = ?").all(doc.id);
 
+  // Collect every id owned by this document so we can purge dangling graph edges
+  // (graph_edges has no FK constraints, so section/chunk/doc references would otherwise leak).
+  const ownedIds = [doc.id];
+  for (const table of ["sections", "medium_chunks", "micro_chunks"]) {
+    const rows = db.prepare(`SELECT id FROM ${table} WHERE doc_id = ?`).all(doc.id);
+    for (const r of rows) ownedIds.push(r.id);
+  }
+
   db.exec("BEGIN IMMEDIATE;");
   try {
     for (const mc of microChunks) {
@@ -159,7 +180,16 @@ export async function deleteDocument(docIdOrPath, customDb = null, customBlobDir
       } catch {}
     }
 
-    db.prepare("DELETE FROM graph_edges WHERE source_id = ? OR target_id = ?").run(doc.id, doc.id);
+    // Auto-clean Agent knowledge graph links pointing at this document.
+    db.prepare("DELETE FROM knowledge_links WHERE doc_id = ?").run(doc.id);
+
+    for (const id of ownedIds) {
+      // GLOB: '*' suffix is exact (unlike LIKE, '_' stays literal in ids like doc_xxx).
+      db.prepare(
+        "DELETE FROM graph_edges WHERE source_id = ? OR target_id = ? OR source_id GLOB ? OR target_id GLOB ?"
+      ).run(id, id, `${id}*`, `${id}*`);
+    }
+
     db.prepare("DELETE FROM documents WHERE id = ?").run(doc.id);
 
     db.exec("COMMIT;");
@@ -175,5 +205,5 @@ export async function deleteDocument(docIdOrPath, customDb = null, customBlobDir
     }
   }
 
-  return { deleted: true, docId: doc.id, title: doc.title };
+  return { deleted: true, docId: doc.id, title: doc.title, linksCleaned: true };
 }

@@ -59,11 +59,12 @@ Use this tool when adding technical documentation, API specs, architectural docu
 - **Hierarchy Chunking**: The engine automatically creates 3-tier chunks (Big Document -> Medium Section -> Small Micro-Chunk) and extracts GraphRAG code symbols.
 - **Auto Vector Embeddings**: Dense ONNX vectors (`multilingual-e5-small`) are automatically computed and indexed in SQLite.
 - **CRITICAL Schema Usage & Parameters**:
-  - `content` (required, string): Must be the **actual raw text or markdown content** of the document, NOT just a file path!
-  - `type` (optional, enum: `"text"`, `"file"`, `"url"`): Set to `"text"` (default) or `"file"`.
-  - `path` (optional, string): Provide the absolute file path (e.g. `f:\projects\plugins\memory\README.md`).
-  - `title` (optional, string): Provide document title (e.g. `README.md`).
-  - **Correct Example**: `ingest_document(content: "<full text content>", path: "f:/path/to/file.md", title: "file.md", type: "file")`
+  - `content` (required, string): For `type: "text"`/`"file"` it must be the **actual raw text or markdown content** of the document, NOT just a file path! For `type: "url"` it must be the **page URL** — the page is fetched automatically and its content is indexed (not just the URL).
+  - `type` (optional, enum: `"text"`, `"file"`, `"url"`): `"text"` (default), `"file"`, or `"url"` (fetches the web page and indexes its content).
+  - `path` (optional, string): Provide the absolute file path (e.g. `f:\projects\plugins\memory\README.md`). For URLs the final URL is used for deduplication.
+  - `title` (optional, string): Provide document title (e.g. `README.md`). If omitted for a URL, the page `<title>` is used.
+  - **Correct Example (URL)**: `ingest_document(content: "https://docs.example.com/guide", type: "url", title: "Example Guide")`
+  - **Correct Example (text)**: `ingest_document(content: "<full text content>", path: "f:/path/to/file.md", title: "file.md", type: "file")`
   - ❌ **Common Error**: `ingest_document(content: "f:/path/to/file.md")` — this causes validation failures because `content` is missing the text content.
 
 - **CLI/Script Execution Note**: When writing batch node scripts to call `ingestDocument`, remember that `@lotargo/memory_plugin` uses ES Modules (`"type": "module"`). Use `import` syntax instead of `require()`.

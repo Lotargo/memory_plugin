@@ -240,7 +240,7 @@ const MCP_SERVERS = [
 
 export const MemoryPlugin = async ({ directory, worktree, client }) => {
   await ensureDir();
-  const projectKey = scopeKey("project", worktree, directory);
+  const activeProjectKey = scopeKey("project", worktree, directory);
 
   return {
     "experimental.chat.messages.transform": async (_input, output) => {
@@ -252,10 +252,10 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
 
       const [globalFacts, projectFacts] = await Promise.all([
         readMemoryRaw(GLOBAL_KEY),
-        readMemoryRaw(projectKey),
+        readMemoryRaw(activeProjectKey),
       ]);
 
-      const context = buildMemoryContext(globalFacts, projectFacts, projectKey);
+      const context = buildMemoryContext(globalFacts, projectFacts, activeProjectKey);
       const ref = firstUser.parts[0];
       firstUser.parts.unshift({ ...ref, type: "text", text: context });
     },
@@ -288,7 +288,8 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
         description:
           "Save an important, durable fact to memory. Only use for high-signal information " +
           "(name, goals, constraints, tech preferences, project conventions). " +
-          "Optionally link the fact to a Knowledge Base document or exact line range (docId, startLine, endLine). " +
+          "docId/startLine/endLine/relationType are OPTIONAL and only used to link the fact to a " +
+          "Knowledge Base document or line range; omit them when no linking is needed. " +
           "Translate the fact into English and keep it concise. " +
           "scope: 'project' (default) or 'global'",
         args: {
@@ -511,11 +512,12 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
         description:
           "Ingest a document into the RAG knowledge base. " +
           "Accepts local file paths, web URLs, or raw Markdown/text content. " +
+          "For type='url' the page is fetched and its content is indexed (not just the URL). " +
           "Processes document through 3-tier hierarchy chunking (Big/Medium/Small), " +
           "computes dense vectors, and extracts GraphRAG code symbols.",
         args: {
           content: { type: "string", description: "Raw text content, file path, or web URL" },
-          type: { type: "string", description: "Input content type: 'text', 'file', 'url'", default: "text" },
+          type: { type: "string", description: "Input content type: 'text', 'file', 'url' (url fetches the page content)", default: "text" },
           title: { type: "string", description: "Document title" },
           path: { type: "string", description: "Original document file path" },
           generateEmbeddings: { type: "boolean", description: "Compute dense vector embeddings", default: true },

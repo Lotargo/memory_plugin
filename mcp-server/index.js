@@ -32,6 +32,18 @@ const server = new McpServer({
   version: "1.0.0",
 });
 
+// Optional string/number that tolerates null (some tool-call layers fill omitted
+// optional args with null). Linking fields must NEVER be mandatory.
+const optStr = () => z.string().optional().nullable();
+const optNum = () => z.number().optional().nullable();
+const defStr = (fallback) =>
+  z
+    .string()
+    .nullish()
+    .transform((v) => (v === null || v === undefined || v === "" ? fallback : v));
+const defBool = (fallback) => z.boolean().nullish().transform((v) => (v === null || v === undefined ? fallback : v));
+const defNum = (fallback) => z.number().nullish().transform((v) => (v === null || v === undefined ? fallback : v));
+
 // --- Legacy Key-Value Memory Tools ---
 
 // --- Legacy Key-Value Memory Tools & Agent Graph Linking ---
@@ -42,16 +54,17 @@ server.registerTool(
     description:
       "Save an important, durable fact to memory. Only use for high-signal information " +
       "(name, goals, constraints, tech preferences, project conventions). " +
-      "Optionally link the fact to a Knowledge Base document or exact line range (docId, startLine, endLine). " +
+      "docId/startLine/endLine/relationType are OPTIONAL and only used to link the fact to a " +
+      "Knowledge Base document or line range; omit them when no linking is needed. " +
       "Translate the fact into English and keep it concise. " +
       "scope: 'project' (default) or 'global'",
     inputSchema: z.object({
       fact: z.string().describe("The fact to remember, written in English"),
-      scope: z.string().default("project").describe("'project' (default) or 'global'"),
-      docId: z.string().optional().describe("Optional document ID, title, or path to link this fact to"),
-      startLine: z.number().optional().describe("Optional starting line number in target document"),
-      endLine: z.number().optional().describe("Optional ending line number in target document"),
-      relationType: z.string().default("LINKS_TO").describe("Relation type (e.g. 'RULES_FOR', 'IMPLEMENTS', 'REFERENCES')"),
+      scope: defStr("project").describe("'project' (default) or 'global'"),
+      docId: optStr().describe("Optional document ID, title, or path to link this fact to"),
+      startLine: optNum().describe("Optional starting line number in target document"),
+      endLine: optNum().describe("Optional ending line number in target document"),
+      relationType: defStr("LINKS_TO").describe("Relation type (e.g. 'RULES_FOR', 'IMPLEMENTS', 'REFERENCES')"),
     }),
   },
   async ({ fact, scope, docId, startLine, endLine, relationType }) => {
@@ -97,8 +110,8 @@ server.registerTool(
       "scope: 'project', 'global', 'all' (default), or 'list_projects'. " +
       "Use project: '<directory path>' with scope 'project'/'all' to read facts of a specific project from any working directory.",
     inputSchema: z.object({
-      scope: z.string().default("all").describe("'project', 'global', 'all', or 'list_projects'"),
-      project: z.string().optional().describe("Directory path of the project to read facts from (e.g. 'F:/projects/plugins/memory')"),
+      scope: defStr("all").describe("'project', 'global', 'all', or 'list_projects'"),
+      project: optStr().describe("Directory path of the project to read facts from (e.g. 'F:/projects/plugins/memory')"),
     }),
   },
   async ({ scope, project }) => {
@@ -169,7 +182,7 @@ server.registerTool(
       "Delete a fact by number (from recall), by range (e.g. '3-30', inclusive), or by text search",
     inputSchema: z.object({
       query: z.string().describe("Number, range like '3-30', or text to search for"),
-      scope: z.string().default("project").describe("'project' (default) or 'global'"),
+      scope: defStr("project").describe("'project' (default) or 'global'"),
     }),
   },
   async ({ query, scope }) => {
@@ -207,13 +220,13 @@ server.registerTool(
       "Explicitly link a Notebook memory fact to a Knowledge Base document, section, or line range. " +
       "Creates Agent-driven Graph Edges connecting memory to RAG documents.",
     inputSchema: z.object({
-      action: z.enum(["link", "list_links", "get_doc_links"]).default("link").describe("Action type"),
-      factText: z.string().optional().describe("Memory fact text or keyword"),
-      docId: z.string().optional().describe("Document ID, title, or file path"),
-      scope: z.string().default("project").describe("'project' (default) or 'global'"),
-      startLine: z.number().optional().describe("Starting line number in target document"),
-      endLine: z.number().optional().describe("Ending line number in target document"),
-      relationType: z.string().default("LINKS_TO").describe("Relation type (e.g. 'RULES_FOR', 'IMPLEMENTS', 'EXPLAINS')"),
+      action: z.enum(["link", "list_links", "get_doc_links"]).nullish().transform((v) => v || "link").describe("Action type"),
+      factText: optStr().describe("Memory fact text or keyword"),
+      docId: optStr().describe("Document ID, title, or file path"),
+      scope: defStr("project").describe("'project' (default) or 'global'"),
+      startLine: optNum().describe("Starting line number in target document"),
+      endLine: optNum().describe("Ending line number in target document"),
+      relationType: defStr("LINKS_TO").describe("Relation type (e.g. 'RULES_FOR', 'IMPLEMENTS', 'EXPLAINS')"),
     }),
   },
   async ({ action, factText, docId, scope, startLine, endLine, relationType }) => {
@@ -264,14 +277,15 @@ server.registerTool(
     description:
       "Ingest a document into the RAG knowledge base. " +
       "Accepts local file paths, web URLs, or raw Markdown/text content. " +
+      "For type='url' the page is fetched and its content is indexed (not just the URL). " +
       "Processes document through 3-tier hierarchy chunking (Big/Medium/Small), " +
       "computes dense vectors, and extracts GraphRAG code symbols.",
     inputSchema: z.object({
       content: z.string().describe("Raw text content, file path, or web URL"),
-      type: z.enum(["text", "file", "url"]).default("text").describe("Input content type"),
-      title: z.string().optional().describe("Document title"),
-      path: z.string().optional().describe("Original document file path"),
-      generateEmbeddings: z.boolean().default(true).describe("Compute dense vector embeddings"),
+      type: z.enum(["text", "file", "url"]).nullish().transform((v) => v || "text").describe("Input content type: 'text', 'file', or 'url' (url fetches the page content)"),
+      title: optStr().describe("Document title"),
+      path: optStr().describe("Original document file path"),
+      generateEmbeddings: defBool(true).describe("Compute dense vector embeddings"),
     }),
   },
   async ({ content, type, title, path, generateEmbeddings }) => {
@@ -313,15 +327,12 @@ server.registerTool(
       "Returns top-ranked candidate document sections with breadcrumbs, GraphRAG defined code symbols, and relevance scores.",
     inputSchema: z.object({
       query: z.string().describe("Search query in natural language or symbol name"),
-      limit: z.number().default(5).describe("Maximum number of sections to return"),
-      instruction: z
-        .string()
-        .optional()
-        .describe(
-          "Optional task-specific retrieval instruction shaping embedding focus (e.g. 'Retrieve code snippets', 'Find user preferences'). " +
-          "Recommended when using E5/BGE models for domain-specific queries."
-        ),
-      generateEmbeddings: z.boolean().default(true).describe("Use vector search alongside BM25"),
+      limit: defNum(5).describe("Maximum number of sections to return"),
+      instruction: optStr().describe(
+        "Optional task-specific retrieval instruction shaping embedding focus (e.g. 'Retrieve code snippets', 'Find user preferences'). " +
+        "Recommended when using E5/BGE models for domain-specific queries."
+      ),
+      generateEmbeddings: defBool(true).describe("Use vector search alongside BM25"),
     }),
   },
   async ({ query, limit, instruction, generateEmbeddings }) => {
@@ -374,8 +385,8 @@ server.registerTool(
       "Manage the RAG knowledge base: inspect stats, list documents, read full raw document, delete documents, or export/import snapshots.",
     inputSchema: z.object({
       action: z.enum(["stats", "list", "read_document", "delete", "export_snapshot", "import_snapshot"]).describe("Management action"),
-      docId: z.string().optional().describe("Document ID, title, or path (required for read_document and delete)"),
-      snapshotPath: z.string().optional().describe("File path for snapshot export/import"),
+      docId: optStr().describe("Document ID, title, or path (required for read_document and delete)"),
+      snapshotPath: optStr().describe("File path for snapshot export/import"),
     }),
   },
   async ({ action, docId, snapshotPath }) => {

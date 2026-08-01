@@ -27,6 +27,48 @@ export function cleanHtml(html) {
   return cleaned;
 }
 
+// Fetch a web page and convert it to Markdown/text. Used by the 'url' ingestion type
+// so the RAG store gets the page CONTENT, not just the URL string.
+export async function fetchUrlContent(url) {
+  if (typeof url !== "string" || !/^https?:\/\//i.test(url.trim())) {
+    throw new Error(`Unsupported URL for ingestion: '${url}'. Only http/https URLs are supported.`);
+  }
+  let res;
+  try {
+    res = await fetch(url.trim(), {
+      headers: {
+        "User-Agent": "memory-agent-rag/1.0",
+        Accept: "text/html,application/xhtml+xml,application/json,text/plain,*/*",
+      },
+      redirect: "follow",
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (err) {
+    throw new Error(`Failed to fetch URL '${url}': ${err.message}`);
+  }
+  if (!res.ok) {
+    throw new Error(`Failed to fetch URL '${url}': HTTP ${res.status} ${res.statusText}`);
+  }
+  const raw = await res.text();
+  const contentType = (res.headers.get("content-type") || "").toLowerCase();
+  const looksLikeHtml = /<html|<body|<div|<article|<main|<!doctype/i.test(raw.slice(0, 4096));
+  let markdown;
+  if (contentType.includes("html") || looksLikeHtml) {
+    markdown = cleanHtml(raw);
+  } else if (contentType.includes("json") || /^[\[{]/.test(raw.trim())) {
+    try {
+      markdown = JSON.stringify(JSON.parse(raw), null, 2);
+    } catch {
+      markdown = raw.trim();
+    }
+  } else {
+    markdown = raw.trim();
+  }
+  const titleMatch = raw.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  const title = titleMatch ? titleMatch[1].replace(/\s+/g, " ").trim() : null;
+  return { markdown, title: title || null, finalUrl: res.url || url.trim() };
+}
+
 export function extractTitle(markdown, fallbackName = "Untitled Document") {
   const h1Match = markdown.match(/^#\s+(.+)$/m);
   if (h1Match && h1Match[1].trim()) {
