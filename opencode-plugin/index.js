@@ -415,9 +415,9 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
         },
       },
       "forget": {
-        description: "Удалить факт по номеру (см. recall) или тексту",
+        description: "Удалить факт по номеру (см. recall), по диапазону (например '3-30', включительно) или тексту",
         args: {
-          query: { type: "string", description: "Номер факта или текст для поиска" },
+          query: { type: "string", description: "Номер факта, диапазон вида '3-30' или текст для поиска" },
           scope: {
             type: "string",
             description: "project (по умолчанию) или global",
@@ -427,11 +427,20 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
         async execute({ query, scope }, { worktree, directory }) {
           const key = scopeKey(scope || "project", worktree, directory);
           const entries = await readMemory(key);
+          const rangeMatch = /^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(query);
           const num = parseInt(query, 10);
           let removed;
-          if (!isNaN(num) && num > 0 && num <= entries.length) {
+          if (rangeMatch) {
+            const from = parseInt(rangeMatch[1], 10);
+            const to = parseInt(rangeMatch[2], 10);
+            if (from > 0 && to >= from && to <= entries.length) {
+              removed = entries.splice(from - 1, to - from + 1);
+            }
+          }
+          if (!removed && !isNaN(num) && num > 0 && num <= entries.length) {
             removed = entries.splice(num - 1, 1);
-          } else {
+          }
+          if (!removed) {
             const filtered = entries.filter((e) => !e.toLowerCase().includes(query.toLowerCase()));
             removed = entries.filter((e) => e.toLowerCase().includes(query.toLowerCase()));
             entries.length = 0;

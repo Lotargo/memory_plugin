@@ -165,20 +165,30 @@ server.registerTool(
 server.registerTool(
   "forget",
   {
-    description: "Delete a fact by number (from recall) or text search",
+    description:
+      "Delete a fact by number (from recall), by range (e.g. '3-30', inclusive), or by text search",
     inputSchema: z.object({
-      query: z.string().describe("Number or text to search for"),
+      query: z.string().describe("Number, range like '3-30', or text to search for"),
       scope: z.string().default("project").describe("'project' (default) or 'global'"),
     }),
   },
   async ({ query, scope }) => {
     const key = scopeKey(scope, null, null);
     const entries = await readMemory(key);
+    const rangeMatch = /^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(query);
     const num = parseInt(query, 10);
     let removed;
-    if (!isNaN(num) && num > 0 && num <= entries.length) {
+    if (rangeMatch) {
+      const from = parseInt(rangeMatch[1], 10);
+      const to = parseInt(rangeMatch[2], 10);
+      if (from > 0 && to >= from && to <= entries.length) {
+        removed = entries.splice(from - 1, to - from + 1);
+      }
+    }
+    if (!removed && !isNaN(num) && num > 0 && num <= entries.length) {
       removed = entries.splice(num - 1, 1);
-    } else {
+    }
+    if (!removed) {
       const filtered = entries.filter((e) => !e.toLowerCase().includes(query.toLowerCase()));
       removed = entries.filter((e) => e.toLowerCase().includes(query.toLowerCase()));
       entries.length = 0;
