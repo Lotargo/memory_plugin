@@ -29,7 +29,7 @@ Automatically remembers durable user facts, ingests complex document repositorie
 
 Standard AI coding assistants lose context as soon as a chat session closes or a conversation is reset. You end up repeatedly re-explaining your preferences, architectural decisions, coding style, or project conventions.
 
-`@lotargo/memory_plugin` gives your AI tools durable, 100% local long-term memory and document retrieval capabilities that persist across restarts and work seamlessly across all supported coding environments.
+`@lotargo/memory_plugin` gives your AI tools durable, **persistent**, 100% local long-term memory and document retrieval capabilities that persist across restarts and work seamlessly across all supported coding environments. Any LLM-based coding agent (OpenCode, Claude Code, Codex, Antigravity) can query its own memory and hybrid knowledge base via the **Model Context Protocol (MCP)**.
 
 > **Project Scope & Runtime Notes**:
 > `@lotargo/memory_plugin` is designed primarily as a practical plugin to expand capabilities and streamline daily interaction with AI coding tools. Benchmark scores in this repository represent internal synthetic evaluation runs and are not intended as generalized RAG benchmarks.
@@ -58,7 +58,7 @@ Standard AI coding assistants lose context as soon as a chat session closes or a
 Run the setup command to configure all detected AI environments automatically:
 
 ```bash
-# Recommended: Global installation & setup (works across local CLI, Jules, Docker, and CI)
+# Recommended: Global installation & setup (works across local CLI, Docker, and CI)
 npm install -g @lotargo/memory_plugin && memory_plugin setup
 
 # Or via npx
@@ -81,20 +81,23 @@ npm install -g @lotargo/memory_plugin && memory_plugin setup --claude
 npm install -g @lotargo/memory_plugin && memory_plugin setup --codex
 ```
 
+`setup` also accepts `--gemini` (alias for Antigravity) and `--local` (also registers the MCP server in the project-local `.agents/` directory for Antigravity). Without a specific flag, all detected environments are configured.
+
 ---
 
 ## Dual-Layer Architecture
 
 1. **Layer 1: Notebook Store (Durable Facts)**
-   - **Tools**: `remember`, `recall`, `forget`
+   - **Tools**: `remember`, `recall`, `forget`, `update_fact`, `memory_info`
    - **Scope**: User preferences, identity, project conventions, system rules.
    - **Storage**: Human-readable Markdown format (`global` and per-project stores).
    - **Performance**: Guaranteed 100% precision instant lookup without vector degradation or threshold filtering.
+   - **Project Scoping**: Project stores are bound to their canonical directory path (e.g. `f__projects_plugins_memory.md`), so identical project names in different folders never collide. Legacy basename stores are migrated automatically with a collision guard.
 
 2. **Layer 2: RAG Knowledge Base (Technical Documents & Codebases)**
-   - **Tools**: `ingest_document`, `query_knowledge_base`, `manage_knowledge_base`
-   - **Capabilities**: Ingests raw text files, Markdown, HTML, and full code repositories.
-   - **Engine Components**: 3-tier hierarchy chunking (Big / Medium / Small), SQLite FTS5 BM25 search, ONNX dense vector embeddings (`multilingual-e5-small`), Reciprocal Rank Fusion (RRF / RSF), and GraphRAG Lite code symbol extraction.
+   - **Tools**: `ingest_document`, `query_knowledge_base`, `manage_knowledge_base`, `link_knowledge`
+   - **Capabilities**: Ingests raw text files, Markdown, HTML, Web URLs, and full code repositories.
+   - **Engine Components**: 3-tier hierarchy chunking (Big / Medium / Small), SQLite FTS5 BM25 search, ONNX dense vector embeddings (`multilingual-e5-small`), Reciprocal Rank Fusion (RRF / RSF), cross-encoder reranking (optional), and GraphRAG Lite code symbol extraction.
 
 ---
 
@@ -103,11 +106,14 @@ npm install -g @lotargo/memory_plugin && memory_plugin setup --codex
 - **Zero Heavy Infrastructure**: No Docker, no Python server, no C++ compilation (`node-gyp`). Uses Node.js native SQLite database.
 - **Bilingual & Multilingual Support**: State-of-the-art semantic precision across Russian, English, and technical code symbols.
 - **3-Tier Hierarchy Chunking**: Document (Big) -> Section (Medium) -> Micro-Chunk (Small).
-- **Hybrid RRF/RSF Fusion**: Combines SQLite FTS5 keyword precision with ONNX dense vector similarity.
+- **Hybrid RRF/RSF Fusion**: Combines SQLite FTS5 keyword precision with ONNX dense vector similarity; lexical-only fallback when embeddings are disabled.
+- **Semantic Search**: Cosine-similarity vector retrieval with multilingual ONNX embeddings (E5 / BGE model families).
+- **Path-Based Project Memory**: Per-project stores keyed by canonical directory path, with automatic migration of legacy stores.
 - **GraphRAG Lite**: Automatically links documents and extracted code symbols (classes, functions, types).
+- **Memory-to-Knowledge Linking**: Associate notebook facts with specific documents or line ranges in the RAG base.
 - **Content-Addressable Storage (CAS)**: Local S3-style compressed blob store for raw original documents.
 - **Dual-Source Model Failover**: Automatic HuggingFace CDN model downloading with GitHub Repository Mirror fallback.
-- **Interactive CLI Management**: Terminal GUI interface for runtime engine tuning, database maintenance, and diagnostics.
+- **Interactive TUI**: Terminal GUI (CLI menu) for runtime engine tuning, snapshot export/import, model cache management, and diagnostics.
 
 ---
 
@@ -119,17 +125,17 @@ npm install -g @lotargo/memory_plugin && memory_plugin setup --codex
 | **OpenCode**                 | Native       | Native plugin + MCP Server (`~/.config/opencode/opencode.json`)             |
 | **Claude Code**              | Supported    | MCP Server (`~/.claude.json`)                                               |
 | **Codex**                    | Supported    | MCP Server (`~/.codex/config.toml`)                                         |
-| **Google Jules**             | Experimental | MCP Server via global install (`npm install -g @lotargo/memory_plugin`)     |
+| **Google Jules**             | Experimental | MCP Server via global install + setup (`npm install -g @lotargo/memory_plugin && memory_plugin setup`) |
 
 ### Google Jules Integration (Experimental)
 
-The plugin has been verified inside the **Google Jules** cloud workspace environment.
+The plugin has been verified inside the **Google Jules** cloud workspace environment. This feature is **experimental**.
 
-- **Setup Method**: Global pre-installation:
+- **Setup Method**: Global pre-installation with auto-setup:
   ```bash
-  npm install -g @lotargo/memory_plugin
+  npm install -g @lotargo/memory_plugin && memory_plugin setup
   ```
-- **Verification**: Google Jules automatically discovers the registered MCP server upon workspace initialization and seamlessly interacts with memory & RAG tools (`remember`, `recall`, `ingest_document`, `query_knowledge_base`).
+- **Verification**: All current tools and capabilities have been verified inside the Google Jules cloud workspace. Google Jules automatically discovers the registered MCP server upon workspace initialization and seamlessly interacts with the full set of memory & RAG tools — `remember`, `recall`, `forget`, `update_fact`, `memory_info`, `link_knowledge`, `ingest_document`, `query_knowledge_base`, and `manage_knowledge_base` — including project-scoped memory, knowledge linking, and snapshot export/import.
 - **Current Limitation**: All memory stores and vector indexes operate locally within the workspace environment. Cross-session cloud synchronization across different Jules runs is planned for upcoming releases.
 
 ---
@@ -138,11 +144,13 @@ The plugin has been verified inside the **Google Jules** cloud workspace environ
 
 ### 1. Memory Tools (Key-Value Notebook)
 
-| Tool       | Scope / Target                | Description                                  |
-| :--------- | :---------------------------- | :------------------------------------------- |
-| `remember` | `global` or `project`         | Save an important durable fact or preference |
-| `recall`   | `project`, `global`, or `all` | Display saved facts                          |
-| `forget`   | Index ID or query             | Remove a saved fact                          |
+| Tool            | Scope / Target                          | Description                                                       |
+| :-------------- | :-------------------------------------- | :---------------------------------------------------------------- |
+| `remember`      | `global` or `project`                   | Save an important durable fact or preference                       |
+| `recall`        | `project`, `global`, `all`, `list_projects` | Display saved facts; read another project's store via `project: '<path>'` |
+| `forget`        | Index ID, range, or query               | Remove a saved fact (e.g. `"3-30"` ranges; `force` for protected) |
+| `update_fact`   | Index ID, metadata id, or text          | Rewrite a fact while preserving its original date and links       |
+| `memory_info`   | -                                       | Show storage paths, fact counts, RAG stats, and package version   |
 
 ### 2. Hybrid RAG Knowledge Base Tools
 
@@ -150,13 +158,50 @@ The plugin has been verified inside the **Google Jules** cloud workspace environ
 | :---------------------- | :------------------------------ | :--------------------------------------------------------------------------- |
 | `ingest_document`       | Local files, Web URLs, Raw text | Ingest into 3-tier index with ONNX vector embeddings & symbol extraction     |
 | `query_knowledge_base`  | Text / Code query               | Perform hybrid RSF/RRF search (BM25 + Vector) to retrieve candidate sections |
-| `manage_knowledge_base` | Actions / Documents             | List documents, delete entries, view DB stats, or export/import snapshots    |
+| `manage_knowledge_base` | Actions / Documents             | Stats, list, read, delete documents, or export/import snapshots              |
+| `link_knowledge`        | Facts + Document ranges         | Explicitly link a memory fact to a KB document or line range                 |
+
+### 3. Native OpenCode Plugin
+
+When installed as an OpenCode plugin, all MCP tools above plus `list-mcp-tools` and `mcp-reminder` are exposed. A chat hook (`experimental.chat.messages.transform`) automatically injects your saved memory into every conversation as a `<MEMORY>` block, so your agent starts each session already knowing your preferences and project context.
 
 ---
 
-## Interactive CLI & Engine Tuning
+## GraphRAG Lite
 
-Launch the interactive CLI terminal interface to manage engine settings, inspect databases, and tune retrieval parameters:
+The RAG engine includes a lightweight graph layer built on the same SQLite database. It combines code symbol extraction, hierarchy edges, and explicit memory-to-document links without requiring a separate graph store or an LLM at ingest time.
+
+**Code Symbol Extraction** — during `ingest_document`, code symbols are extracted from the chunk content using fast regex heuristics (no language model needed):
+
+- JavaScript / TypeScript: `function`, `class`, `interface`, `type`, `enum`, `const`, `let`, `var`
+- Python: `def`, `class`
+- Symbols shorter than 3 characters and reserved keywords (`const`, `let`, `var`, `function`, `class`, `import`, `export`, `from`, `return`, `if`, `for`, `while`, `def`, `self`) are filtered out.
+
+**Graph Edges** — three built-in relation types are created automatically, and custom relation types are supported for explicit linking:
+
+| Relation Type       | Direction / Example                                          |
+| :------------------ | :----------------------------------------------------------- |
+| `CONTAINS`          | Document -> Section -> Micro-Chunk (3-tier hierarchy)        |
+| `DEFINES_SYMBOL`    | Section -> `symbol:<name>` (extracted code symbol)           |
+| `LINKS_TO` (default) | Memory fact -> Document or line range (via `link_knowledge`) |
+
+**Memory-to-Knowledge Linking** — the `link_knowledge` tool connects a notebook fact to a specific document or line range (`RULES_FOR`, `IMPLEMENTS`, `EXPLAINS`, `REFERENCES`, ...):
+
+- `link` — create the link and its graph edge
+- `list_links` — list all links, optionally filtered by fact key
+- `get_doc_links` — list all links pointing to a given document
+
+Linked facts are surfaced automatically in `recall` results as `🔗 [Linked Docs: ...]`, and `remember` accepts an optional `docId` to link immediately.
+
+**Retrieval Integration** — `query_knowledge_base` augments each retrieved section with `defined_symbols`: the code symbols defined in that same section (a single-hop lookup along `DEFINES_SYMBOL` edges). Symbol extraction also improves BM25 scoring, since symbol names become searchable tokens.
+
+**Lifecycle** — edges are rebuilt transactionally on re-ingest of the same document, and `manage_knowledge_base` delete operations clean up all graph edges and knowledge links owned by the document (including `GLOB`-matched section/micro-chunk suffixes).
+
+---
+
+## Interactive TUI (CLI Menu)
+
+Launch the interactive terminal UI to manage engine settings, inspect databases, tune retrieval parameters, and run diagnostics:
 
 ```bash
 # From local repository folder:
@@ -170,23 +215,50 @@ memory_plugin cli
 memory-cli
 ```
 
-### CLI Menu Overview
+### TUI Menu Overview
 
 The interactive menu exposes runtime parameters that `hybridQuery` honors, allowing search behavior modifications without restarting the MCP server. Use **Up / Down** arrows to navigate, **ENTER** to select, and **BACKSPACE** to go back.
 
-| Block               | Menu Item                    | Functionality                                                                  |
-| :------------------ | :--------------------------- | :----------------------------------------------------------------------------- |
-| **Engine Settings** | Fusion Algorithm             | Switch between `rsf`, `rrf`, `semantic_only`, `lexical_only`.                  |
-|                     | RSF Alpha Balance            | Weight of semantic over lexical in `rsf` fusion (`α ∈ [0,1]`). Default: `0.5`. |
-|                     | Embedding Model              | Select ONNX model (e.g. `Xenova/multilingual-e5-small`).                       |
-|                     | Reranker Model               | Enable Cross-Encoder reranking or disable for zero-latency fusion.             |
-| **Notebook**        | Layer 1 Facts                | Browse and manage `global` and per-project `.md` fact stores.                  |
-| **RAG Docs**        | Layer 2 RAG Base             | List ingested documents, inspect chunk counts, and purge entries.              |
-| **Diagnostics**     | Run Search Quality Benchmark | Execute in-process search evaluation across benchmark query set.               |
-|                     | Verification Query           | Run a test `hybridQuery` against the active index.                             |
-|                     | Clear Cache & Reset          | Clear cached benchmark corpus or restore factory default config.               |
+| Block                                   | Menu Item                       | Functionality                                                                  |
+| :-------------------------------------- | :------------------------------ | :----------------------------------------------------------------------------- |
+| **Engine & Hybrid Search Settings**     | Fusion Algorithm                | Switch between `rsf`, `rrf`, `semantic_only`, `lexical_only`.                  |
+|                                         | RSF Alpha Balance               | Weight of semantic over lexical in `rsf` fusion (`α ∈ [0,1]`). Default: `0.5`.  |
+|                                         | Embedding Model                 | Select ONNX model (e.g. `Xenova/multilingual-e5-small`, custom HF models).     |
+|                                         | Reranker Model                  | Enable Cross-Encoder reranking or disable for zero-latency fusion.             |
+|                                         | Vector Batch Size               | Ingestion vector batch size `[1 - 256]` (default `12`).                        |
+|                                         | GPU Attention Budget            | GPU micro-batch attention budget `[1M - 16M]` (default `2.0M`, ~1.5 GB VRAM).  |
+|                                         | CPU WASM Threads                | ONNX WASM threads: `0` auto-detect or `1-16`.                                  |
+|                                         | Execution Hardware              | `cpu` or `webgpu` (experimental).                                              |
+| **Knowledge Base & Storage Management** | Notebook (Layer 1 Facts)        | Browse and manage `global` and per-project `.md` fact stores.                  |
+|                                         | RAG Docs (Layer 2 Base)         | List ingested documents, inspect chunk counts, and purge entries.              |
+|                                         | Snapshot Export / Import        | Export or restore the full RAG base + blob store as a JSON snapshot.           |
+|                                         | Manage & Purge ML Model Cache   | Inspect or purge downloaded ONNX model weights.                                |
+|                                         | Hard Reset                      | Purge RAG base, blob storage, and graph edges.                                 |
+| **Global Prompt & Integration**         | Enable / Disable Global Prompt  | Inject memory instructions into `~/.gemini/config/AGENTS.md`, `~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`. |
+| **Diagnostics & System Actions**        | Search Quality Benchmark        | Execute in-process search evaluation across the benchmark query set.           |
+|                                         | Verification Query              | Run a test `hybridQuery` against the active index.                             |
+|                                         | Clear Benchmark Corpus Cache    | Clear cached benchmark corpus.                                                 |
+|                                         | Reset Config to Factory Defaults| Restore default engine configuration.                                          |
 
-Settings persist to `~/.config/opencode/memory/config.json` and are immediately loaded by the MCP server.
+Settings persist to `<memory-dir>/config.json` and are immediately loaded by the MCP server.
+
+---
+
+## Configuration
+
+The engine is configured through `<memory-dir>/config.json` (created with defaults on first run):
+
+| Key                   | Default                            | Description                                                     |
+| :-------------------- | :--------------------------------- | :-------------------------------------------------------------- |
+| `fusionAlgorithm`     | `rsf`                              | `rsf`, `rrf`, `semantic_only`, or `lexical_only`                |
+| `alpha`               | `0.5`                              | Vector vs BM25 weight in RSF `[0.0 - 1.0]`                      |
+| `embeddingModel`      | `Xenova/multilingual-e5-small`     | ONNX dense embedding model (E5 / BGE families supported)        |
+| `rerankerModel`       | `none`                             | Cross-encoder reranker, or `Xenova/bge-reranker-base`           |
+| `rerankerEnabled`     | `false`                            | Enable cross-encoder re-ranking                                 |
+| `batchSize`           | `12`                               | Ingestion vector batch size `[1 - 256]`                         |
+| `gpuAttentionBudget`  | `2000000`                          | GPU micro-batch attention budget `[1M - 16M]`                   |
+| `onnxThreads`         | `0`                                | ONNX WASM threads: `0` auto-detect, or `1-16`                   |
+| `executionDevice`     | `cpu`                              | `cpu` or `webgpu` (experimental)                                |
 
 ---
 
@@ -241,7 +313,7 @@ Detailed technical documentation and architectural specifications are available 
 
 ## Storage & Privacy
 
-- **100% Local Storage**: All SQLite indexes, ONNX models, CAS blobs, and Markdown notebooks are stored locally under `~/.config/opencode/memory/`.
+- **100% Local Storage**: All SQLite indexes, ONNX models, CAS blobs, and Markdown notebooks are stored locally in the memory directory. The location resolves to, in order of priority: `$MEMORY_DIR`, `$OPENCODE_CONFIG_DIR/memory`, the legacy `~/.config/opencode/memory` (on Windows: `%LOCALAPPDATA%\opencode\memory`), or `$XDG_CONFIG_HOME/opencode/memory`.
 - **Dual-Source Failover Model Fetching**: Primary model weights are fetched from HuggingFace CDN with automatic failover to GitHub Repository Mirror.
 - **Zero External Telemetry**: No third-party network calls are required after initial model setup.
 

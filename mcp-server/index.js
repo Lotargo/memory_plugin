@@ -39,13 +39,6 @@ if (cliArgs.includes("setup") || cliArgs.includes("install") || cliArgs.includes
   process.exit(0);
 }
 
-if (cliArgs.includes("admin") || cliArgs.includes("--admin") || cliArgs.includes("-a")) {
-  const { startAdminServer } = await import("./admin/server.js");
-  await startAdminServer();
-  // Keep process running for web server
-  await new Promise(() => {});
-}
-
 if (cliArgs.includes("cli") || cliArgs.includes("config") || cliArgs.includes("--cli") || cliArgs.includes("-c")) {
   const { runCli } = await import("./cli.js");
   await runCli();

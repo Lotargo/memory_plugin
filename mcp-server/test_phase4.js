@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { getDatabase } from "./db/database.js";
 import { ingestDocument } from "./ingest/pipeline.js";
 import { exportSnapshot, importSnapshot } from "./admin/snapshot.js";
-import { startAdminServer, findAvailablePort } from "./admin/server.js";
 
 const TEST_DIR = join(tmpdir(), `memory_test_phase4_${Date.now()}`);
 const TEST_DB_PATH = join(TEST_DIR, "test_memory.sqlite");
@@ -76,46 +75,6 @@ Dynamic port scanning ensures zero conflicts on ports 8765-8785.
   freshDb.close();
   console.log("  [PASS] Snapshot Export & Import OK");
 
-  // 3. Web Admin Server Endpoints Test
-  console.log("3. Testing Web Admin Server & API Endpoints...");
-  const testPort = await findAvailablePort(8900, 8950);
-  const { server, port, url } = await startAdminServer({
-    port: testPort,
-    customDb: db,
-    customBlobDir: TEST_BLOB_DIR,
-  });
-
-  assert.strictEqual(port, testPort, "Server should bind to specified port");
-
-  // Test GET /api/stats
-  const statsRes = await fetch(`${url}/api/stats`);
-  const statsData = await statsRes.json();
-  assert.strictEqual(statsData.documents, 1, "Stats API should return 1 document");
-  assert.strictEqual(statsData.sections, 2, "Stats API should return 2 sections");
-
-  // Test GET /api/documents
-  const docsRes = await fetch(`${url}/api/documents`);
-  const docsData = await docsRes.json();
-  assert.strictEqual(docsData.length, 1, "Documents API should return document list");
-
-  // Test POST /api/query
-  const queryRes = await fetch(`${url}/api/query`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query: "exportSnapshot port", limit: 5, generateEmbeddings: false }),
-  });
-  const queryData = await queryRes.json();
-  assert(queryData.results.length >= 1, "Query API should return search results");
-
-  // Test GET /api/graph
-  const graphRes = await fetch(`${url}/api/graph`);
-  const graphData = await graphRes.json();
-  assert(graphData.nodes.length >= 1, "Graph API should return nodes");
-
-  server.close();
-  db.close();
-  console.log("  [PASS] Web Admin Server API Endpoints OK");
-
   // 4. Testing Reranker Loading and Config Manager Fixes
   console.log("4. Testing Reranker Lazy Loading and Config Sync fixes...");
   const { getReranker } = await import("./ml/model_manager.js");
@@ -145,6 +104,7 @@ Dynamic port scanning ensures zero conflicts on ports 8765-8785.
   }
   console.log("  [PASS] Reranker Lazy Loading & Config Sync fixes OK");
 
+  db.close();
   console.log("\n✅ ALL PHASE 4 & PHASE 5 TESTS PASSED SUCCESSFULLY!");
 } catch (err) {
   console.error("\n❌ PHASE 4 TEST FAILED:", err);
