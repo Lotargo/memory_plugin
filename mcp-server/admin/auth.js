@@ -1,8 +1,8 @@
 import http from "node:http";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
-import { saveSecrets, deleteSecrets } from "../config/auth_store.js";
-import { updateConfig } from "../config/config_manager.js";
+import { saveSecrets, deleteSecrets, loadSecrets, resolveEnvSecrets, getSecretsSource } from "../config/auth_store.js";
+import { getConfig, updateConfig } from "../config/config_manager.js";
 
 export const TURSO_API_BASE = () => process.env.TURSO_API_BASE || "https://api.turso.tech";
 
@@ -273,6 +273,86 @@ function dbHostname(org, dbName) {
   return `${dbName}-${org}.turso.io`;
 }
 
+// Shared post-auth resolution: validate happens in the caller. Steps:
+//   1. Resolve an organization (explicit, first available, or username fallback).
+//   2. Pick or create a database.
+//   3. Mint a full-access token for that database.
+//   4. Persist the encrypted token + dbUrl and mark the session as authorized.
+async function finalizeCloudLogin({ token, username, org = null, databaseName = null, autoCreate = true, persist = true, apiToken = null }) {
+  const accountUsername = username || "user";
+
+  // Step 1: resolve organization + database namespace
+  const orgs = await listOrganizations(token);
+  let orgSlug;
+  let orgName;
+  if (orgs && orgs.length > 0) {
+    const requested = org ? orgs.find((o) => (o.slug || o.name || o.id) === org) : null;
+    const chosen = requested || orgs[0];
+    orgSlug = chosen.slug || chosen.name || chosen.id || String(chosen);
+    orgName = chosen.name || orgSlug;
+  } else {
+    // Personal accounts are not listed in /v1/organizations, but their own
+    // username acts as the organization namespace in the Platform API.
+    orgSlug = accountUsername;
+    orgName = accountUsername;
+    console.log(`  [CLOUD] No organizations found. Using personal account "${orgSlug}" as the database namespace.`);
+  }
+
+  const dbs = await listDatabases(token, orgSlug);
+  if (dbs.length > 0) {
+    console.log(`\n  [CLOUD] Databases in organization "${orgName}":`);
+    dbs.forEach((d, i) => console.log(`    ${i + 1}. ${d.name}`));
+  }
+
+  let dbName = databaseName;
+  if (!dbName) {
+    if (dbs.length > 0) {
+      dbName = dbs[0].name;
+      console.log(`\n  [CLOUD] Using existing database: "${dbName}"`);
+    } else if (autoCreate) {
+      dbName = `memory-${accountUsername}`;
+      console.log(`\n  [CLOUD] No database found. Creating "${dbName}"...`);
+      await createDatabase(token, orgSlug, dbName);
+      console.log(`  [OK] Database "${dbName}" created.`);
+    } else {
+      throw new Error("No databases found and autoCreate is disabled.");
+    }
+  }
+
+  // Step 2: mint a full-access token for the database
+  console.log("  [CLOUD] Issuing database access token...");
+  const dbJwt = await createDatabaseToken(token, orgSlug, dbName);
+  if (!dbJwt) {
+    throw new Error("Failed to create database auth token.");
+  }
+
+  const dbUrl = `libsql://${dbHostname(orgSlug, dbName)}`;
+
+  // Step 3: persist secrets and mark authorized
+  if (persist) {
+    saveSecrets({
+      token: dbJwt,
+      dbUrl,
+      username: accountUsername,
+      org: orgSlug,
+      db: dbName,
+      authorized: true,
+      ...(apiToken ? { apiToken } : {}),
+    });
+  }
+  updateConfig({ tursoUrl: dbUrl, authorized: true, username: accountUsername });
+
+  return {
+    token: dbJwt,
+    dbUrl,
+    username: accountUsername,
+    org: orgSlug,
+    db: dbName,
+    authorized: true,
+    ...(apiToken ? { apiToken } : {}),
+  };
+}
+
 // Perform the full cloud login flow:
 //   1. OAuth browser flow against Turso (api.turso.tech).
 //   2. Validate the received account JWT.
@@ -285,6 +365,7 @@ export async function loginToCloud({
   simulatedParams = null,
   autoCreate = true,
   databaseName = null,
+  org = null,
 } = {}) {
   const state = crypto.randomBytes(16).toString("hex");
   const loginUrl = `${TURSO_API_BASE()}/?port=${customPort}&redirect=true&state=${state}&type=cli`;
@@ -324,57 +405,200 @@ export async function loginToCloud({
   const accountUsername = username || userInfo?.username || userInfo?.name || "user";
   console.log(`  [OK] Token is valid. User: ${accountUsername}`);
 
-  // Step 3: resolve organization + database
-  const orgs = await listOrganizations(token);
-  let org;
-  let orgName;
-  if (orgs && orgs.length > 0) {
-    org = orgs[0].slug || orgs[0].name || orgs[0].id || String(orgs[0]);
-    orgName = orgs[0].name || org;
-  } else {
-    // Personal accounts are not listed in /v1/organizations, but their own
-    // username acts as the organization namespace in the Platform API.
-    org = accountUsername;
-    orgName = accountUsername;
-    console.log(`  [CLOUD] No organizations found. Using personal account "${org}" as the database namespace.`);
-  }
+  const secrets = await finalizeCloudLogin({ token, username: accountUsername, org, databaseName, autoCreate });
 
-  const dbs = await listDatabases(token, org);
-  if (dbs.length > 0) {
-    console.log(`\n  [CLOUD] Databases in organization "${orgName}":`);
-    dbs.forEach((d, i) => console.log(`    ${i + 1}. ${d.name}`));
-  }
+  console.log(`\n  \x1b[32m[OK] Successfully signed in to the cloud! Endpoint: ${secrets.dbUrl}\x1b[0m`);
+  return secrets;
+}
 
-  let dbName = databaseName;
-  if (!dbName) {
-    if (dbs.length > 0) {
-      dbName = dbs[0].name;
-      console.log(`\n  [CLOUD] Using existing database: "${dbName}"`);
-    } else if (autoCreate) {
-      dbName = `memory-${accountUsername}`;
-      console.log(`\n  [CLOUD] No database found. Creating "${dbName}"...`);
-      await createDatabase(token, org, dbName);
-      console.log(`  [OK] Database "${dbName}" created.`);
-    } else {
-      throw new Error("No databases found and autoCreate is disabled.");
+// Headless login with a Turso account API token (no browser, no loopback).
+// Create one at https://console.turso.tech or via `turso auth api-tokens create`.
+// The same Platform API is used to resolve the organization + database and to
+// mint a per-database token, exactly like the browser flow.
+export async function loginWithApiToken({
+  token,
+  org = null,
+  databaseName = null,
+  autoCreate = true,
+  username = null,
+  persist = true,
+} = {}) {
+  if (!token) throw new Error("An account API token is required.");
+  console.log("\n  [CLOUD] Validating account API token...");
+  let userInfo = null;
+  try {
+    userInfo = await validateTursoToken(token);
+  } catch (err) {
+    throw new Error(`Token validation failed: ${err.message}`);
+  }
+  const accountUsername = username || userInfo?.username || userInfo?.name || "user";
+  console.log(`  [OK] API token is valid. User: ${accountUsername}`);
+
+  const secrets = await finalizeCloudLogin({
+    token,
+    username: accountUsername,
+    org,
+    databaseName,
+    autoCreate,
+    persist,
+    apiToken: persist ? token : null,
+  });
+
+  console.log(`\n  \x1b[32m[OK] Successfully signed in to the cloud! Endpoint: ${secrets.dbUrl}\x1b[0m`);
+  return secrets;
+}
+
+// Direct headless login with an existing database URL + auth token.
+// No Platform API calls are made; org/db are derived from the endpoint.
+export async function loginWithDatabaseToken({
+  token,
+  dbUrl,
+  username = "",
+  org = "",
+  db = "",
+  validate = true,
+} = {}) {
+  if (!token || !dbUrl) throw new Error("Both a database auth token and a libsql:// URL are required.");
+
+  // Derive org + database name from the endpoint (libsql://<db>-<org>.turso.io)
+  let resolvedOrg = org;
+  let resolvedDb = db;
+  const m = String(dbUrl).match(/^libsql:\/\/(.+)\.turso\.io$/);
+  if (m) {
+    const host = m[1];
+    const sep = host.lastIndexOf("-");
+    if (sep > 0) {
+      resolvedDb = resolvedDb || host.slice(0, sep);
+      resolvedOrg = resolvedOrg || host.slice(sep + 1);
     }
   }
 
-  // Step 4: mint a full-access token for the database
-  console.log("  [CLOUD] Issuing database access token...");
-  const dbJwt = await createDatabaseToken(token, org, dbName);
-  if (!dbJwt) {
-    throw new Error("Failed to create database auth token.");
+  if (validate) {
+    console.log("  [CLOUD] Validating database token against the endpoint...");
+    try {
+      const { createClient } = await import("@libsql/client");
+      const client = createClient({ url: dbUrl, authToken: token });
+      await client.execute("SELECT 1");
+      client.close();
+      console.log("  [OK] Database token validated.");
+    } catch (err) {
+      throw new Error(`Database token validation failed: ${err.message}`);
+    }
   }
 
-  const dbUrl = `libsql://${dbHostname(org, dbName)}`;
-
-  // Step 5: persist secrets and mark authorized
-  saveSecrets({ token: dbJwt, dbUrl, username: accountUsername, org, db: dbName, authorized: true });
-  updateConfig({ tursoUrl: dbUrl, authorized: true, username: accountUsername });
+  saveSecrets({ token, dbUrl, username, org: resolvedOrg, db: resolvedDb, authorized: true });
+  updateConfig({ tursoUrl: dbUrl, authorized: true, username });
 
   console.log(`\n  \x1b[32m[OK] Successfully signed in to the cloud! Endpoint: ${dbUrl}\x1b[0m`);
-  return { token: dbJwt, dbUrl, username: accountUsername, org, db: dbName, authorized: true };
+  return { token, dbUrl, username, org: resolvedOrg, db: resolvedDb, authorized: true };
+}
+
+// Pick up credentials from the environment or MEMORY_DIR/.env.
+// - TURSO_DB_URL + TURSO_DB_TOKEN: direct endpoint login (preferred, no API calls).
+// - TURSO_API_TOKEN: account API-token flow resolving org/db via the Platform API.
+// When persist is true the resolved secrets are also written to the encrypted store.
+export async function loginFromEnv({ persist = false } = {}) {
+  const env = resolveEnvSecrets();
+  if (!env) {
+    return { ok: false, reason: "No cloud secrets found in the environment or MEMORY_DIR/.env." };
+  }
+
+  if (env.dbUrl && env.token) {
+    const secrets = {
+      token: env.token,
+      dbUrl: env.dbUrl,
+      username: env.username || "",
+      org: env.org || "",
+      db: env.database || "",
+      authorized: true,
+    };
+    if (persist) saveSecrets(secrets);
+    updateConfig({ tursoUrl: env.dbUrl, authorized: true, username: secrets.username });
+    console.log(`\n  \x1b[32m[OK] Cloud credentials imported from the environment! Endpoint: ${env.dbUrl}\x1b[0m`);
+    return { ok: true, secrets, source: "env" };
+  }
+
+  if (env.apiToken) {
+    // Resolve lazily; the raw API token stays in the environment and is NOT
+    // persisted to the encrypted store (explicit `login --api-token` does that).
+    const secrets = await loginWithApiToken({
+      token: env.apiToken,
+      org: env.org || null,
+      databaseName: env.database || null,
+      username: env.username || null,
+      persist: false,
+    });
+    return { ok: true, secrets: { ...secrets, apiToken: env.apiToken }, source: "env" };
+  }
+
+  return {
+    ok: false,
+    reason: "Incomplete cloud secrets. Set TURSO_DB_URL + TURSO_DB_TOKEN (preferred) or TURSO_API_TOKEN (with optional TURSO_ORG / TURSO_DATABASE).",
+  };
+}
+
+// Async resolution of the working cloud credentials (a DB URL + auth token).
+// Used by database.js at startup so a raw TURSO_API_TOKEN environment token
+// (which can only call the Platform API, not libsql) gets minted into a
+// per-database JWT without any interactive step.
+export async function resolveCloudSecrets() {
+  const secrets = loadSecrets();
+  if (!secrets) return null;
+  if (secrets.apiToken && secrets.needsResolution) {
+    const resolved = await loginWithApiToken({
+      token: secrets.apiToken,
+      org: secrets.org || null,
+      databaseName: secrets.db || null,
+      username: secrets.username || null,
+      persist: false,
+    });
+    return { ...resolved, source: "env" };
+  }
+  return secrets;
+}
+
+// Store/replace a Turso account API token. Alias of the headless login flow:
+// the token is validated, an org/database is resolved and a per-database JWT
+// is minted, then both the API token and the resolved session are persisted.
+export async function setApiKey(token, { org = null, databaseName = null } = {}) {
+  if (!token || typeof token !== "string" || !token.trim()) {
+    throw new Error("An account API token is required.");
+  }
+  const secrets = await loginWithApiToken({ token: token.trim(), org, databaseName });
+  return { ok: true, secrets };
+}
+
+// Remove a stored API token. The resolved database session is kept as a plain
+// browser/database session so an already-synced deployment keeps working.
+export function clearApiKey() {
+  const existing = loadSecrets();
+  if (!existing || !existing.apiToken) return { removed: false };
+  const rest = { ...existing };
+  delete rest.apiToken;
+  if (rest.token && rest.dbUrl) {
+    saveSecrets({ ...rest, authorized: true });
+    return { removed: true, keptDbSession: true };
+  }
+  deleteSecrets();
+  return { removed: true, keptDbSession: false };
+}
+
+// Non-throwing status report used by `auth-status` and the TUI.
+export function getAuthStatus() {
+  const secrets = loadSecrets();
+  const config = getConfig();
+  const source = getSecretsSource();
+  return {
+    source: source || "none",
+    configured: !!(secrets?.dbUrl || config.tursoUrl),
+    authorized: !!config.authorized || source === "env" || source === "api-key",
+    hasApiKey: !!secrets?.apiToken,
+    dbUrl: secrets?.dbUrl || config.tursoUrl || "",
+    username: secrets?.username || config.username || "",
+    org: secrets?.org || "",
+    database: secrets?.db || "",
+    mode: config.mode || "only-local",
+  };
 }
 
 // Logout and reset configurations

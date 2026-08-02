@@ -27,7 +27,7 @@
 
 ---
 
-## 2. Безопасная авторизация через браузер (Browser-Based OAuth / Device Flow)
+## 2. Безопасная авторизация (Browser OAuth / Token / Environment)
 
 Для бесшовного и безопасного подключения к облаку Turso процесс авторизации будет организован по современным стандартам:
 
@@ -58,6 +58,35 @@
         ```
     *   При деавторизации зашифрованный файл токенов физически стирается с диска, локальные сессии инвалидируются, а режим работы принудительно переключается в `only-local`.
 
+5.  **Headless-авторизация без браузера (Docker, Google Jules, VPS/VDS)**:
+    *   Браузерный OAuth требует GUI-сессии, поэтому в headless-окружениях используются токеновые и env-методы. **API-токен аккаунта (`TURSO_API_TOKEN`) является главным источником истины**: он резолвит org/db и выпускает токен БД через Platform API (аналогично браузерному потоку), а полученная сессия сохраняется зашифрованной. Приоритет секретов (`loadSecrets()` читает env автоматически, без шага `login`): **env `TURSO_API_TOKEN` → сохранённая API-ключ-сессия → env `TURSO_DB_URL`/`TURSO_DB_TOKEN` → сохранённая браузерная/DB-сессия**.
+    *   Команды:
+        ```bash
+        # API-токен аккаунта: резолвит org/db и выпускает токен БД через Platform API (предпочтительно)
+        memory_plugin login --api-key <TOKEN> [--org <ORG>] [--database <DB>]
+
+        # Прямой endpoint: без вызовов Platform API (org/db выводятся из URL)
+        memory_plugin login --db-url libsql://<db>-<org>.turso.io --db-token <TOKEN>
+
+        # Импорт из окружения / .env
+        memory_plugin login --from-env
+
+        # Удалить только API-ключ (резолвленная сессия БД сохраняется)
+        memory_plugin logout --api-key
+
+        # Статус авторизации (source: env / api-key / store)
+        memory_plugin auth-status
+        ```
+    *   Однострочный headless-setup (без браузера и интерактивного `login`):
+        ```bash
+        memory_plugin setup --api-key <TURSO_API_TOKEN> --mode hybrid-sync   # авторизация + режим за один шаг
+        memory_plugin setup --mode only-cloud                                # только режим (если уже авторизован)
+        ```
+    *   Поддерживаемые переменные окружения:
+        *   `TURSO_API_TOKEN` — API-токен аккаунта (требует доступ к Platform API). При первом использовании плагин на лету выпускает JWT БД, не трогая зашифрованное хранилище; опциональные `TURSO_ORG`, `TURSO_DATABASE` / `TURSO_DB_NAME`, `TURSO_USERNAME`.
+        *   `TURSO_DB_URL` / `TURSO_URL` + `TURSO_DB_TOKEN` / `TURSO_TOKEN` — прямые credentials БД.
+    *   В TUI (`memory_plugin cli` → `[CLOUD] ...`) доступен выбор метода: Browser OAuth, API-токен аккаунта, URL+токен БД или импорт из окружения — плюс пункты `[API KEY] Set / Replace Account API Token` и `[API KEY] Remove Account API Token`.
+
 ---
 
 ## 3. Резервная облачная инфраструктура (Failover Strategy): Fly.io + LiteFS
@@ -77,6 +106,7 @@ Turso является невероятно стабильной СУБД, од�
 ### Этап 1: Облачный слой (libsql) и CLI Авторизация (Текущий квартал)
 - [x] Интеграция легковесного JS-драйвера `@libsql/client` (он не требует компиляции C++, так как работает по протоколу WebSocket/HTTP, сохраняя философию Zero-Docker).
 - [x] Разработка модуля авторизации `memory_plugin login` / `logout` с loopback-сервером и шифрованием AES-256-GCM.
+- [x] Headless-авторизация без браузера: `login --api-key` (API-токен как главный источник истины с приоритетом над браузерной сессией), `login --db-url --db-token`, `login --from-env`, env/.env-секреты (`TURSO_DB_URL`, `TURSO_DB_TOKEN`, `TURSO_API_TOKEN`), `logout --api-key`, `setup --api-key --mode`, пункты TUI `[API KEY] Set/Remove`, команда `auth-status` — для Docker, Google Jules и VPS/VDS.
 - [x] Добавление конфигурационных параметров режимов (`only-local`, `only-cloud`, `hybrid-sync`) в `config_manager.js`.
 
 ### Этап 2: Реализация режимов синхронизации (Текущий квартал)

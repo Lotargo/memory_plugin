@@ -4,7 +4,7 @@ import { existsSync, mkdirSync } from "fs";
 import { MEMORY_DIR } from "../memory.js";
 import { runMigrations } from "./migrations.js";
 import { getConfig } from "../config/config_manager.js";
-import { loadSecrets } from "../config/auth_store.js";
+import { resolveCloudSecrets } from "../admin/auth.js";
 import { createClient } from "@libsql/client";
 
 let dbInstance = null;
@@ -159,7 +159,9 @@ async function openDatabase(customPath, mode) {
   let cloudClient = null;
   let failoverClient = null;
   if (mode === "only-cloud" || mode === "hybrid-sync") {
-    const secrets = loadSecrets();
+    // Resolve working cloud credentials. An env TURSO_API_TOKEN (which can only
+    // call the Platform API) is lazily minted into a per-database JWT here.
+    const secrets = await resolveCloudSecrets();
     const tursoUrl = customPath && customPath.startsWith("libsql:") ? customPath : (secrets?.dbUrl || config.tursoUrl);
     const failoverUrl = config.failoverUrl || "";
     const token = secrets?.token;

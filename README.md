@@ -139,7 +139,39 @@ The plugin has been verified inside the **Google Jules** cloud workspace environ
   npm install -g @lotargo/memory_plugin && memory_plugin setup
   ```
 - **Verification**: All current tools and capabilities have been verified inside the Google Jules cloud workspace. Google Jules automatically discovers the registered MCP server upon workspace initialization and seamlessly interacts with the full set of memory & RAG tools — `remember`, `recall`, `forget`, `update_fact`, `memory_info`, `link_knowledge`, `ingest_document`, `query_knowledge_base`, and `manage_knowledge_base` — including project-scoped memory, knowledge linking, and snapshot export/import.
-- **Current Limitation**: All memory stores and vector indexes operate locally within the workspace environment. Cross-session cloud synchronization across different Jules runs is planned for upcoming releases.
+- **Current Limitation**: All memory stores and vector indexes operate locally within the workspace environment. For cross-session cloud synchronization (Turso `only-cloud` / `hybrid-sync`) inside headless environments like Jules, authenticate without a browser using the token/env methods below.
+
+### Headless Turso Authentication (Docker, Google Jules, VPS/VDS)
+
+Browser OAuth requires a desktop session, so headless deployments use token- or env-based login. The **Turso account API token is the primary source of truth**: it resolves an org/database and mints a per-database token via the Platform API, exactly like the browser flow, and the resulting session is stored encrypted. In priority order, secrets resolve as **env `TURSO_API_TOKEN` → stored API-token session → env `TURSO_DB_URL`/`TURSO_DB_TOKEN` → stored browser/database session**:
+
+| Method | Command | Notes |
+| :----- | :------ | :---- |
+| Account API token | `memory_plugin login --api-key <TOKEN> [--org <ORG>] [--database <DB>]` | Preferred. Validates the token, resolves org/db, mints and stores a per-database token |
+| Direct endpoint | `memory_plugin login --db-url libsql://<db>-<org>.turso.io --db-token <TOKEN>` | No Platform API calls; org/db derived from the URL |
+| Environment | `memory_plugin login --from-env` | Imports `TURSO_DB_URL`+`TURSO_DB_TOKEN` (preferred) or `TURSO_API_TOKEN` |
+| Remove API key | `memory_plugin logout --api-key` | Removes only the API token; the resolved database session is kept |
+| Status | `memory_plugin auth-status` | Shows source (env / api-key / store), authorized flag, API-key flag, endpoint, org, database and mode |
+
+One-shot headless setup (no browser, no interactive `login`):
+
+```bash
+memory_plugin setup --api-key <TURSO_API_TOKEN> --mode hybrid-sync   # auth + set sync mode in one step
+memory_plugin setup --mode only-cloud                                # mode only, if already authorized
+```
+
+Supported environment variables (usable without any `login` step — `loadSecrets()` picks them up automatically):
+
+- `TURSO_API_TOKEN` — account API token (requires Platform API access). On first use the plugin mints a per-database JWT on the fly without touching the encrypted store; optional `TURSO_ORG`, `TURSO_DATABASE` / `TURSO_DB_NAME`, `TURSO_USERNAME`
+- `TURSO_DB_URL` / `TURSO_URL` + `TURSO_DB_TOKEN` / `TURSO_TOKEN` — direct database credentials
+
+The interactive TUI (`memory_plugin cli` → `[CLOUD] ...`) offers a method chooser: Browser OAuth, account API token, database URL + token, or import from environment — plus `[API KEY] Set / Replace Account API Token` and `[API KEY] Remove Account API Token` menu entries. For example, to run a Google Jules workspace with cloud sync:
+
+```bash
+export TURSO_API_TOKEN="eyJhbGciOi..."
+memory_plugin setup --api-key "$TURSO_API_TOKEN" --mode hybrid-sync   # or rely on env auto-detection
+memory_plugin auth-status
+```
 
 ---
 

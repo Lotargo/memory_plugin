@@ -39,7 +39,7 @@ if (cliArgs.includes("setup") || cliArgs.includes("install") || cliArgs.includes
   process.exit(0);
 }
 
-if (cliArgs.includes("cli") || cliArgs.includes("config") || cliArgs.includes("--cli") || cliArgs.includes("-c") || cliArgs.includes("login") || cliArgs.includes("logout")) {
+if (cliArgs.includes("cli") || cliArgs.includes("config") || cliArgs.includes("--cli") || cliArgs.includes("-c") || cliArgs.includes("login") || cliArgs.includes("logout") || cliArgs.includes("auth-status") || cliArgs.includes("auth_status") || cliArgs.includes("auth")) {
   const { runCli } = await import("./cli.js");
   await runCli();
   process.exit(0);

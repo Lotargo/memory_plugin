@@ -15,9 +15,41 @@ export async function runSetup() {
   const doAntigravity = !hasSpecificFlag || args.includes("--antigravity") || args.includes("--gemini");
   const doCodex = !hasSpecificFlag || args.includes("--codex");
 
+  // Headless cloud setup: --api-key <TURSO_API_TOKEN> and/or --mode <only-local|only-cloud|hybrid-sync>
+  const VALID_MODES = ["only-local", "only-cloud", "hybrid-sync"];
+  const apiKeyArg = flagValue(args, "--api-key");
+  const modeArg = flagValue(args, "--mode");
+  if (modeArg && !VALID_MODES.includes(modeArg)) {
+    console.log(`  [WARN] Unknown --mode "${modeArg}". Allowed: ${VALID_MODES.join(", ")}`);
+  }
+
   console.log("\nSetting up @lotargo/memory_plugin...\n");
   const home = homedir();
   let configuredCount = 0;
+
+  // 0. Headless cloud authentication (Google Jules / CI / VPS)
+  if (apiKeyArg) {
+    try {
+      const { loginWithApiToken } = await import("./admin/auth.js");
+      const secrets = await loginWithApiToken({ token: apiKeyArg });
+      if (modeArg && VALID_MODES.includes(modeArg)) {
+        const { updateConfig } = await import("./config/config_manager.js");
+        updateConfig({ mode: modeArg });
+      }
+      console.log(`  [OK] Cloud: authorized as "${secrets.username}" via API token. Endpoint: ${secrets.dbUrl}`);
+      configuredCount++;
+    } catch (err) {
+      console.log("  [FAIL] Cloud setup failed:", err.message);
+    }
+  } else if (modeArg && VALID_MODES.includes(modeArg)) {
+    try {
+      const { updateConfig } = await import("./config/config_manager.js");
+      updateConfig({ mode: modeArg });
+      console.log(`  [OK] Cloud: sync mode set to "${modeArg}"`);
+    } catch (err) {
+      console.log("  [SKIP] Cloud mode update skipped:", err.message);
+    }
+  }
 
   // 1. OpenCode (~/.config/opencode/opencode.json)
   if (doOpenCode) {
@@ -227,5 +259,14 @@ export async function runSetup() {
   }
 
   console.log(`\nSetup complete. Configured ${configuredCount} environment(s).\n`);
+}
+
+// Read the value following --flag, or null when absent / followed by another flag.
+function flagValue(args, flag) {
+  const idx = args.indexOf(flag);
+  if (idx === -1 || idx + 1 >= args.length) return null;
+  const value = args[idx + 1];
+  if (value.startsWith("--")) return null;
+  return value;
 }
 
