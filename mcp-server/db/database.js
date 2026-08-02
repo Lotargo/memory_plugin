@@ -8,6 +8,7 @@ import { loadSecrets } from "../config/auth_store.js";
 import { createClient } from "@libsql/client";
 
 let dbInstance = null;
+let dbInitPromise = null;
 
 export const STORAGE_DIR = join(MEMORY_DIR, "storage");
 export const BLOBS_DIR = join(STORAGE_DIR, "blobs");
@@ -141,14 +142,8 @@ class DatabaseWrapper {
   }
 }
 
-export async function getDatabase(customPath = null, forceMode = null) {
+async function openDatabase(customPath, mode) {
   const config = getConfig();
-  const mode = forceMode || config.mode || "only-local";
-
-  if (dbInstance && !customPath && dbInstance.mode === mode) {
-    return dbInstance;
-  }
-
   let localDb = null;
   if (mode !== "only-cloud") {
     const dbPath = customPath || DB_PATH;
@@ -202,7 +197,29 @@ export async function getDatabase(customPath = null, forceMode = null) {
   return wrappedDb;
 }
 
+export async function getDatabase(customPath = null, forceMode = null) {
+  const config = getConfig();
+  const mode = forceMode || config.mode || "only-local";
+
+  if (!customPath) {
+    if (dbInstance && dbInstance.mode === mode) {
+      return dbInstance;
+    }
+    // Deduplicate concurrent default-DB initialization so migrations never run
+    // on multiple connections at once (avoids "database is locked" crashes).
+    if (!dbInitPromise) {
+      dbInitPromise = openDatabase(null, mode).finally(() => {
+        dbInitPromise = null;
+      });
+    }
+    return await dbInitPromise;
+  }
+
+  return openDatabase(customPath, mode);
+}
+
 export function closeDatabase() {
+  dbInitPromise = null;
   if (dbInstance) {
     dbInstance.close();
     dbInstance = null;

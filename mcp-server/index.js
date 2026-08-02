@@ -175,10 +175,10 @@ server.registerTool(
     const { getLinksForFact } = await import("./graph/knowledge_linker.js");
     const results = [];
 
-    const formatFactWithLinks = (factLine, key) => {
+    const formatFactWithLinks = async (factLine, key) => {
       let line = displayFact(factLine);
       try {
-        const links = getLinksForFact(key, factText(factLine));
+        const links = await getLinksForFact(key, factText(factLine));
         if (links && links.length > 0) {
           const docStr = links
             .map((l) => {
@@ -192,14 +192,16 @@ server.registerTool(
       return line;
     };
 
-    const collect = (entries, key) => {
+    const collect = async (entries, key) => {
       const matched = entries.filter(
         (e) => matchesQuery(e, query) && matchesTags(e, tags) && inDateRange(e, since, until)
       );
       if (!matched.length) return;
       if (results.length) results.push("");
       results.push(`--- ${key === GLOBAL_KEY ? "Global" : `Project: ${key === target ? label : key}`} ---`);
-      matched.forEach((e, i) => results.push(`${i + 1}. ${formatFactWithLinks(e, key)}`));
+      for (let i = 0; i < matched.length; i++) {
+        results.push(`${i + 1}. ${await formatFactWithLinks(matched[i], key)}`);
+      }
       results.push(`Store file: ${storeFilePath(key)}`);
     };
 
@@ -225,11 +227,11 @@ server.registerTool(
     const label = project ? target : projectName();
     if (scope !== "project") {
       const global = await readMemory(GLOBAL_KEY);
-      collect(global, GLOBAL_KEY);
+      await collect(global, GLOBAL_KEY);
     }
     if (scope !== "global") {
       const local = await readMemory(target);
-      collect(local, target);
+      await collect(local, target);
     }
     const filtered = Boolean(query || tags || since || until);
     const text = results.length

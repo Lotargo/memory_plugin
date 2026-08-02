@@ -67,7 +67,7 @@ try {
   const DB_PATH = join(TEST_DIR, "storage", "memory.sqlite");
   const BLOBS_DIR = join(TEST_DIR, "storage", "blobs");
 
-  const db = getDatabase(DB_PATH);
+  const db = await getDatabase(DB_PATH);
 
   const docCodeContent = `
 # Memory Plugin Core Architecture
@@ -123,10 +123,10 @@ function executeHybridQuery(query) {
   console.log("  [PASS] CAS Blob Storage & SHA-256 deduplication OK");
 
   // C. Verify Database Schema & GraphRAG Symbol Extraction
-  const docRow = db.prepare("SELECT * FROM documents WHERE id = ?").get(ingestRes.docId);
+  const docRow = await db.prepare("SELECT * FROM documents WHERE id = ?").get(ingestRes.docId);
   assert.strictEqual(docRow.title, "Architecture Guide", "Doc title match");
 
-  const symbolEdges = db.prepare("SELECT * FROM graph_edges WHERE relation_type = 'DEFINES_SYMBOL'").all();
+  const symbolEdges = await db.prepare("SELECT * FROM graph_edges WHERE relation_type = 'DEFINES_SYMBOL'").all();
   const extractedSymbols = symbolEdges.map((e) => e.target_id.replace("symbol:", ""));
 
   assert(extractedSymbols.includes("MemoryStorageManager"), "Extracted class symbol 'MemoryStorageManager'");

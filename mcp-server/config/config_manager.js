@@ -17,6 +17,8 @@ export const DEFAULT_CONFIG = {
   mode: "only-local",     // "only-local" | "only-cloud" | "hybrid-sync"
   tursoUrl: "",           // Connection endpoint URL for Turso DB
   failoverUrl: "",        // Failover connection endpoint URL (Fly.io + LiteFS)
+  authorized: false,      // True once the user completed cloud login (token stored encrypted)
+  username: "",           // Account username from the Turso OAuth profile
 };
 
 let cachedConfig = null;

@@ -660,28 +660,27 @@ export async function runCli() {
     return;
   }
 
-  const cliArgs = process.argv.slice(2);
   if (cliArgs.includes("login")) {
-    console.log("\n  [CLOUD] Запуск процесса авторизации в облаке Turso...");
+    console.log("\n  [CLOUD] Starting Turso cloud authorization...");
     const { loginToCloud } = await import("./admin/auth.js");
     try {
       const secrets = await loginToCloud();
-      console.log(`\n  \x1b[32m[OK] Успешный вход в облако! Подключен к endpoint: ${secrets.dbUrl}\x1b[0m\n`);
+      console.log(`\n  \x1b[32m[OK] Successfully signed in to the cloud! Connected to endpoint: ${secrets.dbUrl}\x1b[0m\n`);
     } catch (e) {
-      console.error(`\n  \x1b[31m[ERROR] Ошибка авторизации: ${e.message}\x1b[0m\n`);
+      console.error(`\n  \x1b[31m[ERROR] Authorization failed: ${e.message}\x1b[0m\n`);
       process.exit(1);
     }
     return;
   }
 
   if (cliArgs.includes("logout")) {
-    console.log("\n  [CLOUD] Выход из облака...");
+    console.log("\n  [CLOUD] Signing out of the cloud...");
     const { logoutFromCloud } = await import("./admin/auth.js");
     const deleted = logoutFromCloud();
     if (deleted) {
-      console.log("  \x1b[32m[OK] Вы вышли из облака. Секретные ключи удалены. Режим изменен на only-local.\x1b[0m\n");
+      console.log("  \x1b[32m[OK] You have been signed out. Encrypted secrets removed. Mode reverted to only-local.\x1b[0m\n");
     } else {
-      console.log("  [*] Режим изменен на only-local. Сессионных токенов не было обнаружено.\x1b[0m\n");
+      console.log("  [*] Mode reverted to only-local. No session tokens were found.\x1b[0m\n");
     }
     return;
   }
@@ -1830,35 +1829,35 @@ export async function runCli() {
       }
       case "cloud_login": {
         console.clear();
-        console.log("\n  [CLOUD] Запуск процесса авторизации в облаке Turso...");
+        console.log("\n  [CLOUD] Starting Turso cloud authorization...");
         const { loginToCloud } = await import("./admin/auth.js");
         try {
           const secrets = await loginToCloud();
-          console.log(`\n  \x1b[32m[OK] Успешный вход в облако! Подключен к endpoint: ${secrets.dbUrl}\x1b[0m\n`);
+          console.log(`\n  \x1b[32m[OK] Successfully signed in to the cloud! Connected to endpoint: ${secrets.dbUrl}\x1b[0m\n`);
         } catch (e) {
-          console.error(`\n  \x1b[31m[ERROR] Ошибка авторизации: ${e.message}\x1b[0m\n`);
+          console.error(`\n  \x1b[31m[ERROR] Authorization failed: ${e.message}\x1b[0m\n`);
         }
         await waitForEnter();
         break;
       }
       case "cloud_logout": {
         console.clear();
-        console.log("\n  [CLOUD] Выход из облака...");
+        console.log("\n  [CLOUD] Signing out of the cloud...");
         const { logoutFromCloud } = await import("./admin/auth.js");
         const deleted = logoutFromCloud();
         if (deleted) {
-          console.log("  \x1b[32m[OK] Вы вышли из облака. Секретные ключи удалены. Режим изменен на only-local.\x1b[0m\n");
+          console.log("  \x1b[32m[OK] You have been signed out. Encrypted secrets removed. Mode reverted to only-local.\x1b[0m\n");
         } else {
-          console.log("  [*] Режим изменен на only-local. Сессионных токенов не было обнаружено.\x1b[0m\n");
+          console.log("  [*] Mode reverted to only-local. No session tokens were found.\x1b[0m\n");
         }
         await waitForEnter();
         break;
       }
       case "cloud_mode": {
         const modeItems = [
-          { label: "only-local (Только локальный)", value: "only-local", info: "Полностью приватный автономный режим (все на диске)" },
-          { label: "only-cloud (Только облачный)", value: "only-cloud", info: "Полностью облачный бессерверный режим без локального кэширования" },
-          { label: "hybrid-sync (Локальный с фоновой синхронизацией)", value: "hybrid-sync", info: "Локальные мгновенные операции с фоновым демоном синхронизации" },
+          { label: "only-local (Local only)", value: "only-local", info: "Fully private, offline-first mode (everything stored on disk)" },
+          { label: "only-cloud (Cloud only)", value: "only-cloud", info: "Fully serverless cloud mode with no local caching" },
+          { label: "hybrid-sync (Local with background sync)", value: "hybrid-sync", info: "Instant local operations with a background sync daemon" },
         ];
         const initialIdx = Math.max(0, modeItems.findIndex((i) => i.value === config.mode));
         const subRes = await selectSimpleMenu({

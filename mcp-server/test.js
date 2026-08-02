@@ -6,7 +6,7 @@ async function main() {
 
   const transport = new StdioClientTransport({
     command: "node",
-    args: ["./index.js"],
+    args: ["mcp-server/index.js"],
   });
 
   const client = new Client(

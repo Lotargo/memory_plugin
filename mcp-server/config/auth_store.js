@@ -2,19 +2,51 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import os from "node:os";
+import { execSync } from "node:child_process";
 import { MEMORY_DIR, ensureDirSync } from "../memory.js";
 
 const SECRETS_FILE = path.join(MEMORY_DIR, "auth_secrets.enc");
 
-// Generate a deterministic hardware + system fingerprint
+// Stable per-machine identifier. Must NOT rely on volatile values (e.g.
+// os.networkInterfaces() — VPN adapters, hotspot IPs and IPv6 privacy
+// addresses rotate constantly and would silently change the AES key).
+function getMachineId() {
+  try {
+    if (process.platform === "win32") {
+      const out = execSync("reg query HKLM\\SOFTWARE\\Microsoft\\Cryptography /v MachineGuid", {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      const m = out.match(/MachineGuid\s+REG_SZ\s+([0-9a-fA-F-]{36})/i);
+      if (m) return m[1].toLowerCase();
+    } else if (process.platform === "linux") {
+      for (const p of ["/etc/machine-id", "/var/lib/dbus/machine-id"]) {
+        try {
+          const v = fs.readFileSync(p, "utf8").trim();
+          if (v) return v;
+        } catch {}
+      }
+    } else if (process.platform === "darwin") {
+      const out = execSync("ioreg -rd1 -c IOPlatformExpertDevice", {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      const m = out.match(/"IOPlatformUUID"\s*=\s*"([^"]+)"/);
+      if (m) return m[1];
+    }
+  } catch {}
+  return null;
+}
+
+// Generate a deterministic hardware + system fingerprint (stable across reboots,
+// network changes and user sessions on the same machine).
 function getSystemFingerprint() {
   const parts = [
+    getMachineId() || "no-machine-id",
     os.hostname() || "localhost",
     os.userInfo()?.username || "default_user",
     os.platform() || "unknown",
     os.arch() || "unknown",
-    // Fallback if network interfaces list is empty or can't be fetched
-    JSON.stringify(os.networkInterfaces() || {}),
   ];
   return parts.join("|");
 }
@@ -82,7 +114,11 @@ export function loadSecrets() {
     const decrypted = decryptData(encrypted);
     return JSON.parse(decrypted);
   } catch (err) {
-    console.error("Failed to decrypt or load cloud secrets:", err.message);
+    console.error(
+      "Failed to decrypt or load cloud secrets:",
+      err.message,
+      "— the file was encrypted with a different machine key. Re-run login to recreate it."
+    );
     return null;
   }
 }
