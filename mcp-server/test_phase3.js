@@ -46,7 +46,7 @@ class HybridSearchRetriever {
 
   // 3. Hybrid Retrieval End-to-End Test
   console.log("3. Testing End-to-End Hybrid Retrieval...");
-  const db = getDatabase(TEST_DB_PATH);
+  const db = await getDatabase(TEST_DB_PATH);
 
   const docCode = `
 # Hybrid Search Architecture

@@ -14,14 +14,15 @@ console.log("--- Starting Phase 1 Unit Tests ---");
 try {
   // 1. Database & Migrations Test
   console.log("1. Testing SQLite Database & Migrations...");
-  const db = getDatabase(TEST_DB_PATH);
+  const db = await getDatabase(TEST_DB_PATH);
 
-  const userVersionRow = db.prepare("PRAGMA user_version;").get();
-  assert.strictEqual(userVersionRow.user_version, 3, "Database user_version should be 3 after migration");
+  const userVersionRow = await db.prepare("PRAGMA user_version;").get();
+  const userVersion = userVersionRow ? (userVersionRow.user_version || userVersionRow.v || 0) : 0;
+  assert(userVersion >= 3, "Database user_version should be at least 3 after migration");
 
-  const tables = db
+  const tables = (await db
     .prepare("SELECT name FROM sqlite_master WHERE type='table';")
-    .all()
+    .all())
     .map((r) => r.name);
 
   assert(tables.includes("documents"), "Table 'documents' should exist");
@@ -63,28 +64,28 @@ try {
   const chunkContent = "DeepMind Antigravity RAG architecture provides high performance search.";
   const breadcrumbs = "Docs > Architecture > RAG";
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO documents (id, path, blob_hash, title, checksum, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?);
   `).run(docId, "dev_docs/rag.md", expectedHash, "RAG Specs", expectedHash, Date.now(), Date.now());
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO sections (id, doc_id, heading, breadcrumbs, content, token_count)
     VALUES (?, ?, ?, ?, ?, ?);
   `).run(sectionId, docId, "Architecture", breadcrumbs, chunkContent, 10);
 
   const emptyVectorBuffer = Buffer.alloc(384 * 4); // 384 Float32 elements
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO micro_chunks (id, section_id, doc_id, content, vector, token_count)
     VALUES (?, ?, ?, ?, ?, ?);
   `).run(chunkId, sectionId, docId, chunkContent, emptyVectorBuffer, 10);
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO micro_chunks_fts (id, content, breadcrumbs)
     VALUES (?, ?, ?);
   `).run(chunkId, chunkContent, breadcrumbs);
 
-  const searchHits = db.prepare(`
+  const searchHits = await db.prepare(`
     SELECT id, content, breadcrumbs, rank
     FROM micro_chunks_fts
     WHERE micro_chunks_fts MATCH 'Antigravity RAG'

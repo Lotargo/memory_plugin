@@ -315,8 +315,8 @@ server.registerTool(
     let linksUpdated = 0;
     try {
       const { getDatabase } = await import("./db/database.js");
-      const db = getDatabase();
-      const res = db
+      const db = await getDatabase();
+      const res = await db
         .prepare(
           "UPDATE knowledge_links SET fact_text = ? WHERE fact_key = ? AND fact_text = ?"
         )
@@ -353,12 +353,17 @@ server.registerTool(
     let rag = {};
     try {
       const { getDatabase } = await import("./db/database.js");
-      const db = getDatabase();
-      rag.documents = db.prepare("SELECT COUNT(*) AS c FROM documents").get().c;
-      rag.sections = db.prepare("SELECT COUNT(*) AS c FROM sections").get().c;
-      rag.chunks = db.prepare("SELECT COUNT(*) AS c FROM micro_chunks").get().c;
-      rag.edges = db.prepare("SELECT COUNT(*) AS c FROM graph_edges").get().c;
-      rag.links = db.prepare("SELECT COUNT(*) AS c FROM knowledge_links").get().c;
+      const db = await getDatabase();
+      const docCountRow = await db.prepare("SELECT COUNT(*) AS c FROM documents").get();
+      rag.documents = docCountRow ? docCountRow.c : 0;
+      const secCountRow = await db.prepare("SELECT COUNT(*) AS c FROM sections").get();
+      rag.sections = secCountRow ? secCountRow.c : 0;
+      const chunkCountRow = await db.prepare("SELECT COUNT(*) AS c FROM micro_chunks").get();
+      rag.chunks = chunkCountRow ? chunkCountRow.c : 0;
+      const edgeCountRow = await db.prepare("SELECT COUNT(*) AS c FROM graph_edges").get();
+      rag.edges = edgeCountRow ? edgeCountRow.c : 0;
+      const linkCountRow = await db.prepare("SELECT COUNT(*) AS c FROM knowledge_links").get();
+      rag.links = linkCountRow ? linkCountRow.c : 0;
     } catch (e) {
       rag.error = e.message;
     }
@@ -561,13 +566,17 @@ server.registerTool(
   },
   async ({ action, docId, snapshotPath }) => {
     const { getDatabase } = await import("./db/database.js");
-    const db = getDatabase();
+    const db = await getDatabase();
 
     if (action === "stats") {
-      const docCount = db.prepare("SELECT COUNT(*) as cnt FROM documents").get().cnt;
-      const secCount = db.prepare("SELECT COUNT(*) as cnt FROM sections").get().cnt;
-      const chunkCount = db.prepare("SELECT COUNT(*) as cnt FROM micro_chunks").get().cnt;
-      const edgeCount = db.prepare("SELECT COUNT(*) as cnt FROM graph_edges").get().cnt;
+      const docCountRow = await db.prepare("SELECT COUNT(*) as cnt FROM documents").get();
+      const docCount = docCountRow ? docCountRow.cnt : 0;
+      const secCountRow = await db.prepare("SELECT COUNT(*) as cnt FROM sections").get();
+      const secCount = secCountRow ? secCountRow.cnt : 0;
+      const chunkCountRow = await db.prepare("SELECT COUNT(*) as cnt FROM micro_chunks").get();
+      const chunkCount = chunkCountRow ? chunkCountRow.cnt : 0;
+      const edgeCountRow = await db.prepare("SELECT COUNT(*) as cnt FROM graph_edges").get();
+      const edgeCount = edgeCountRow ? edgeCountRow.cnt : 0;
       return {
         content: [
           {
@@ -588,7 +597,7 @@ server.registerTool(
     }
 
     if (action === "list") {
-      const docs = db
+      const docs = await db
         .prepare("SELECT id, title, path, blob_hash, created_at FROM documents ORDER BY created_at DESC")
         .all();
       return {
@@ -598,7 +607,7 @@ server.registerTool(
 
     if (action === "read_document") {
       if (!docId) throw new Error("docId parameter is required for read_document action");
-      const doc = db
+      const doc = await db
         .prepare("SELECT id, title, path, blob_hash, created_at FROM documents WHERE id = ? OR path = ? OR title = ?")
         .get(docId, docId, docId);
       if (!doc) {

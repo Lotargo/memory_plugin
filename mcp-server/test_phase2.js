@@ -105,7 +105,7 @@ Uses ONNX Runtime with Transformers.js for zero native build overhead.
 
   // 5. Ingestion Pipeline Integration Test
   console.log("5. Testing Ingestion Pipeline into SQLite...");
-  const db = getDatabase(TEST_DB_PATH);
+  const db = await getDatabase(TEST_DB_PATH);
 
   const ingestRes = await ingestDocument({
     content: sampleMarkdown,
@@ -119,13 +119,13 @@ Uses ONNX Runtime with Transformers.js for zero native build overhead.
   assert(ingestRes.sections_count >= 4, "Ingest should record sections");
   assert(ingestRes.micro_chunks_count >= 4, "Ingest should record micro chunks");
 
-  const docRow = db.prepare("SELECT * FROM documents WHERE id = ?").get(ingestRes.doc_id);
+  const docRow = await db.prepare("SELECT * FROM documents WHERE id = ?").get(ingestRes.doc_id);
   assert.strictEqual(docRow.title, "Zero-Docker RAG Guide", "DB Document title match");
 
-  const mediumRows = db.prepare("SELECT * FROM medium_chunks WHERE doc_id = ?").all(ingestRes.doc_id);
+  const mediumRows = await db.prepare("SELECT * FROM medium_chunks WHERE doc_id = ?").all(ingestRes.doc_id);
   assert(mediumRows.length >= 4, "DB medium_chunks table should contain logical blocks");
 
-  const ftsHits = db.prepare("SELECT * FROM micro_chunks_fts WHERE micro_chunks_fts MATCH 'ONNX Runtime';").all();
+  const ftsHits = await db.prepare("SELECT * FROM micro_chunks_fts WHERE micro_chunks_fts MATCH 'ONNX Runtime';").all();
   assert(ftsHits.length >= 1, "FTS5 query should find ONNX Runtime chunk");
 
   // 6. Testing Snapshot Export, Import & Hard Reset
@@ -137,16 +137,18 @@ Uses ONNX Runtime with Transformers.js for zero native build overhead.
   assert(existsSync(snapPath), "Snapshot export file must exist");
   assert(expRes.snapshot.documents.length >= 1, "Snapshot documents must not be empty");
 
-  const resetRes = hardResetDatabase({ customDb: db });
+  const resetRes = await hardResetDatabase({ customDb: db });
   assert(resetRes.purgedDocuments >= 1, "Hard reset must purge documents");
 
-  const emptyDocsCount = db.prepare("SELECT COUNT(*) as cnt FROM documents").get().cnt;
+  const emptyDocsCountRow = await db.prepare("SELECT COUNT(*) as cnt FROM documents").get();
+  const emptyDocsCount = emptyDocsCountRow ? emptyDocsCountRow.cnt : 0;
   assert.strictEqual(emptyDocsCount, 0, "Database must be empty after Hard Reset");
 
   const impRes = await importSnapshot({ customDb: db, snapshotPathOrData: snapPath });
   assert(impRes.documents >= 1, "Snapshot import must restore documents");
 
-  const restoredDocsCount = db.prepare("SELECT COUNT(*) as cnt FROM documents").get().cnt;
+  const restoredDocsCountRow = await db.prepare("SELECT COUNT(*) as cnt FROM documents").get();
+  const restoredDocsCount = restoredDocsCountRow ? restoredDocsCountRow.cnt : 0;
   assert(restoredDocsCount >= 1, "Database documents must be restored after Import");
   console.log("  [PASS] Snapshot Export, Import & Hard Reset OK");
 

@@ -91,9 +91,11 @@ async function getQuickStats() {
   let docCount = 0;
   let chunkCount = 0;
   try {
-    const db = getDatabase();
-    docCount = db.prepare("SELECT COUNT(*) as cnt FROM documents").get().cnt;
-    chunkCount = db.prepare("SELECT COUNT(*) as cnt FROM micro_chunks").get().cnt;
+    const db = await getDatabase();
+    const docRow = await db.prepare("SELECT COUNT(*) as cnt FROM documents").get();
+    docCount = docRow ? docRow.cnt : 0;
+    const chunkRow = await db.prepare("SELECT COUNT(*) as cnt FROM micro_chunks").get();
+    chunkCount = chunkRow ? chunkRow.cnt : 0;
   } catch (e) {}
 
   let factCount = 0;
@@ -1150,10 +1152,11 @@ export async function runCli() {
                 await writeMemory(key, updated);
                 let links = 0;
                 try {
-                  const db = getDatabase();
-                  links = db
+                  const db = await getDatabase();
+                  const runRes = await db
                     .prepare("UPDATE knowledge_links SET fact_text = ? WHERE fact_key = ? AND fact_text = ?")
-                    .run(newText, key, factText(selectedEntry)).changes;
+                    .run(newText, key, factText(selectedEntry));
+                  links = runRes ? runRes.changes : 0;
                 } catch (e) {}
                 console.clear();
                 console.log(`\n  [OK] Fact updated successfully${links ? `, ${links} doc link(s) updated` : ""}.\n`);
@@ -1281,8 +1284,8 @@ export async function runCli() {
       case "rag_docs": {
         let docRunning = true;
         while (docRunning) {
-          const db = getDatabase();
-          const docs = db.prepare("SELECT id, title, path, created_at FROM documents ORDER BY created_at DESC").all();
+          const db = await getDatabase();
+          const docs = await db.prepare("SELECT id, title, path, created_at FROM documents ORDER BY created_at DESC").all();
 
           if (!docs || docs.length === 0) {
             console.clear();
@@ -1342,9 +1345,11 @@ export async function runCli() {
           });
 
           if (actionRes.action === "select" && actionRes.value === "info") {
-            const secCount = db.prepare("SELECT COUNT(*) as cnt FROM sections WHERE doc_id = ?").get(targetDoc.id).cnt;
-            const chunkCount = db.prepare("SELECT COUNT(*) as cnt FROM micro_chunks WHERE doc_id = ?").get(targetDoc.id).cnt;
-            const sampleSections = db.prepare("SELECT heading FROM sections WHERE doc_id = ? LIMIT 5").all(targetDoc.id);
+            const secCountRow = await db.prepare("SELECT COUNT(*) as cnt FROM sections WHERE doc_id = ?").get(targetDoc.id);
+            const secCount = secCountRow ? secCountRow.cnt : 0;
+            const chunkCountRow = await db.prepare("SELECT COUNT(*) as cnt FROM micro_chunks WHERE doc_id = ?").get(targetDoc.id);
+            const chunkCount = chunkCountRow ? chunkCountRow.cnt : 0;
+            const sampleSections = await db.prepare("SELECT heading FROM sections WHERE doc_id = ? LIMIT 5").all(targetDoc.id);
 
             console.clear();
             const line = "─".repeat(PANEL_WIDTH - 2);

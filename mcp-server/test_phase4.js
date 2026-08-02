@@ -15,7 +15,7 @@ console.log("--- Starting Phase 4 & Phase 5 Unit & Integration Tests ---");
 try {
   // 1. Database & Ingestion Setup
   console.log("1. Setting up test database and ingesting sample doc...");
-  const db = getDatabase(TEST_DB_PATH);
+  const db = await getDatabase(TEST_DB_PATH);
 
   const sampleDoc = `
 # Admin Suite Architecture
@@ -62,7 +62,7 @@ Dynamic port scanning ensures zero conflicts on ports 8765-8785.
   // Test restoration into fresh DB
   const FRESH_DB_PATH = join(TEST_DIR, "fresh_memory.sqlite");
   const FRESH_BLOB_DIR = join(TEST_DIR, "fresh_blobs");
-  const freshDb = getDatabase(FRESH_DB_PATH);
+  const freshDb = await getDatabase(FRESH_DB_PATH);
 
   const importRes = await importSnapshot({
     customDb: freshDb,

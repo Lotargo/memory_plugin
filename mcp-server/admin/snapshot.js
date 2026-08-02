@@ -36,13 +36,13 @@ export function listAvailableSnapshots() {
 }
 
 export async function exportSnapshot({ customDb = null, customBlobDir = BLOBS_DIR, outputPath = null } = {}) {
-  const db = customDb || getDatabase();
+  const db = customDb || await getDatabase();
 
-  const documents = db.prepare("SELECT * FROM documents").all();
-  const sections = db.prepare("SELECT * FROM sections").all();
-  const mediumChunks = db.prepare("SELECT * FROM medium_chunks").all();
-  const rawMicroChunks = db.prepare("SELECT * FROM micro_chunks").all();
-  const graphEdges = db.prepare("SELECT * FROM graph_edges").all();
+  const documents = await db.prepare("SELECT * FROM documents").all();
+  const sections = await db.prepare("SELECT * FROM sections").all();
+  const mediumChunks = await db.prepare("SELECT * FROM medium_chunks").all();
+  const rawMicroChunks = await db.prepare("SELECT * FROM micro_chunks").all();
+  const graphEdges = await db.prepare("SELECT * FROM graph_edges").all();
 
   const microChunks = rawMicroChunks.map((mc) => {
     let vecBase64 = "";
@@ -92,7 +92,7 @@ export async function exportSnapshot({ customDb = null, customBlobDir = BLOBS_DI
 }
 
 export async function importSnapshot({ customDb = null, customBlobDir = BLOBS_DIR, snapshotPathOrData } = {}) {
-  const db = customDb || getDatabase();
+  const db = customDb || await getDatabase();
   let snapshot;
 
   if (typeof snapshotPathOrData === "string") {
@@ -181,11 +181,11 @@ export async function importSnapshot({ customDb = null, customBlobDir = BLOBS_DI
     ON CONFLICT(source_id, target_id, relation_type) DO NOTHING
   `);
 
-  db.exec("BEGIN IMMEDIATE;");
+  await db.exec("BEGIN IMMEDIATE;");
   try {
     if (Array.isArray(snapshot.documents)) {
       for (const d of snapshot.documents) {
-        insertDoc.run(
+        await insertDoc.run(
           d.id,
           d.path,
           d.blob_hash,
@@ -201,13 +201,13 @@ export async function importSnapshot({ customDb = null, customBlobDir = BLOBS_DI
 
     if (Array.isArray(snapshot.sections)) {
       for (const s of snapshot.sections) {
-        insertSection.run(s.id, s.doc_id, s.heading, s.breadcrumbs, s.content, s.token_count);
+        await insertSection.run(s.id, s.doc_id, s.heading, s.breadcrumbs, s.content, s.token_count);
       }
     }
 
     if (Array.isArray(snapshot.medium_chunks)) {
       for (const m of snapshot.medium_chunks) {
-        insertMedium.run(m.id, m.section_id, m.doc_id, m.content, m.block_type, m.token_count, m.created_at || Date.now());
+        await insertMedium.run(m.id, m.section_id, m.doc_id, m.content, m.block_type, m.token_count, m.created_at || Date.now());
       }
     }
 
@@ -217,23 +217,23 @@ export async function importSnapshot({ customDb = null, customBlobDir = BLOBS_DI
         if (mc.vector) {
           vecBuf = Buffer.from(mc.vector, "base64");
         }
-        insertChunk.run(mc.id, mc.section_id, mc.doc_id, mc.content, vecBuf, mc.token_count, mc.medium_id || null);
+        await insertChunk.run(mc.id, mc.section_id, mc.doc_id, mc.content, vecBuf, mc.token_count, mc.medium_id || null);
 
         try {
-          deleteFts.run(mc.id);
+          await deleteFts.run(mc.id);
         } catch {}
-        insertFts.run(mc.id, mc.content, mc.breadcrumbs || "");
+        await insertFts.run(mc.id, mc.content, mc.breadcrumbs || "");
       }
     }
 
     if (Array.isArray(snapshot.graph_edges)) {
       for (const e of snapshot.graph_edges) {
-        insertEdge.run(e.source_id, e.target_id, e.relation_type);
+        await insertEdge.run(e.source_id, e.target_id, e.relation_type);
       }
     }
-    db.exec("COMMIT;");
+    await db.exec("COMMIT;");
   } catch (err) {
-    db.exec("ROLLBACK;");
+    await db.exec("ROLLBACK;");
     throw err;
   }
 
@@ -247,30 +247,32 @@ export async function importSnapshot({ customDb = null, customBlobDir = BLOBS_DI
   };
 }
 
-export function hardResetDatabase({ customDb = null, customBlobDir = BLOBS_DIR } = {}) {
-  const db = customDb || getDatabase();
+export async function hardResetDatabase({ customDb = null, customBlobDir = BLOBS_DIR } = {}) {
+  const db = customDb || await getDatabase();
 
   let docCount = 0;
   let chunkCount = 0;
   let blobCount = 0;
 
   try {
-    docCount = db.prepare("SELECT COUNT(*) as cnt FROM documents").get().cnt;
-    chunkCount = db.prepare("SELECT COUNT(*) as cnt FROM micro_chunks").get().cnt;
+    const docRow = await db.prepare("SELECT COUNT(*) as cnt FROM documents").get();
+    docCount = docRow ? docRow.cnt : 0;
+    const chunkRow = await db.prepare("SELECT COUNT(*) as cnt FROM micro_chunks").get();
+    chunkCount = chunkRow ? chunkRow.cnt : 0;
   } catch {}
 
-  db.exec("BEGIN IMMEDIATE;");
+  await db.exec("BEGIN IMMEDIATE;");
   try {
-    try { db.exec("DELETE FROM micro_chunks_fts;"); } catch {}
-    try { db.exec("DELETE FROM micro_chunks;"); } catch {}
-    try { db.exec("DELETE FROM medium_chunks;"); } catch {}
-    try { db.exec("DELETE FROM sections;"); } catch {}
-    try { db.exec("DELETE FROM graph_edges;"); } catch {}
-    try { db.exec("DELETE FROM knowledge_links;"); } catch {}
-    try { db.exec("DELETE FROM documents;"); } catch {}
-    db.exec("COMMIT;");
+    try { await db.exec("DELETE FROM micro_chunks_fts;"); } catch {}
+    try { await db.exec("DELETE FROM micro_chunks;"); } catch {}
+    try { await db.exec("DELETE FROM medium_chunks;"); } catch {}
+    try { await db.exec("DELETE FROM sections;"); } catch {}
+    try { await db.exec("DELETE FROM graph_edges;"); } catch {}
+    try { await db.exec("DELETE FROM knowledge_links;"); } catch {}
+    try { await db.exec("DELETE FROM documents;"); } catch {}
+    await db.exec("COMMIT;");
   } catch (err) {
-    db.exec("ROLLBACK;");
+    await db.exec("ROLLBACK;");
     throw err;
   }
 
@@ -292,7 +294,7 @@ export function hardResetDatabase({ customDb = null, customBlobDir = BLOBS_DIR }
   }
 
   try {
-    db.exec("VACUUM;");
+    await db.exec("VACUUM;");
   } catch {}
 
   return {

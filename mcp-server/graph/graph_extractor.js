@@ -75,21 +75,21 @@ export function buildGraphEdges(docId, hierarchy) {
   return edges;
 }
 
-export function saveGraphEdges(db, edges) {
+export async function saveGraphEdges(db, edges) {
   const stmt = db.prepare(`
     INSERT OR IGNORE INTO graph_edges (source_id, target_id, relation_type)
     VALUES (?, ?, ?);
   `);
   for (const edge of edges) {
-    stmt.run(edge.source_id, edge.target_id, edge.relation_type);
+    await stmt.run(edge.source_id, edge.target_id, edge.relation_type);
   }
 }
 
-export function getRelatedSymbols(db, sectionId) {
+export async function getRelatedSymbols(db, sectionId) {
   const stmt = db.prepare(`
     SELECT target_id, relation_type FROM graph_edges
     WHERE source_id = ? AND relation_type = 'DEFINES_SYMBOL';
   `);
-  const rows = stmt.all(sectionId);
+  const rows = await stmt.all(sectionId);
   return rows.map((r) => r.target_id.replace("symbol:", ""));
 }
