@@ -658,6 +658,32 @@ export async function runCli() {
     return;
   }
 
+  const cliArgs = process.argv.slice(2);
+  if (cliArgs.includes("login")) {
+    console.log("\n  [CLOUD] Запуск процесса авторизации в облаке Turso...");
+    const { loginToCloud } = await import("./admin/auth.js");
+    try {
+      const secrets = await loginToCloud();
+      console.log(`\n  \x1b[32m[OK] Успешный вход в облако! Подключен к endpoint: ${secrets.dbUrl}\x1b[0m\n`);
+    } catch (e) {
+      console.error(`\n  \x1b[31m[ERROR] Ошибка авторизации: ${e.message}\x1b[0m\n`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (cliArgs.includes("logout")) {
+    console.log("\n  [CLOUD] Выход из облака...");
+    const { logoutFromCloud } = await import("./admin/auth.js");
+    const deleted = logoutFromCloud();
+    if (deleted) {
+      console.log("  \x1b[32m[OK] Вы вышли из облака. Секретные ключи удалены. Режим изменен на only-local.\x1b[0m\n");
+    } else {
+      console.log("  [*] Режим изменен на only-local. Сессионных токенов не было обнаружено.\x1b[0m\n");
+    }
+    return;
+  }
+
   let running = true;
   let selectedIndex = 0;
 
@@ -757,6 +783,27 @@ export async function runCli() {
             label: "[HARD RESET] Purge RAG Base & Blob Storage",
             value: "hard_reset",
             info: "Permanently delete all documents, sections, vectors, FTS indexes, and blobs",
+          },
+        ],
+      },
+      {
+        title: "Cloud Synchronization & Turso",
+        items: [
+          {
+            label: "[CLOUD] Login to Turso Cloud",
+            value: "cloud_login",
+            info: "Perform secure OAuth/Device login flow with loopback listener and local AES-256 key encryption",
+          },
+          {
+            label: "[CLOUD] Logout",
+            value: "cloud_logout",
+            info: "Sign out, purge encrypted secrets, and revert mode to only-local",
+          },
+          {
+            label: "Operational Mode",
+            badge: config.mode.toUpperCase(),
+            value: "cloud_mode",
+            info: "Choose Operational Mode: only-local | only-cloud | hybrid-sync",
           },
         ],
       },
@@ -1773,6 +1820,51 @@ export async function runCli() {
             console.log(`\n  [OK] Benchmark corpus cache cleared (${sizeMB} MB freed).\n`);
             await waitForEnter();
           }
+        }
+        break;
+      }
+      case "cloud_login": {
+        console.clear();
+        console.log("\n  [CLOUD] Запуск процесса авторизации в облаке Turso...");
+        const { loginToCloud } = await import("./admin/auth.js");
+        try {
+          const secrets = await loginToCloud();
+          console.log(`\n  \x1b[32m[OK] Успешный вход в облако! Подключен к endpoint: ${secrets.dbUrl}\x1b[0m\n`);
+        } catch (e) {
+          console.error(`\n  \x1b[31m[ERROR] Ошибка авторизации: ${e.message}\x1b[0m\n`);
+        }
+        await waitForEnter();
+        break;
+      }
+      case "cloud_logout": {
+        console.clear();
+        console.log("\n  [CLOUD] Выход из облака...");
+        const { logoutFromCloud } = await import("./admin/auth.js");
+        const deleted = logoutFromCloud();
+        if (deleted) {
+          console.log("  \x1b[32m[OK] Вы вышли из облака. Секретные ключи удалены. Режим изменен на only-local.\x1b[0m\n");
+        } else {
+          console.log("  [*] Режим изменен на only-local. Сессионных токенов не было обнаружено.\x1b[0m\n");
+        }
+        await waitForEnter();
+        break;
+      }
+      case "cloud_mode": {
+        const modeItems = [
+          { label: "only-local (Только локальный)", value: "only-local", info: "Полностью приватный автономный режим (все на диске)" },
+          { label: "only-cloud (Только облачный)", value: "only-cloud", info: "Полностью облачный бессерверный режим без локального кэширования" },
+          { label: "hybrid-sync (Локальный с фоновой синхронизацией)", value: "hybrid-sync", info: "Локальные мгновенные операции с фоновым демоном синхронизации" },
+        ];
+        const initialIdx = Math.max(0, modeItems.findIndex((i) => i.value === config.mode));
+        const subRes = await selectSimpleMenu({
+          title: "CHOOSE OPERATIONAL MODE",
+          subtitle: "Configure database storage and cloud sync behavior",
+          items: modeItems,
+          initialIndex: initialIdx,
+        });
+
+        if (subRes.action === "select") {
+          updateConfig({ mode: subRes.value });
         }
         break;
       }
