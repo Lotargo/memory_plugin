@@ -1,20 +1,43 @@
+const ignoredKeywords = new Set([
+  "const", "let", "var", "function", "class", "import", "export", "from", "return", "if", "for", "while", "switch", "case", "default",
+  "def", "self", "lambda", "pass", "yield", "async", "await", "with", "except", "try", "catch", "finally",
+  "func", "type", "struct", "interface", "chan", "map", "go", "defer", "package", "range",
+  "fn", "enum", "trait", "impl", "pub", "mut", "ref", "self", "Self", "match", "use", "mod", "crate",
+  "namespace", "template", "typename", "public", "private", "protected", "virtual", "override", "using", "inline", "static", "constexpr", "extern", "explicit", "friend", "operator", "throw",
+  "record", "synchronized", "final", "void", "throws", "new", "this", "super", "fun", "val", "null", "true", "false",
+  "internal", "readonly", "base", "get", "set", "echo", "exit", "die", "require", "include",
+  "module", "end", "extend", "attr_accessor", "attr_reader", "attr_writer", "nil", "puts", "raise"
+]);
+
 export function extractSymbolsFromContent(content) {
+  if (!content) return [];
   const symbols = new Set();
 
-  const jsTsRegex = /(?:function|class|interface|type|enum|const|let|var)\s+([a-zA-Z0-9_$]+)/g;
-  let match;
-  while ((match = jsTsRegex.exec(content)) !== null) {
-    const symbol = match[1];
-    if (symbol.length > 2 && !["const", "let", "var", "function", "class", "import", "export", "from", "return", "if", "for", "while"].includes(symbol)) {
-      symbols.add(symbol);
-    }
-  }
+  const patterns = [
+    // JS/TS
+    /(?:function|class|interface|type|enum|const|let|var)\s+([a-zA-Z0-9_$]+)/g,
+    // Python / PHP / Ruby
+    /(?:def|class|function|module|trait)\s+([a-zA-Z0-9_!?=]+)/g,
+    // Go / Rust / C++ / Java / Kotlin / C# / PHP (Types)
+    /\b(?:class|struct|interface|record|enum|trait|type|namespace)\s+([a-zA-Z0-9_]+)/g,
+    // Go (Functions)
+    /\bfunc\s+(?:\([^)]+\)\s+)?([a-zA-Z0-9_]+)\s*\(/g,
+    // Rust (Functions)
+    /\bfn\s+([a-zA-Z0-9_]+)/g,
+    // Kotlin (Functions)
+    /\bfun\s+([a-zA-Z0-9_]+)/g,
+    // Java / C# / C++ (Methods/Functions)
+    /\b(?:public|protected|private|static|synchronized|final|async|virtual|override|readonly)*\s*[\w<>\[\]]+\s+([a-zA-Z0-9_]+)\s*\([^)]*\)\s*(?:const|override|noexcept|throws\s+[\w,\s]+|\s)*\s*[{;]/g
+  ];
 
-  const pyRegex = /(?:def|class)\s+([a-zA-Z0-9_]+)/g;
-  while ((match = pyRegex.exec(content)) !== null) {
-    const symbol = match[1];
-    if (symbol.length > 2 && !["def", "class", "self", "return", "import", "from"].includes(symbol)) {
-      symbols.add(symbol);
+  for (const pattern of patterns) {
+    let match;
+    pattern.lastIndex = 0;
+    while ((match = pattern.exec(content)) !== null) {
+      const symbol = match[1];
+      if (symbol && symbol.length > 2 && !ignoredKeywords.has(symbol)) {
+        symbols.add(symbol);
+      }
     }
   }
 

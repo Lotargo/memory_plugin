@@ -33,12 +33,14 @@ export async function ingestDocument({
     const filePath = effectivePath || content;
     const needsRead = !content || content === filePath;
     if (needsRead && filePath) {
-      content = await readFile(filePath, "utf-8");
+      const ext = extname(filePath).toLowerCase();
+      const isBinary = [".pdf", ".docx", ".xlsx", ".xls"].includes(ext);
+      content = await readFile(filePath, isBinary ? null : "utf-8");
       effectivePath = filePath;
     }
   }
 
-  const { markdown, title: docTitle, metadata } = normalizeContent({ content, type: effectiveType, path: effectivePath, title: effectiveTitle });
+  const { markdown, title: docTitle, metadata } = await normalizeContent({ content, type: effectiveType, path: effectivePath, title: effectiveTitle });
   if (type === "url") metadata.source_type = "url";
 
   const blobRes = await saveBlob(markdown, customBlobDir);
