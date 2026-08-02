@@ -105,6 +105,9 @@ npm install -g @lotargo/memory_plugin && memory_plugin setup --codex
 
 - **Zero Heavy Infrastructure**: No Docker, no Python server, no C++ compilation (`node-gyp`). Uses Node.js native SQLite database.
 - **Bilingual & Multilingual Support**: State-of-the-art semantic precision across Russian, English, and technical code symbols.
+- **Multilingual Code Symbol Parsing**: High-performance extraction of code entities across 10 programming languages (Python, Go, Rust, C++, Java, Kotlin, C#, PHP, Ruby, JS/TS).
+- **Office Document Ingestion**: Native, pure-JS parsing of PDF, DOCX, XLSX, and CSV documents, removing the need for external CLI converters.
+- **Hybrid Spreadsheet RAG Representation**: XLSX/CSV tables are converted to Markdown tables for raw document viewing, while row records are transformed into semantic key-value text lines to prevent vector database noise and boost search quality.
 - **3-Tier Hierarchy Chunking**: Document (Big) -> Section (Medium) -> Micro-Chunk (Small).
 - **Hybrid RRF/RSF Fusion**: Combines SQLite FTS5 keyword precision with ONNX dense vector similarity; lexical-only fallback when embeddings are disabled.
 - **Semantic Search**: Cosine-similarity vector retrieval with multilingual ONNX embeddings (E5 / BGE model families).
@@ -171,11 +174,18 @@ When installed as an OpenCode plugin, all MCP tools above plus `list-mcp-tools` 
 
 The RAG engine includes a lightweight graph layer built on the same SQLite database. It combines code symbol extraction, hierarchy edges, and explicit memory-to-document links without requiring a separate graph store or an LLM at ingest time.
 
-**Code Symbol Extraction** — during `ingest_document`, code symbols are extracted from the chunk content using fast regex heuristics (no language model needed):
+**Code Symbol Extraction** — during `ingest_document`, code symbols are extracted from the chunk content using fast, highly-optimized regex heuristics (maintaining 100% portability and avoiding heavy binary parsers):
 
-- JavaScript / TypeScript: `function`, `class`, `interface`, `type`, `enum`, `const`, `let`, `var`
-- Python: `def`, `class`
-- Symbols shorter than 3 characters and reserved keywords (`const`, `let`, `var`, `function`, `class`, `import`, `export`, `from`, `return`, `if`, `for`, `while`, `def`, `self`) are filtered out.
+- **JavaScript / TypeScript**: `function`, `class`, `interface`, `type`, `enum`, `const`, `let`, `var`
+- **Python**: `def`, `class`
+- **Go**: `struct`, `interface`, `func` (including methods with receivers)
+- **Rust**: `struct`, `enum`, `trait`, `fn` (including async/pub)
+- **C++**: `class`, `struct`, `namespace`, functions and methods
+- **Java & Kotlin**: `class`, `interface`, `record`, `enum`, `fun` and synchronized methods
+- **C#**: `class`, `interface`, `struct`, `record`, methods and properties
+- **PHP**: `class`, `interface`, `trait`, functions
+- **Ruby**: `module`, `class`, methods
+- Standard language keywords and symbols shorter than 3 characters are automatically filtered out using a comprehensive, cross-language ignored keyword list to prevent graph clutter.
 
 **Graph Edges** — three built-in relation types are created automatically, and custom relation types are supported for explicit linking:
 

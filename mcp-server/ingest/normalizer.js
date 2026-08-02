@@ -1,4 +1,7 @@
 import { basename, extname } from "node:path";
+import { PDFParse } from "pdf-parse";
+import mammoth from "mammoth";
+import xlsx from "xlsx";
 
 export function cleanHtml(html) {
   if (!html) return "";
@@ -98,7 +101,60 @@ export function stripMarkdownBadgesAndNoise(text) {
   return cleaned;
 }
 
-export function normalizeContent({ content, type = "text", path = null, title = null }) {
+export function parseSpreadsheet(content, fileName, isCsv = false) {
+  const options = isCsv && (typeof content === "string") ? { type: "string" } : { type: "buffer" };
+  const workbook = xlsx.read(content, options);
+  let markdownParts = [];
+
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    // Convert to JSON 2D array
+    const rows = xlsx.utils.sheet_to_json(sheet, { header: 1 });
+    if (rows.length === 0) continue;
+
+    markdownParts.push(`## Sheet: ${sheetName}\n`);
+
+    // Create Markdown Table representation
+    const normalizedRows = rows.map(r => (Array.isArray(r) ? r : []).map(cell => (cell === undefined || cell === null) ? "" : String(cell)));
+    const maxCols = Math.max(...normalizedRows.map(r => r.length), 0);
+    if (maxCols === 0) continue;
+
+    // Pad all rows to maxCols
+    for (const r of normalizedRows) {
+      while (r.length < maxCols) r.push("");
+    }
+
+    // Header
+    const headers = normalizedRows[0];
+    markdownParts.push(`| ${headers.join(" | ")} |`);
+    markdownParts.push(`| ${headers.map(() => "---").join(" | ")} |`);
+
+    // Data rows
+    for (let i = 1; i < normalizedRows.length; i++) {
+      markdownParts.push(`| ${normalizedRows[i].join(" | ")} |`);
+    }
+
+    markdownParts.push("\n### Searchable Records\n");
+    // Row-by-row key-value representation for chunking/semantic search
+    for (let i = 1; i < normalizedRows.length; i++) {
+      const row = normalizedRows[i];
+      // Skip completely empty rows
+      if (row.every(cell => cell.trim() === "")) continue;
+
+      markdownParts.push(`Record ${i} from sheet ${sheetName}:`);
+      for (let j = 0; j < maxCols; j++) {
+        const headerName = headers[j]?.trim() || `Column_${j + 1}`;
+        const val = row[j]?.trim() || "";
+        markdownParts.push(`- ${headerName}: ${val}`);
+      }
+      markdownParts.push("");
+    }
+  }
+
+  return markdownParts.join("\n");
+}
+
+export async function normalizeContent({ content, type = "text", path = null, title = null }) {
   let markdown = "";
   let docTitle = title;
   const fileName = path ? basename(path) : "document";
@@ -112,6 +168,18 @@ export function normalizeContent({ content, type = "text", path = null, title = 
       ".js": "javascript",
       ".ts": "typescript",
       ".py": "python",
+      ".go": "go",
+      ".rs": "rust",
+      ".cpp": "cpp",
+      ".h": "cpp",
+      ".hpp": "cpp",
+      ".cc": "cpp",
+      ".cxx": "cpp",
+      ".java": "java",
+      ".kt": "kotlin",
+      ".cs": "csharp",
+      ".php": "php",
+      ".rb": "ruby",
       ".json": "json",
       ".yaml": "yaml",
       ".yml": "yaml",
@@ -119,15 +187,44 @@ export function normalizeContent({ content, type = "text", path = null, title = 
       ".html": "html",
     };
 
-    if (codeLangs[ext]) {
-      markdown = `# ${fileName}\n\n\`\`\`${codeLangs[ext]}\n${content.trim()}\n\`\`\``;
+    if (ext === ".pdf") {
+      try {
+        const pdfBuffer = Buffer.isBuffer(content) ? content : Buffer.from(content);
+        const parser = new PDFParse({ data: pdfBuffer });
+        const result = await parser.getText();
+        markdown = result.text || "";
+        docTitle = title || fileName;
+      } catch (err) {
+        throw new Error(`Failed to parse PDF file '${fileName}': ${err.message}`);
+      }
+    } else if (ext === ".docx") {
+      try {
+        const docxBuffer = Buffer.isBuffer(content) ? content : Buffer.from(content);
+        const result = await mammoth.convertToMarkdown({ buffer: docxBuffer });
+        markdown = result.value || "";
+        docTitle = title || fileName;
+      } catch (err) {
+        throw new Error(`Failed to parse DOCX file '${fileName}': ${err.message}`);
+      }
+    } else if (ext === ".xlsx" || ext === ".xls" || ext === ".csv") {
+      try {
+        markdown = parseSpreadsheet(content, fileName, ext === ".csv");
+        docTitle = title || fileName;
+      } catch (err) {
+        throw new Error(`Failed to parse spreadsheet file '${fileName}': ${err.message}`);
+      }
+    } else if (codeLangs[ext]) {
+      const textContent = Buffer.isBuffer(content) ? content.toString("utf8") : String(content);
+      markdown = `# ${fileName}\n\n\`\`\`${codeLangs[ext]}\n${textContent.trim()}\n\`\`\``;
       docTitle = title || fileName;
     } else {
-      markdown = content.trim();
+      const textContent = Buffer.isBuffer(content) ? content.toString("utf8") : String(content);
+      markdown = textContent.trim();
       docTitle = title || extractTitle(markdown, fileName);
     }
   } else {
-    markdown = typeof content === "string" ? content.trim() : String(content);
+    const textContent = Buffer.isBuffer(content) ? content.toString("utf8") : String(content);
+    markdown = textContent.trim();
     docTitle = title || extractTitle(markdown, "Direct Note");
   }
 

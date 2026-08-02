@@ -34,7 +34,7 @@ try {
   assert(!cleaned.includes("header"), "Header tags should be stripped");
   assert(cleaned.includes("Welcome to hybrid search!"), "Text content should be preserved");
 
-  const codeNorm = normalizeContent({
+  const codeNorm = await normalizeContent({
     content: "console.log('hello');",
     type: "file",
     path: "test.js",
