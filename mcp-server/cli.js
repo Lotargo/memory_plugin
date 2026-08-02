@@ -806,6 +806,12 @@ export async function runCli() {
             value: "cloud_mode",
             info: "Choose Operational Mode: only-local | only-cloud | hybrid-sync",
           },
+          {
+            label: "Conflict Strategy",
+            badge: (config.conflictStrategy || "merge").toUpperCase(),
+            value: "conflict_strategy",
+            info: "How hybrid-sync resolves differing local vs cloud stores: merge | cloud-wins | local-wins",
+          },
         ],
       },
       {
@@ -1869,6 +1875,26 @@ export async function runCli() {
 
         if (subRes.action === "select") {
           updateConfig({ mode: subRes.value });
+        }
+        break;
+      }
+      case "conflict_strategy": {
+        const strategyItems = [
+          { label: "merge (Union local + cloud)", value: "merge", info: "Facts from both sides are merged and deduplicated — no data loss (recommended)" },
+          { label: "cloud-wins (Cloud overwrites local)", value: "cloud-wins", info: "On conflict, the cloud copy replaces the local store" },
+          { label: "local-wins (Local overwrites cloud)", value: "local-wins", info: "On conflict, the local copy replaces the cloud store" },
+        ];
+        const initialIdx = Math.max(0, strategyItems.findIndex((i) => i.value === (config.conflictStrategy || "merge")));
+        const subRes = await selectSimpleMenu({
+          title: "CHOOSE CONFLICT STRATEGY",
+          subtitle: "How hybrid-sync resolves differing local vs cloud stores",
+          items: strategyItems,
+          initialIndex: initialIdx,
+        });
+
+        if (subRes.action === "select") {
+          updateConfig({ conflictStrategy: subRes.value });
+          console.log(`\n  [OK] Conflict strategy set to: ${subRes.value}`);
         }
         break;
       }

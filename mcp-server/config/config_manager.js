@@ -15,6 +15,7 @@ export const DEFAULT_CONFIG = {
   onnxThreads: 0,          // ONNX WASM threads: 0 = auto-detect CPU cores, or 1-16
   executionDevice: "cpu",  // "cpu" | "webgpu"
   mode: "only-local",     // "only-local" | "only-cloud" | "hybrid-sync"
+  conflictStrategy: "merge", // "merge" | "cloud-wins" | "local-wins"
   tursoUrl: "",           // Connection endpoint URL for Turso DB
   failoverUrl: "",        // Failover connection endpoint URL (Fly.io + LiteFS)
   authorized: false,      // True once the user completed cloud login (token stored encrypted)
@@ -22,12 +23,9 @@ export const DEFAULT_CONFIG = {
 };
 
 let cachedConfig = null;
+let cachedMtimeMs = 0;
 
-export function getConfig() {
-  if (cachedConfig) {
-    return cachedConfig;
-  }
-
+function loadConfigFromDisk() {
   ensureDirSync();
 
   if (fs.existsSync(CONFIG_FILE)) {
@@ -35,6 +33,7 @@ export function getConfig() {
       const raw = fs.readFileSync(CONFIG_FILE, "utf-8");
       const parsed = JSON.parse(raw);
       cachedConfig = Object.freeze({ ...DEFAULT_CONFIG, ...parsed });
+      cachedMtimeMs = fs.statSync(CONFIG_FILE).mtimeMs;
       return cachedConfig;
     } catch (err) {
       console.warn("Failed to read config file, falling back to defaults:", err.message);
@@ -46,11 +45,24 @@ export function getConfig() {
   return cachedConfig;
 }
 
+export function getConfig() {
+  try {
+    const mtimeMs = fs.statSync(CONFIG_FILE).mtimeMs;
+    if (cachedConfig && mtimeMs === cachedMtimeMs) {
+      return cachedConfig;
+    }
+  } catch (err) {
+    // Config file missing — fall through to load/create.
+  }
+  return loadConfigFromDisk();
+}
+
 export function saveConfig(newConfig) {
   ensureDirSync();
   cachedConfig = Object.freeze({ ...DEFAULT_CONFIG, ...newConfig });
   try {
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(cachedConfig, null, 2), "utf-8");
+    cachedMtimeMs = fs.statSync(CONFIG_FILE).mtimeMs;
   } catch (err) {
     console.error("Failed to write config file:", err.message);
   }

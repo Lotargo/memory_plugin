@@ -142,6 +142,15 @@ export async function readMemory(key) {
   }
 
   const fp = memoryPath(key);
+  if (config.mode === "hybrid-sync") {
+    // Pull cloud state down first so cloud-only records appear locally.
+    try {
+      const { ensureReverseSync } = await import("./db/sync_queue.js");
+      await ensureReverseSync();
+    } catch (err) {
+      console.error("Failed to reverse-sync before read:", err.message);
+    }
+  }
   if (existsSync(fp)) {
     const content = await readFile(fp, "utf-8");
     return content.split("\n").filter((l) => l.startsWith("- ["));
@@ -154,7 +163,8 @@ export async function readMemoryRaw(key) {
   return (await readMemory(key)).map((e) => e.slice(2));
 }
 
-export async function writeMemory(key, entries) {
+// Build the markdown store content for a key from a list of fact lines.
+export function buildMemoryContent(key, entries) {
   const lines = [];
   if (key === GLOBAL_KEY) {
     lines.push("# Global Memory", "");
@@ -164,7 +174,22 @@ export async function writeMemory(key, entries) {
       lines.push(`<!-- path: ${key} -->`, "");
     }
   }
-  const content = lines.join("\n") + "\n" + (entries.length ? entries.join("\n") + "\n" : "");
+  return lines.join("\n") + "\n" + (entries.length ? entries.join("\n") + "\n" : "");
+}
+
+// Extract fact lines (`- [date] ...`) from a store content string.
+export function extractFacts(content) {
+  return (content || "").split("\n").filter((l) => l.startsWith("- ["));
+}
+
+// Write a store file directly to disk WITHOUT enqueueing a cloud sync task.
+// Used by the sync worker to apply pulled cloud state without re-queueing.
+export async function writeMemoryFile(key, content) {
+  await writeFile(memoryPath(key), content);
+}
+
+export async function writeMemory(key, entries) {
+  const content = buildMemoryContent(key, entries);
 
   const { getConfig } = await import("./config/config_manager.js");
   const config = getConfig();

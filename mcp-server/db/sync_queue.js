@@ -1,4 +1,14 @@
+import { readFile, readdir } from "fs/promises";
+import { join, basename } from "path";
+import { MEMORY_DIR, GLOBAL_KEY, buildMemoryContent, extractFacts, writeMemoryFile, storeFilePath, memoryFileName } from "../memory.js";
+
 let isSyncing = false;
+
+// Reverse sync (cloud -> local) throttling: only pull at most once per window
+// even if readMemory triggers it frequently (recall hits every keystroke).
+let lastReverseSync = 0;
+let isReverseSyncing = false;
+const REVERSE_SYNC_INTERVAL_MS = 5000;
 
 async function processSyncTask(db, task) {
   if (task.action === "write_memory") {
@@ -162,6 +172,161 @@ export async function enqueueSyncTask(action, keyOrId, payload = null) {
   });
 }
 
+// Map a store key to its local file path, mirroring memory.js naming.
+function localFilePath(key) {
+  return join(MEMORY_DIR, memoryFileName(key));
+}
+
+// Enumerate local store files as { key, path }.
+async function enumerateLocalStores() {
+  const files = await readdir(MEMORY_DIR).catch(() => []);
+  const stores = [];
+  for (const f of files) {
+    if (!f.endsWith(".md")) continue;
+    const fp = join(MEMORY_DIR, f);
+    let content = "";
+    try {
+      content = await readFile(fp, "utf-8");
+    } catch (e) {
+      continue;
+    }
+    const meta = content.match(/<!-- path: (.+?) -->/);
+    const key = f === `${GLOBAL_KEY}.md` ? GLOBAL_KEY : (meta ? meta[1].trim() : f.slice(0, -3));
+    stores.push({ key, path: fp, file: f });
+  }
+  return stores;
+}
+
+// Reverse sync: pull cloud state down to local stores, resolving conflicts
+// according to config.conflictStrategy ("merge" | "cloud-wins" | "local-wins").
+//
+// Returns a summary of what happened for diagnostics.
+async function pullFromCloud(db) {
+  const { getConfig } = await import("../config/config_manager.js");
+  const config = getConfig();
+  const strategy = config.conflictStrategy || "merge";
+
+  const summary = { pulled: 0, pushed: 0, merged: 0, cloudWins: 0, localWins: 0, unchanged: 0, conflicts: 0 };
+
+  // 1. Enumerate cloud notebooks. In hybrid-sync the wrapper's prepare() routes
+  // to the LOCAL sqlite, so cloud reads/writes must go through cloudClient directly.
+  const cloudRes = await db.cloudClient.execute("SELECT key, content FROM notebooks;");
+  const cloudRows = cloudRes.rows || [];
+  const cloudByKey = new Map(cloudRows.map((r) => [r.key, r.content || ""]));
+
+  // 2. Enumerate local store files.
+  const localStores = await enumerateLocalStores();
+  const localByKey = new Map(localStores.map((s) => [s.key, s.path]));
+  const localContentByKey = new Map();
+  for (const s of localStores) {
+    try {
+      localContentByKey.set(s.key, await readFile(s.path, "utf-8"));
+    } catch (e) {}
+  }
+
+  const allKeys = new Set([...cloudByKey.keys(), ...localByKey.keys()]);
+
+  // Upsert a notebook row directly on the cloud client.
+  const upsertCloud = async (key, content) => {
+    await db.cloudClient.execute({
+      sql: `
+        INSERT INTO notebooks (key, content, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at;
+      `,
+      args: [key, content, Date.now()],
+    });
+  };
+
+  // 3. Reconcile each key.
+  for (const key of allKeys) {
+    const cloudContent = cloudByKey.get(key);
+    const localPath = localByKey.get(key);
+    const localContent = localContentByKey.get(key) || "";
+
+    const cloudFacts = cloudContent !== undefined ? extractFacts(cloudContent) : null;
+    const localFacts = extractFacts(localContent);
+    const cloudHas = cloudFacts !== null && cloudFacts.length > 0;
+    const localHas = localFacts.length > 0;
+
+    if (cloudFacts === null) {
+      // Store exists only locally -> push up.
+      if (localHas) {
+        await upsertCloud(key, localContent);
+        summary.pushed++;
+      }
+      continue;
+    }
+
+    if (!localHas) {
+      // Store exists only in cloud -> pull down.
+      if (cloudHas) {
+        await writeMemoryFile(key, cloudContent);
+        summary.pulled++;
+      }
+      continue;
+    }
+
+    // Both exist.
+    if (localContent === cloudContent) {
+      summary.unchanged++;
+      continue;
+    }
+
+    summary.conflicts++;
+    if (strategy === "cloud-wins") {
+      await writeMemoryFile(key, cloudContent);
+      summary.cloudWins++;
+    } else if (strategy === "local-wins") {
+      await upsertCloud(key, localContent);
+      summary.localWins++;
+    } else {
+      // merge: union of fact lines, deduped, local order first then cloud-only.
+      const seen = new Set();
+      const mergedFacts = [];
+      for (const l of [...localFacts, ...cloudFacts]) {
+        if (!seen.has(l)) {
+          seen.add(l);
+          mergedFacts.push(l);
+        }
+      }
+      const mergedContent = buildMemoryContent(key, mergedFacts);
+      await writeMemoryFile(key, mergedContent);
+      await upsertCloud(key, mergedContent);
+      summary.merged++;
+    }
+  }
+
+  return summary;
+}
+
+// Trigger a reverse sync now (regardless of throttle). Used after the push queue
+// drains so both directions stay in sync.
+export async function syncFromCloud() {
+  if (isReverseSyncing) return { skipped: true };
+  isReverseSyncing = true;
+  try {
+    const { getDatabase } = await import("./database.js");
+    const db = await getDatabase();
+    if (db.mode !== "hybrid-sync" || !db.cloudClient) return { skipped: true };
+    lastReverseSync = Date.now();
+    return await pullFromCloud(db);
+  } finally {
+    isReverseSyncing = false;
+  }
+}
+
+// Throttled reverse sync, safe to call on every recall/read.
+export async function ensureReverseSync() {
+  if (Date.now() - lastReverseSync < REVERSE_SYNC_INTERVAL_MS) return { throttled: true };
+  return syncFromCloud();
+}
+
+// Reset the reverse-sync throttle (used by tests and manual syncs).
+export function resetReverseSyncThrottle() {
+  lastReverseSync = 0;
+}
+
 export async function triggerBackgroundSync() {
   if (isSyncing) return;
   isSyncing = true;
@@ -203,6 +368,9 @@ export async function triggerBackgroundSync() {
         break;
       }
     }
+
+    // Push queue drained — now pull cloud state back down (reverse sync).
+    await syncFromCloud();
   } catch (err) {
     console.error("Error during background sync execution:", err.message);
   } finally {
