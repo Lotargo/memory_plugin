@@ -14,6 +14,8 @@ export const DEFAULT_CONFIG = {
   gpuAttentionBudget: 2000000, // GPU micro-batch attention budget [1M - 16M] (default 2.0M ~1.5GB VRAM)
   onnxThreads: 0,          // ONNX WASM threads: 0 = auto-detect CPU cores, or 1-16
   executionDevice: "cpu",  // "cpu" | "webgpu"
+  mode: "only-local",     // "only-local" | "only-cloud" | "hybrid-sync"
+  tursoUrl: "",           // Connection endpoint URL for Turso DB
 };
 
 let cachedConfig = null;
