@@ -16,6 +16,7 @@ export const DEFAULT_CONFIG = {
   executionDevice: "cpu",  // "cpu" | "webgpu"
   mode: "only-local",     // "only-local" | "only-cloud" | "hybrid-sync"
   tursoUrl: "",           // Connection endpoint URL for Turso DB
+  failoverUrl: "",        // Failover connection endpoint URL (Fly.io + LiteFS)
 };
 
 let cachedConfig = null;
