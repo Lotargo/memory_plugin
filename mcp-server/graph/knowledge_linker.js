@@ -1,7 +1,7 @@
 import { getDatabase } from "../db/database.js";
 import { randomUUID } from "node:crypto";
 
-export function linkFactToDocument({
+export async function linkFactToDocument({
   factKey,
   factText,
   docId,
@@ -11,11 +11,11 @@ export function linkFactToDocument({
   relationType = "LINKS_TO",
   metadata = null,
 }) {
-  const db = getDatabase();
+  const db = await getDatabase();
   const id = `link_${randomUUID().substring(0, 12)}`;
   const now = Date.now();
 
-  const doc = db
+  const doc = await db
     .prepare("SELECT id, title, path FROM documents WHERE id = ? OR path = ? OR title = ?")
     .get(docId, docId, docId);
 
@@ -28,7 +28,7 @@ export function linkFactToDocument({
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  stmt.run(
+  await stmt.run(
     id,
     factKey,
     factText,
@@ -46,7 +46,7 @@ export function linkFactToDocument({
     VALUES (?, ?, ?, ?, ?)
   `);
   const targetSpec = startLine ? `${doc.id}:L${startLine}-${endLine || startLine}` : doc.id;
-  edgeStmt.run(`fact:${factKey}:${factText.substring(0, 30)}`, targetSpec, relationType, JSON.stringify({ linkId: id }), now);
+  await edgeStmt.run(`fact:${factKey}:${factText.substring(0, 30)}`, targetSpec, relationType, JSON.stringify({ linkId: id }), now);
 
   return {
     linkId: id,
@@ -60,8 +60,8 @@ export function linkFactToDocument({
   };
 }
 
-export function getLinksForFact(factKey, factText) {
-  const db = getDatabase();
+export async function getLinksForFact(factKey, factText) {
+  const db = await getDatabase();
   const stmt = db.prepare(`
     SELECT k.*, d.title as doc_title, d.path as doc_path
     FROM knowledge_links k
@@ -70,11 +70,11 @@ export function getLinksForFact(factKey, factText) {
     ORDER BY k.created_at DESC
   `);
   const queryPattern = `%${factText.substring(0, 20)}%`;
-  return stmt.all(factKey, queryPattern, factText);
+  return await stmt.all(factKey, queryPattern, factText);
 }
 
-export function getLinksForDoc(docId) {
-  const db = getDatabase();
+export async function getLinksForDoc(docId) {
+  const db = await getDatabase();
   const stmt = db.prepare(`
     SELECT k.*, d.title as doc_title, d.path as doc_path
     FROM knowledge_links k
@@ -82,11 +82,11 @@ export function getLinksForDoc(docId) {
     WHERE k.doc_id = ? OR d.path = ? OR d.title = ?
     ORDER BY k.created_at DESC
   `);
-  return stmt.all(docId, docId, docId);
+  return await stmt.all(docId, docId, docId);
 }
 
-export function listAllLinks(factKey = null) {
-  const db = getDatabase();
+export async function listAllLinks(factKey = null) {
+  const db = await getDatabase();
   let sql = `
     SELECT k.*, d.title as doc_title, d.path as doc_path
     FROM knowledge_links k
@@ -98,5 +98,5 @@ export function listAllLinks(factKey = null) {
     params.push(factKey);
   }
   sql += " ORDER BY k.created_at DESC";
-  return db.prepare(sql).all(...params);
+  return await db.prepare(sql).all(...params);
 }

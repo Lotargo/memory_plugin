@@ -11,7 +11,7 @@ export function sanitizeFtsQuery(query) {
   return words.join(" OR ");
 }
 
-export function bm25Search(db, query, limit = 30) {
+export async function bm25Search(db, query, limit = 30) {
   const ftsQuery = sanitizeFtsQuery(query);
   if (!ftsQuery) return [];
 
@@ -23,7 +23,7 @@ export function bm25Search(db, query, limit = 30) {
       ORDER BY rank
       LIMIT ?;
     `);
-    const rows = stmt.all(ftsQuery, limit);
+    const rows = await stmt.all(ftsQuery, limit);
     return rows.map((r, i) => ({
       id: r.id,
       content: r.content,
@@ -37,7 +37,7 @@ export function bm25Search(db, query, limit = 30) {
   }
 }
 
-export function vectorSearch(db, queryVector, limit = 30, minSim = 0.25) {
+export async function vectorSearch(db, queryVector, limit = 30, minSim = 0.25) {
   if (!queryVector || queryVector.length === 0) return [];
 
   const vectorDim = queryVector.length;
@@ -52,8 +52,17 @@ export function vectorSearch(db, queryVector, limit = 30, minSim = 0.25) {
   `);
 
   const scored = [];
-  for (const r of stmt.iterate()) {
-    tempView.set(r.vector.subarray(0, vectorDim * 4));
+  const rows = await stmt.all();
+  for (const r of rows) {
+    let vecSub = r.vector;
+    if (typeof vecSub === "string") {
+      vecSub = Buffer.from(vecSub, "base64");
+    } else if (vecSub.type === "Buffer" && Array.isArray(vecSub.data)) {
+      vecSub = Buffer.from(vecSub.data);
+    } else if (Array.isArray(vecSub)) {
+      vecSub = Buffer.from(vecSub);
+    }
+    tempView.set(vecSub.subarray(0, vectorDim * 4));
 
     const sim = cosineSimilarity(queryVector, tempVec);
     if (!isNaN(sim) && sim >= minSim) {
@@ -205,7 +214,7 @@ export async function hybridQuery({
   instruction = null,
   generateEmbeddings = true,
 }) {
-  const db = customDb || getDatabase();
+  const db = customDb || await getDatabase();
   const activeConfig = getConfig();
 
   // If embeddings are disabled (e.g. fast/offline test mode or model not cached),
@@ -223,28 +232,28 @@ export async function hybridQuery({
   let fusedHits = [];
 
   if (algo === "lexical_only" || algo === "bm25_only") {
-    const bm25Hits = bm25Search(db, query, limit * 4);
+    const bm25Hits = await bm25Search(db, query, limit * 4);
     fusedHits = bm25Hits.map((hit) => ({
       ...hit,
       score: 1.0 / hit.bm25_rank,
     }));
   } else if (algo === "semantic_only" || algo === "vector_only") {
     const queryVector = await embedText(query, true, embModel, null, instruction);
-    const vectorHits = vectorSearch(db, queryVector, limit * 4, 0.10);
+    const vectorHits = await vectorSearch(db, queryVector, limit * 4, 0.10);
     fusedHits = vectorHits.map((hit) => ({
       ...hit,
       score: hit.cosine_sim,
     }));
   } else if (algo === "rrf") {
-    const bm25Hits = bm25Search(db, query, 30);
+    const bm25Hits = await bm25Search(db, query, 30);
     const queryVector = await embedText(query, true, embModel, null, instruction);
-    const vectorHits = vectorSearch(db, queryVector, 30, 0.10);
+    const vectorHits = await vectorSearch(db, queryVector, 30, 0.10);
     fusedHits = rrfFusion(bm25Hits, vectorHits, 60, scoreThreshold);
   } else {
     // Default: RSF
-    const bm25Hits = bm25Search(db, query, 30);
+    const bm25Hits = await bm25Search(db, query, 30);
     const queryVector = await embedText(query, true, embModel, null, instruction);
-    const vectorHits = vectorSearch(db, queryVector, 30, 0.10);
+    const vectorHits = await vectorSearch(db, queryVector, 30, 0.10);
     fusedHits = rsfFusion(bm25Hits, vectorHits, alphaWeight, scoreThreshold);
   }
 
@@ -260,7 +269,7 @@ export async function hybridQuery({
   `);
 
   for (const hit of fusedHits) {
-    const row = parentLookupStmt.get(hit.id);
+    const row = await parentLookupStmt.get(hit.id);
     const parentKey = row ? (row.medium_id || row.section_id) : hit.id;
     if (!seenParents.has(parentKey)) {
       seenParents.add(parentKey);
@@ -282,12 +291,12 @@ export async function hybridQuery({
   `);
 
   for (const hit of topHits) {
-    const detail = secStmt.get(hit.id);
+    const detail = await secStmt.get(hit.id);
     if (!detail) continue;
 
     let symbols = [];
     if (includeGraphContext) {
-      symbols = getRelatedSymbols(db, detail.section_id);
+      symbols = await getRelatedSymbols(db, detail.section_id);
     }
 
     results.push({

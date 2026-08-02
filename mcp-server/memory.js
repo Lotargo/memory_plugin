@@ -125,6 +125,22 @@ async function maybeMigrateLegacy(key) {
 }
 
 export async function readMemory(key) {
+  const { getConfig } = await import("./config/config_manager.js");
+  const config = getConfig();
+  if (config.mode === "only-cloud") {
+    try {
+      const { getDatabase } = await import("./db/database.js");
+      const db = await getDatabase();
+      const row = await db.prepare("SELECT content FROM notebooks WHERE key = ?;").get(key);
+      if (row && row.content) {
+        return row.content.split("\n").filter((l) => l.startsWith("- ["));
+      }
+    } catch (err) {
+      console.error("Failed to read memory from cloud database:", err.message);
+    }
+    return [];
+  }
+
   const fp = memoryPath(key);
   if (existsSync(fp)) {
     const content = await readFile(fp, "utf-8");
@@ -149,10 +165,67 @@ export async function writeMemory(key, entries) {
     }
   }
   const content = lines.join("\n") + "\n" + (entries.length ? entries.join("\n") + "\n" : "");
+
+  const { getConfig } = await import("./config/config_manager.js");
+  const config = getConfig();
+  if (config.mode === "only-cloud") {
+    try {
+      const { getDatabase } = await import("./db/database.js");
+      const db = await getDatabase();
+      await db.prepare(`
+        INSERT INTO notebooks (key, content, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at;
+      `).run(key, content, Date.now());
+    } catch (err) {
+      console.error("Failed to write memory to cloud database:", err.message);
+    }
+    return;
+  }
+
   await writeFile(memoryPath(key), content);
+
+  if (config.mode === "hybrid-sync") {
+    try {
+      const { enqueueSyncTask } = await import("./db/sync_queue.js");
+      await enqueueSyncTask("write_memory", key, content);
+    } catch (err) {
+      console.error("Failed to queue memory sync task:", err.message);
+    }
+  }
 }
 
 export async function listProjectStores() {
+  const { getConfig } = await import("./config/config_manager.js");
+  const config = getConfig();
+  if (config.mode === "only-cloud") {
+    try {
+      const { getDatabase } = await import("./db/database.js");
+      const db = await getDatabase();
+      const rows = await db.prepare("SELECT key, content FROM notebooks WHERE key != ?;").all(GLOBAL_KEY);
+      const stores = [];
+      for (const row of rows) {
+        const key = row.key;
+        const content = row.content;
+        const facts = content.split("\n").filter((l) => l.startsWith("- ["));
+        const meta = parseMeta(content);
+        stores.push({
+          key,
+          path: meta.path || (key.includes("/") || key.includes(":") ? key : null),
+          basename: basename(meta.path || key) || key,
+          file: `${slugify(key)}.md`,
+          count: facts.length,
+          legacy: !meta.path,
+        });
+      }
+      stores.sort((a, b) => a.basename.localeCompare(b.basename));
+      return stores;
+    } catch (err) {
+      console.error("Failed to list memory stores from cloud database:", err.message);
+    }
+    return [];
+  }
+
   const stores = [];
   const files = await readdir(MEMORY_DIR).catch(() => []);
   for (const f of files) {

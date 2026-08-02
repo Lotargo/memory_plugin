@@ -256,7 +256,7 @@ try {
 
   // 3. End-to-End Ingestion Integration Test
   console.log("3. Testing End-to-End Spreadsheet Ingestion & Retrieval...");
-  const db = getDatabase(TEST_DB_PATH);
+  const db = await getDatabase(TEST_DB_PATH);
 
   const ingestRes = await ingestDocument({
     content: csvContent,
@@ -271,13 +271,13 @@ try {
   assert(ingestRes.micro_chunks_count > 0, "E2E: Should generate chunks");
 
   // Verify DB entries
-  const docRow = db.prepare("SELECT * FROM documents WHERE id = ?").get(ingestRes.doc_id);
+  const docRow = await db.prepare("SELECT * FROM documents WHERE id = ?").get(ingestRes.doc_id);
   assert.strictEqual(docRow.title, "Inventory Log", "E2E: DB Document title match");
 
-  const ftsHits = db.prepare("SELECT * FROM micro_chunks_fts WHERE micro_chunks_fts MATCH 'Widget A';").all();
+  const ftsHits = await db.prepare("SELECT * FROM micro_chunks_fts WHERE micro_chunks_fts MATCH 'Widget A';").all();
   assert(ftsHits.length >= 1, "E2E: FTS query should find Widget A");
 
-  const microChunkRow = db.prepare("SELECT content FROM micro_chunks WHERE doc_id = ?").all(ingestRes.doc_id);
+  const microChunkRow = await db.prepare("SELECT content FROM micro_chunks WHERE doc_id = ?").all(ingestRes.doc_id);
   const rowContentText = microChunkRow.map(r => r.content).join("\n");
   assert(rowContentText.includes("- Product: Widget A"), "E2E: Record contents must exist in RAG database");
 

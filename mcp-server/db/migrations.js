@@ -2,9 +2,9 @@ const MIGRATIONS = [
   {
     version: 1,
     name: "001_initial_rag_schema",
-    up: (db) => {
+    up: async (db) => {
       // 1. Documents Table
-      db.exec(`
+      await db.exec(`
         CREATE TABLE IF NOT EXISTS documents (
             id TEXT PRIMARY KEY,
             path TEXT UNIQUE NOT NULL,
@@ -19,7 +19,7 @@ const MIGRATIONS = [
       `);
 
       // 2. Sections Table
-      db.exec(`
+      await db.exec(`
         CREATE TABLE IF NOT EXISTS sections (
             id TEXT PRIMARY KEY,
             doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
@@ -31,7 +31,7 @@ const MIGRATIONS = [
       `);
 
       // 3. Micro-Chunks Table
-      db.exec(`
+      await db.exec(`
         CREATE TABLE IF NOT EXISTS micro_chunks (
             id TEXT PRIMARY KEY,
             section_id TEXT NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
@@ -43,7 +43,7 @@ const MIGRATIONS = [
       `);
 
       // 4. Full-Text Search (BM25 Index via SQLite FTS5)
-      db.exec(`
+      await db.exec(`
         CREATE VIRTUAL TABLE IF NOT EXISTS micro_chunks_fts USING fts5(
             id UNINDEXED,
             content,
@@ -52,7 +52,7 @@ const MIGRATIONS = [
       `);
 
       // 5. GraphRAG Lite Edges Table
-      db.exec(`
+      await db.exec(`
         CREATE TABLE IF NOT EXISTS graph_edges (
             source_id TEXT NOT NULL,
             target_id TEXT NOT NULL,
@@ -65,15 +65,15 @@ const MIGRATIONS = [
   {
     version: 2,
     name: "002_agent_knowledge_graph",
-    up: (db) => {
+    up: async (db) => {
       try {
-        db.exec(`ALTER TABLE graph_edges ADD COLUMN metadata_json TEXT;`);
+        await db.exec(`ALTER TABLE graph_edges ADD COLUMN metadata_json TEXT;`);
       } catch (e) {}
       try {
-        db.exec(`ALTER TABLE graph_edges ADD COLUMN created_at INTEGER;`);
+        await db.exec(`ALTER TABLE graph_edges ADD COLUMN created_at INTEGER;`);
       } catch (e) {}
 
-      db.exec(`
+      await db.exec(`
         CREATE TABLE IF NOT EXISTS knowledge_links (
             id TEXT PRIMARY KEY,
             fact_key TEXT NOT NULL,
@@ -92,8 +92,8 @@ const MIGRATIONS = [
   {
     version: 3,
     name: "003_medium_chunks_hierarchy",
-    up: (db) => {
-      db.exec(`
+    up: async (db) => {
+      await db.exec(`
         CREATE TABLE IF NOT EXISTS medium_chunks (
             id TEXT PRIMARY KEY,
             section_id TEXT NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
@@ -106,43 +106,72 @@ const MIGRATIONS = [
       `);
 
       try {
-        db.exec(`ALTER TABLE micro_chunks ADD COLUMN medium_id TEXT REFERENCES medium_chunks(id) ON DELETE CASCADE;`);
+        await db.exec(`ALTER TABLE micro_chunks ADD COLUMN medium_id TEXT REFERENCES medium_chunks(id) ON DELETE CASCADE;`);
       } catch (e) {}
     },
   },
 ];
 
-export function runMigrations(db) {
-  const versionRow = db.prepare("PRAGMA user_version;").get();
-  const currentVersion = versionRow ? versionRow.user_version : 0;
+export async function runMigrations(db) {
+  let currentVersion = 0;
+  try {
+    const row = await db.prepare("SELECT MAX(version) as v FROM schema_migrations;").get();
+    currentVersion = row ? row.v || 0 : 0;
+  } catch (e) {
+    try {
+      const versionRow = await db.prepare("PRAGMA user_version;").get();
+      currentVersion = versionRow ? (versionRow.user_version || 0) : 0;
+    } catch (e2) {}
+  }
+
+  // Ensure schema_migrations table exists for future
+  try {
+    await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY);`);
+  } catch (e) {}
+
+  // Create notebooks table if not exists
+  try {
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS notebooks (
+          key TEXT PRIMARY KEY,
+          content TEXT NOT NULL,
+          updated_at INTEGER NOT NULL
+      );
+    `);
+  } catch (e) {}
 
   for (const migration of MIGRATIONS) {
     if (migration.version > currentVersion) {
-      db.exec("BEGIN IMMEDIATE;");
+      await db.exec("BEGIN;");
       try {
-        migration.up(db);
-        db.exec("COMMIT;");
-        db.exec(`PRAGMA user_version = ${migration.version};`);
+        await migration.up(db);
+        await db.prepare("INSERT INTO schema_migrations (version) VALUES (?);").run(migration.version);
+        await db.exec("COMMIT;");
+        try {
+          await db.exec(`PRAGMA user_version = ${migration.version};`);
+        } catch (e) {}
       } catch (err) {
-        db.exec("ROLLBACK;");
+        try {
+          await db.exec("ROLLBACK;");
+        } catch (e) {}
         throw new Error(`Migration ${migration.name} failed: ${err.message}`);
       }
     }
   }
 
   // Defensive table & column check for medium_chunks hierarchy
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS medium_chunks (
-        id TEXT PRIMARY KEY,
-        section_id TEXT NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
-        doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-        content TEXT NOT NULL,
-        block_type TEXT NOT NULL,
-        token_count INTEGER NOT NULL,
-        created_at INTEGER
-    );
-  `);
   try {
-    db.exec(`ALTER TABLE micro_chunks ADD COLUMN medium_id TEXT REFERENCES medium_chunks(id) ON DELETE CASCADE;`);
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS medium_chunks (
+          id TEXT PRIMARY KEY,
+          section_id TEXT NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
+          doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+          content TEXT NOT NULL,
+          block_type TEXT NOT NULL,
+          token_count INTEGER NOT NULL,
+          created_at INTEGER
+      );
+    `);
+    await db.exec(`ALTER TABLE micro_chunks ADD COLUMN medium_id TEXT REFERENCES medium_chunks(id) ON DELETE CASCADE;`);
   } catch (e) {}
 }

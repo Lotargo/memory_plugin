@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { extname } from "node:path";
 import { getDatabase, BLOBS_DIR } from "../db/database.js";
 import { saveBlob, deleteBlob } from "../storage/blob_store.js";
 import { normalizeContent, fetchUrlContent } from "./normalizer.js";
@@ -17,7 +18,7 @@ export async function ingestDocument({
   customBlobDir = BLOBS_DIR,
   generateEmbeddings = true,
 }) {
-  const db = customDb || getDatabase();
+  const db = customDb || await getDatabase();
 
   let effectiveType = type;
   let effectivePath = path;
@@ -80,21 +81,21 @@ export async function ingestDocument({
     }
   }
 
-  db.exec("BEGIN IMMEDIATE;");
+  await db.exec("BEGIN IMMEDIATE;");
   try {
-    const existingDoc = db.prepare("SELECT id FROM documents WHERE path = ?").get(docPath);
+    const existingDoc = await db.prepare("SELECT id FROM documents WHERE path = ?").get(docPath);
     if (existingDoc) {
-      const microChunks = db.prepare("SELECT id FROM micro_chunks WHERE doc_id = ?").all(existingDoc.id);
+      const microChunks = await db.prepare("SELECT id FROM micro_chunks WHERE doc_id = ?").all(existingDoc.id);
       for (const mc of microChunks) {
         try {
-          db.prepare("DELETE FROM micro_chunks_fts WHERE id = ?").run(mc.id);
+          await db.prepare("DELETE FROM micro_chunks_fts WHERE id = ?").run(mc.id);
         } catch {}
       }
-      db.prepare("DELETE FROM graph_edges WHERE source_id = ? OR target_id = ?").run(existingDoc.id, existingDoc.id);
-      db.prepare("DELETE FROM documents WHERE id = ?").run(existingDoc.id);
+      await db.prepare("DELETE FROM graph_edges WHERE source_id = ? OR target_id = ?").run(existingDoc.id, existingDoc.id);
+      await db.prepare("DELETE FROM documents WHERE id = ?").run(existingDoc.id);
     }
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO documents (id, path, blob_hash, title, checksum, toc_json, metadata_json, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
     `).run(
@@ -114,7 +115,7 @@ export async function ingestDocument({
       VALUES (?, ?, ?, ?, ?, ?);
     `);
     for (const sec of hierarchy.sections) {
-      insertSectionStmt.run(sec.id, sec.doc_id, sec.heading, sec.breadcrumbs, sec.content, sec.token_count);
+      await insertSectionStmt.run(sec.id, sec.doc_id, sec.heading, sec.breadcrumbs, sec.content, sec.token_count);
     }
 
     if (hierarchy.mediumChunks && hierarchy.mediumChunks.length > 0) {
@@ -123,7 +124,7 @@ export async function ingestDocument({
         VALUES (?, ?, ?, ?, ?, ?, ?);
       `);
       for (const med of hierarchy.mediumChunks) {
-        insertMediumStmt.run(med.id, med.section_id, med.doc_id, med.content, med.block_type, med.token_count, now);
+        await insertMediumStmt.run(med.id, med.section_id, med.doc_id, med.content, med.block_type, med.token_count, now);
       }
     }
 
@@ -137,17 +138,28 @@ export async function ingestDocument({
     `);
 
     for (const micro of hierarchy.microChunks) {
-      insertMicroStmt.run(micro.id, micro.section_id, micro.doc_id, micro.content, micro.vector, micro.token_count, micro.medium_id || null);
-      insertFtsStmt.run(micro.id, micro.content, micro.breadcrumbs);
+      await insertMicroStmt.run(micro.id, micro.section_id, micro.doc_id, micro.content, micro.vector, micro.token_count, micro.medium_id || null);
+      await insertFtsStmt.run(micro.id, micro.content, micro.breadcrumbs);
     }
 
     const edges = buildGraphEdges(docId, hierarchy);
-    saveGraphEdges(db, edges);
+    await saveGraphEdges(db, edges);
 
-    db.exec("COMMIT;");
+    await db.exec("COMMIT;");
   } catch (err) {
-    db.exec("ROLLBACK;");
+    await db.exec("ROLLBACK;");
     throw new Error(`Ingestion transaction failed: ${err.message}`);
+  }
+
+  if (getConfig().mode === "hybrid-sync") {
+    try {
+      const { exportDocumentData } = await import("./exporter.js");
+      const { enqueueSyncTask } = await import("../db/sync_queue.js");
+      const exportedData = await exportDocumentData(docId, db);
+      await enqueueSyncTask("ingest_document", docId, exportedData);
+    } catch (err) {
+      console.error("Failed to queue document ingest sync task:", err.message);
+    }
   }
 
   return {
@@ -166,52 +178,62 @@ export async function ingestDocument({
 }
 
 export async function deleteDocument(docIdOrPath, customDb = null, customBlobDir = BLOBS_DIR) {
-  const db = customDb || getDatabase();
-  const doc = db.prepare("SELECT * FROM documents WHERE id = ? OR path = ?").get(docIdOrPath, docIdOrPath);
+  const db = customDb || await getDatabase();
+  const doc = await db.prepare("SELECT * FROM documents WHERE id = ? OR path = ?").get(docIdOrPath, docIdOrPath);
   if (!doc) {
     return { deleted: false, reason: "Document not found" };
   }
 
-  const microChunks = db.prepare("SELECT id FROM micro_chunks WHERE doc_id = ?").all(doc.id);
+  const microChunks = await db.prepare("SELECT id FROM micro_chunks WHERE doc_id = ?").all(doc.id);
 
   // Collect every id owned by this document so we can purge dangling graph edges
   // (graph_edges has no FK constraints, so section/chunk/doc references would otherwise leak).
   const ownedIds = [doc.id];
   for (const table of ["sections", "medium_chunks", "micro_chunks"]) {
-    const rows = db.prepare(`SELECT id FROM ${table} WHERE doc_id = ?`).all(doc.id);
+    const rows = await db.prepare(`SELECT id FROM ${table} WHERE doc_id = ?`).all(doc.id);
     for (const r of rows) ownedIds.push(r.id);
   }
 
-  db.exec("BEGIN IMMEDIATE;");
+  await db.exec("BEGIN IMMEDIATE;");
   try {
     for (const mc of microChunks) {
       try {
-        db.prepare("DELETE FROM micro_chunks_fts WHERE id = ?").run(mc.id);
+        await db.prepare("DELETE FROM micro_chunks_fts WHERE id = ?").run(mc.id);
       } catch {}
     }
 
     // Auto-clean Agent knowledge graph links pointing at this document.
-    db.prepare("DELETE FROM knowledge_links WHERE doc_id = ?").run(doc.id);
+    await db.prepare("DELETE FROM knowledge_links WHERE doc_id = ?").run(doc.id);
 
     for (const id of ownedIds) {
       // GLOB: '*' suffix is exact (unlike LIKE, '_' stays literal in ids like doc_xxx).
-      db.prepare(
+      await db.prepare(
         "DELETE FROM graph_edges WHERE source_id = ? OR target_id = ? OR source_id GLOB ? OR target_id GLOB ?"
       ).run(id, id, `${id}*`, `${id}*`);
     }
 
-    db.prepare("DELETE FROM documents WHERE id = ?").run(doc.id);
+    await db.prepare("DELETE FROM documents WHERE id = ?").run(doc.id);
 
-    db.exec("COMMIT;");
+    await db.exec("COMMIT;");
   } catch (err) {
-    db.exec("ROLLBACK;");
+    await db.exec("ROLLBACK;");
     throw err;
   }
 
   if (doc.blob_hash) {
-    const refCount = db.prepare("SELECT COUNT(*) as cnt FROM documents WHERE blob_hash = ?").get(doc.blob_hash).cnt;
+    const refCountRow = await db.prepare("SELECT COUNT(*) as cnt FROM documents WHERE blob_hash = ?").get(doc.blob_hash);
+    const refCount = refCountRow ? refCountRow.cnt : 0;
     if (refCount === 0) {
       await deleteBlob(doc.blob_hash, customBlobDir);
+    }
+  }
+
+  if (getConfig().mode === "hybrid-sync") {
+    try {
+      const { enqueueSyncTask } = await import("../db/sync_queue.js");
+      await enqueueSyncTask("delete_document", docIdOrPath);
+    } catch (err) {
+      console.error("Failed to queue document delete sync task:", err.message);
     }
   }
 
