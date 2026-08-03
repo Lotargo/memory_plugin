@@ -1,8 +1,11 @@
 import http from "node:http";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
-import { saveSecrets, deleteSecrets, loadSecrets, resolveEnvSecrets, getSecretsSource } from "../config/auth_store.js";
+import { saveSecrets, deleteSecrets, loadSecrets, resolveEnvSecrets, getSecretsSource, invalidateAuthCache, onSecretsChanged } from "../config/auth_store.js";
 import { getConfig, updateConfig } from "../config/config_manager.js";
+
+// Register callback so resolveCloudSecrets() cache is cleared when secrets change
+onSecretsChanged(() => { _cachedResolvedSecrets = undefined; _cachedResolvedAt = 0; });
 
 export const TURSO_API_BASE = () => process.env.TURSO_API_BASE || "https://api.turso.tech";
 
@@ -541,9 +544,23 @@ export async function loginFromEnv({ persist = false } = {}) {
 // Used by database.js at startup so a raw TURSO_API_TOKEN environment token
 // (which can only call the Platform API, not libsql) gets minted into a
 // per-database JWT without any interactive step.
+let _cachedResolvedSecrets = undefined;
+let _cachedResolvedAt = 0;
+const RESOLVED_CACHE_TTL_MS = 60_000;  // 60s — avoids re-minting JWT on every getDatabase()
+
+export function invalidateResolvedCache() {
+  _cachedResolvedSecrets = undefined;
+  _cachedResolvedAt = 0;
+}
+
 export async function resolveCloudSecrets() {
+  const now = Date.now();
+  if (_cachedResolvedSecrets !== undefined && (now - _cachedResolvedAt) < RESOLVED_CACHE_TTL_MS) {
+    return _cachedResolvedSecrets;
+  }
+
   const secrets = loadSecrets();
-  if (!secrets) return null;
+  if (!secrets) { _cachedResolvedSecrets = null; return null; }
   if (secrets.apiToken && secrets.needsResolution) {
     const resolved = await loginWithApiToken({
       token: secrets.apiToken,
@@ -552,9 +569,13 @@ export async function resolveCloudSecrets() {
       username: secrets.username || null,
       persist: false,
     });
-    return { ...resolved, source: "env" };
+    _cachedResolvedSecrets = { ...resolved, source: "env" };
+    _cachedResolvedAt = Date.now();
+    return _cachedResolvedSecrets;
   }
-  return secrets;
+  _cachedResolvedSecrets = secrets;
+  _cachedResolvedAt = Date.now();
+  return _cachedResolvedSecrets;
 }
 
 // Store/replace a Turso account API token. Alias of the headless login flow:
@@ -577,9 +598,13 @@ export function clearApiKey() {
   delete rest.apiToken;
   if (rest.token && rest.dbUrl) {
     saveSecrets({ ...rest, authorized: true });
+    invalidateAuthCache();
+    invalidateResolvedCache();
     return { removed: true, keptDbSession: true };
   }
   deleteSecrets();
+  invalidateAuthCache();
+  invalidateResolvedCache();
   return { removed: true, keptDbSession: false };
 }
 
@@ -604,6 +629,8 @@ export function getAuthStatus() {
 // Logout and reset configurations
 export function logoutFromCloud() {
   const deleted = deleteSecrets();
+  invalidateAuthCache();
+  invalidateResolvedCache();
   updateConfig({ tursoUrl: "", mode: "only-local", authorized: false, username: "" });
   return deleted;
 }

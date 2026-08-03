@@ -9,6 +9,8 @@ import { createClient } from "@libsql/client";
 
 let dbInstance = null;
 let dbInitPromise = null;
+let dbLastFailAt = 0;
+const DB_FAIL_COOLDOWN_MS = 5_000;  // don't retry cloud init within 5s of a failure
 
 export const STORAGE_DIR = join(MEMORY_DIR, "storage");
 export const BLOBS_DIR = join(STORAGE_DIR, "blobs");
@@ -207,10 +209,20 @@ export async function getDatabase(customPath = null, forceMode = null) {
     if (dbInstance && dbInstance.mode === mode) {
       return dbInstance;
     }
+    // After a failed init, wait before retrying to avoid hammering cloud auth
+    if (!dbInitPromise && dbLastFailAt && (Date.now() - dbLastFailAt) < DB_FAIL_COOLDOWN_MS) {
+      throw new Error("Database initialization failed recently. Retrying in a few seconds...");
+    }
     // Deduplicate concurrent default-DB initialization so migrations never run
     // on multiple connections at once (avoids "database is locked" crashes).
     if (!dbInitPromise) {
-      dbInitPromise = openDatabase(null, mode).finally(() => {
+      dbInitPromise = openDatabase(null, mode).then((result) => {
+        dbLastFailAt = 0;
+        return result;
+      }).catch((err) => {
+        dbLastFailAt = Date.now();
+        throw err;
+      }).finally(() => {
         dbInitPromise = null;
       });
     }
@@ -222,6 +234,7 @@ export async function getDatabase(customPath = null, forceMode = null) {
 
 export function closeDatabase() {
   dbInitPromise = null;
+  dbLastFailAt = 0;
   if (dbInstance) {
     dbInstance.close();
     dbInstance = null;

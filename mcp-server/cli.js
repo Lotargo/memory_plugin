@@ -38,12 +38,8 @@ const PANEL_WIDTH = 58;
 
 async function downloadModelWithProgress(modelName, type = "embedding") {
   console.clear();
-  const line = "─".repeat(PANEL_WIDTH - 2);
-  console.log(`\x1b[36m╭${line}╮\x1b[0m`);
-  console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37mMODEL DOWNLOAD & PRELOAD\x1b[0m${" ".repeat(PANEL_WIDTH - 28)}\x1b[36m│\x1b[0m`);
-  const modelSub = `${type.toUpperCase()}: ${modelName.substring(0, 36)}`;
-  console.log(`\x1b[36m│\x1b[0m  \x1b[90m${modelSub.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
-  console.log(`\x1b[36m╰${line}╯\x1b[0m\n`);
+  console.log(`\n  MODEL DOWNLOAD & PRELOAD`);
+  console.log(`  \x1b[90m${type.toUpperCase()}: ${modelName.substring(0, 36)}\x1b[0m\n`);
 
   const spinFrames = ["|", "/", "-", "\\"];
   let spinIdx = 0;
@@ -87,7 +83,15 @@ async function downloadModelWithProgress(modelName, type = "embedding") {
   }
 }
 
+let _quickStatsCache = null;
+let _quickStatsAt = 0;
+const QUICK_STATS_TTL_MS = 3_000;  // 3s — enough for one submenu round-trip
+
 async function getQuickStats() {
+  const now = Date.now();
+  if (_quickStatsCache && (now - _quickStatsAt) < QUICK_STATS_TTL_MS) {
+    return _quickStatsCache;
+  }
   let docCount = 0;
   let chunkCount = 0;
   try {
@@ -106,23 +110,18 @@ async function getQuickStats() {
     factCount = (globalF ? globalF.length : 0) + (projF ? projF.length : 0);
   } catch (e) {}
 
-  return { docCount, chunkCount, factCount };
+  _quickStatsCache = { docCount, chunkCount, factCount };
+  _quickStatsAt = now;
+  return _quickStatsCache;
 }
 
 function printHeaderPanel(title, stats) {
-  const line = "─".repeat(PANEL_WIDTH - 2);
-  console.log(`\x1b[36m╭${line}╮\x1b[0m`);
-  console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37m${title.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
-  const subtitle = `Storage: ${stats.docCount} Docs | ${stats.chunkCount} Chunks | ${stats.factCount} Facts`;
-  console.log(`\x1b[36m│\x1b[0m  \x1b[90m${subtitle.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
-  console.log(`\x1b[36m╰${line}╯\x1b[0m`);
+  console.log(`\n  \x1b[1m\x1b[37m${title}\x1b[0m`);
+  console.log(`  \x1b[90mStorage: ${stats.docCount} Docs | ${stats.chunkCount} Chunks | ${stats.factCount} Facts\x1b[0m`);
 }
 
 function printQuickInfoBox(infoText) {
-  const line = "─".repeat(PANEL_WIDTH - 14);
-  console.log(`\x1b[90m ╭─ INFO ${line}╮\x1b[0m`);
-  console.log(`\x1b[90m │\x1b[0m  \x1b[36m${infoText.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[90m│\x1b[0m`);
-  console.log(`\x1b[90m ╰${"─".repeat(PANEL_WIDTH - 2)}╯\x1b[0m`);
+  console.log(`  \x1b[90mINFO: ${infoText}\x1b[0m\n`);
 }
 
 function padVisible(str, width, align = "left") {
@@ -169,86 +168,42 @@ function wrapText(text, width) {
 function renderPerQueryBreakdownTable(breakdown) {
   if (!breakdown || breakdown.length === 0) return;
 
-  const termCols = (process.stdout && process.stdout.columns) ? process.stdout.columns : 120;
-  const wId = 3;
-  const wRank = 6;
-  const fixedWidths = wId + wRank * 4 + 27; // borders + separators + rank columns
-  const flexWidth = Math.max(50, termCols - fixedWidths);
-
-  const wQ = Math.max(35, Math.floor(flexWidth * 0.52));
-  const wTarget = Math.max(16, Math.floor(flexWidth * 0.24));
-  const wTopHit = Math.max(16, Math.floor(flexWidth * 0.24));
-
-  const totalLineWidth = wId + wQ + wTarget + (wRank * 4) + wTopHit + 25;
-  const headerDashes = "─".repeat(Math.max(10, totalLineWidth - 38));
-
-  const titleLine = ` ┌── PER-QUERY RESULTS BREAKDOWN (${breakdown.length} Queries) ${headerDashes}┐`;
-  console.log(`\x1b[36m${titleLine}\x1b[0m`);
-
-  const headerRow = ` │ ${padVisible("\x1b[1m\x1b[37m#\x1b[0m", wId)} │ ${padVisible("\x1b[1m\x1b[37mQuestion / Query\x1b[0m", wQ)} │ ${padVisible("\x1b[1m\x1b[37mTarget Document\x1b[0m", wTarget)} │ ${padVisible("\x1b[1m\x1b[37mBM25\x1b[0m", wRank)} │ ${padVisible("\x1b[1m\x1b[37mVector\x1b[0m", wRank)} │ ${padVisible("\x1b[1m\x1b[37mRRF\x1b[0m", wRank)} │ ${padVisible("\x1b[1m\x1b[37mRSF\x1b[0m", wRank)} │ ${padVisible("\x1b[1m\x1b[37mTop Retrieved Hit\x1b[0m", wTopHit)} │`;
-  console.log(headerRow);
-
-  const sepLine = ` ├───┼${"─".repeat(wQ + 2)}┼${"─".repeat(wTarget + 2)}┼${"─".repeat(wRank + 2)}┼${"─".repeat(wRank + 2)}┼${"─".repeat(wRank + 2)}┼${"─".repeat(wRank + 2)}┼${"─".repeat(wTopHit + 2)}┤`;
-  console.log(`\x1b[36m${sepLine}\x1b[0m`);
+  console.log(`\n  PER-QUERY RESULTS BREAKDOWN (${breakdown.length} Queries)\n`);
 
   breakdown.forEach((item, itemIdx) => {
-    const qLines = wrapText(item.query, wQ);
-    const targetLines = wrapText(item.target, wTarget);
-    const rawHit = item.topHit || "NONE";
-    const hitLines = wrapText(rawHit, wTopHit);
-
     const isMatch = item.topHit && (item.topHit === item.target || (item.expectedDocIds && item.expectedDocIds.includes(item.topHit)));
 
-    const maxLines = Math.max(qLines.length, targetLines.length, hitLines.length);
-
-    for (let l = 0; l < maxLines; l++) {
-      const idCell = l === 0 ? String(item.id) : "";
-      const qCell = qLines[l] || "";
-      const targetCell = targetLines[l] ? `\x1b[36m${targetLines[l]}\x1b[0m` : "";
-
-      const bm25C = l === 0 ? formatRankColor(item.bm25Rank) : "";
-      const vecC = l === 0 ? formatRankColor(item.vectorRank) : "";
-      const rrfC = l === 0 ? formatRankColor(item.rrfRank) : "";
-      const rsfC = l === 0 ? formatRankColor(item.rsfRank) : "";
-
-      let hitC = "";
-      if (hitLines[l]) {
-        hitC = isMatch ? `\x1b[32m${hitLines[l]}\x1b[0m` : `\x1b[33m${hitLines[l]}\x1b[0m`;
-      }
-
-      const rowStr = ` │ ${padVisible(idCell, wId)} │ ${padVisible(qCell, wQ)} │ ${padVisible(targetCell, wTarget)} │ ${padVisible(bm25C, wRank)} │ ${padVisible(vecC, wRank)} │ ${padVisible(rrfC, wRank)} │ ${padVisible(rsfC, wRank)} │ ${padVisible(hitC, wTopHit)} │`;
-      console.log(rowStr);
-    }
-
+    console.log(`  ${item.id}. ${item.query}`);
+    console.log(`     Target: \x1b[36m${item.target}\x1b[0m`);
+    console.log(`     BM25: ${formatRankColor(item.bm25Rank)}  Vector: ${formatRankColor(item.vectorRank)}  RRF: ${formatRankColor(item.rrfRank)}  RSF: ${formatRankColor(item.rsfRank)}`);
+    console.log(`     Top Hit: ${isMatch ? "\x1b[32m" : "\x1b[33m"}${item.topHit || "NONE"}\x1b[0m`);
+    
     if (itemIdx < breakdown.length - 1) {
-      console.log(`\x1b[90m${sepLine}\x1b[0m`);
+      console.log("");
     }
   });
 
-  const bottomLine = ` └───┴${"─".repeat(wQ + 2)}┴${"─".repeat(wTarget + 2)}┴${"─".repeat(wRank + 2)}┴${"─".repeat(wRank + 2)}┴${"─".repeat(wRank + 2)}┴${"─".repeat(wRank + 2)}┴${"─".repeat(wTopHit + 2)}┘`;
-  console.log(`\x1b[36m${bottomLine}\x1b[0m\n`);
+  console.log("");
 }
 
 function renderBenchmarkResultsTable(results) {
-  const line = "─".repeat(PANEL_WIDTH - 2);
   const isSmoke = results && results.mode === "smoke";
   const title = isSmoke ? "SMOKE BENCHMARK RESULTS" : "SEARCH QUALITY BENCHMARK RESULTS";
-  console.log(`\x1b[36m╭${line}╮\x1b[0m`);
-  console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37m${title.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
   const nQueries = results && results.bm25 ? results.bm25.n : 0;
   const subtitle = isSmoke
     ? `Smoke: ${nQueries} queries (stats skipped, fast iteration)`
     : `Evaluated over ${nQueries} challenging cross-lingual queries`;
-  console.log(`\x1b[36m│\x1b[0m  \x1b[90m${subtitle.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
-  console.log(`\x1b[36m╰${line}╯\x1b[0m\n`);
+
+  console.log(`\n  \x1b[1m\x1b[37m${title}\x1b[0m`);
+  console.log(`  \x1b[90m${subtitle}\x1b[0m\n`);
 
   if (results && results.breakdown) {
     renderPerQueryBreakdownTable(results.breakdown);
   }
 
-  console.log(`\x1b[36m ┌── METRIC COMPARISON BY SEARCH STRATEGY ─────────────┐\x1b[0m`);
-  console.log(` \x1b[36m│\x1b[0m \x1b[1m\x1b[37mStrategy            MRR@5     Recall@5     NDCG@5   \x1b[0m\x1b[36m│\x1b[0m`);
-  console.log(` \x1b[36m│\x1b[0m \x1b[90m────────────────────────────────────────────────────\x1b[0m\x1b[36m│\x1b[0m`);
+  console.log(`\n  METRIC COMPARISON BY SEARCH STRATEGY\n`);
+  console.log(`  Strategy            MRR@5     Recall@5     NDCG@5`);
+  console.log(`  ${"─".repeat(50)}`);
 
   const strategies = [
     { name: "BM25 Search Only", data: results.bm25, key: "bm25" },
@@ -257,8 +212,6 @@ function renderBenchmarkResultsTable(results) {
     { name: "Hybrid RSF (Score)", data: results.hybridRsf, key: "hybrid_rsf" },
   ];
 
-  // Backward-compat field access: new evaluator returns {mrr, recall, ndcg, n},
-  // older shape was {mrrAtK, recallAtK, ndcgAtK}. Support both.
   const getMrr = (d) => (d ? (d.mrr ?? d.mrrAtK ?? 0) : 0);
   const getRecall = (d) => (d ? (d.recall ?? d.recallAtK ?? 0) : 0);
   const getNdcg = (d) => (d ? (d.ndcg ?? d.ndcgAtK ?? 0) : 0);
@@ -270,17 +223,14 @@ function renderBenchmarkResultsTable(results) {
     const recallStr = recallPct.padEnd(13);
     const ndcgStr = getNdcg(s.data).toFixed(4);
 
-    // Highlight the dynamically-determined winner instead of hardcoding "Hybrid".
     const isBest = results.winner && s.key === results.winner;
     const color = isBest ? "\x1b[1m\x1b[36m" : "\x1b[37m";
 
-    console.log(` \x1b[36m│\x1b[0m ${color}${nameStr}${mrrStr}${recallStr}${ndcgStr}\x1b[0m \x1b[36m│\x1b[0m`);
+    console.log(`  ${color}${nameStr}${mrrStr}${recallStr}${ndcgStr}\x1b[0m`);
   });
 
-  console.log(`\x1b[36m └──${"─".repeat(PANEL_WIDTH - 4)}┘\x1b[0m\n`);
+  console.log("");
 
-  // Winner block: previously misplaced inside selectBlockMenu where `results` was
-  // out of scope (ReferenceError). Now lives here where `results` is the param.
   if (results && results.winner) {
     const winnerLabel =
       results.winner === "hybrid_rsf" ? "RSF"
@@ -292,22 +242,14 @@ function renderBenchmarkResultsTable(results) {
     const sigNote = p
       ? (p.p < 0.05 ? ` (RRF vs RSF p=${p.p}, significant)` : ` (RRF vs RSF p=${p.p}, NOT significant at N=${p.n})`)
       : (results.mode === "smoke" ? " (smoke: stats skipped)" : "");
-    console.log(` \x1b[90m Winner by MRR: \x1b[1m\x1b[36m${winnerLabel}\x1b[0m\x1b[90m${sigNote}\x1b[0m\n`);
+    console.log(`  \x1b[90m Winner by MRR: \x1b[1m\x1b[36m${winnerLabel}\x1b[0m\x1b[90m${sigNote}\x1b[0m\n`);
   }
 }
 
-function selectBlockMenu({ title, stats, blocks, initialIndex = 0 }) {
+function selectCategoryMenu({ title, stats, categories, initialIndex = 0 }) {
   return new Promise((resolve) => {
-    const allItems = [];
-    blocks.forEach((block) => {
-      block.items.forEach((item) => {
-        allItems.push({ ...item, groupTitle: block.title });
-      });
-    });
+    let activeIndex = Math.min(Math.max(0, initialIndex), categories.length - 1);
 
-    let activeIndex = Math.min(Math.max(0, initialIndex), allItems.length - 1);
-
-    readline.emitKeypressEvents(process.stdin);
     if (process.stdin.isTTY) {
       process.stdin.setRawMode(true);
     }
@@ -315,42 +257,23 @@ function selectBlockMenu({ title, stats, blocks, initialIndex = 0 }) {
 
     function render() {
       console.clear();
-      printHeaderPanel(title, stats);
-      console.log(" \x1b[90mControls: ↑ / ↓ - Navigate   [ENTER] - Select   [BACKSPACE] - Back\x1b[0m\n");
+      console.log(`\n  ${title}\n`);
+      console.log(`  Storage: ${stats.docCount} Docs | ${stats.chunkCount} Chunks | ${stats.factCount} Facts\n`);
+      console.log("  Controls: ↑ / ↓ - Navigate   [ENTER] - Select   [BACKSPACE] - Exit\n");
 
-      let currentItemGlobalIndex = 0;
-
-      blocks.forEach((block) => {
-        const titleStr = block.title.toUpperCase();
-        const line = "─".repeat(Math.max(2, PANEL_WIDTH - titleStr.length - 7));
-        console.log(`\x1b[36m ┌── ${titleStr} ${line}┐\x1b[0m`);
-
-        block.items.forEach((item) => {
-          const isSelected = currentItemGlobalIndex === activeIndex;
-          const pointer = isSelected ? "\x1b[36m > " : "   ";
-
-          const nameStr = item.label;
-          const dotsCount = Math.max(2, 32 - nameStr.length);
-          const dots = "\x1b[90m" + ".".repeat(dotsCount) + "\x1b[0m";
-          const badgeStr = item.badge ? `\x1b[33m[${item.badge}]\x1b[0m` : "";
-
-          let lineContent = item.badge ? `${nameStr} ${dots} ${badgeStr}` : nameStr;
-
-          if (isSelected) {
-            console.log(` \x1b[36m│\x1b[0m${pointer}\x1b[1m\x1b[36m${lineContent}\x1b[0m`);
-          } else {
-            console.log(` \x1b[36m│\x1b[0m${pointer}${lineContent}`);
-          }
-
-          currentItemGlobalIndex++;
-        });
-
-console.log(`\x1b[36m └──${"─".repeat(PANEL_WIDTH - 4)}┘\x1b[0m\n`);
+      categories.forEach((cat, idx) => {
+        const isSelected = idx === activeIndex;
+        const pointer = isSelected ? "  > " : "    ";
+        const label = isSelected ? `\x1b[1m\x1b[36m${cat.label}\x1b[0m` : cat.label;
+        const hint = cat.hint ? ` \x1b[90m(${cat.hint})\x1b[0m` : "";
+        console.log(`${pointer}${label}${hint}`);
       });
 
-      const activeItem = allItems[activeIndex];
-      if (activeItem && activeItem.info) {
-        printQuickInfoBox(activeItem.info);
+      console.log("");
+
+      const activeCat = categories[activeIndex];
+      if (activeCat && activeCat.info) {
+        console.log(`  \x1b[90m${activeCat.info}\x1b[0m\n`);
       }
     }
 
@@ -363,14 +286,14 @@ console.log(`\x1b[36m └──${"─".repeat(PANEL_WIDTH - 4)}┘\x1b[0m\n`);
         process.exit(0);
       }
       if (key.name === "up") {
-        activeIndex = (activeIndex - 1 + allItems.length) % allItems.length;
+        activeIndex = (activeIndex - 1 + categories.length) % categories.length;
         render();
       } else if (key.name === "down") {
-        activeIndex = (activeIndex + 1) % allItems.length;
+        activeIndex = (activeIndex + 1) % categories.length;
         render();
       } else if (key.name === "return") {
         cleanup();
-        resolve({ action: "select", index: activeIndex, value: allItems[activeIndex].value });
+        resolve({ action: "select", index: activeIndex, value: categories[activeIndex].value });
       } else if (key.name === "backspace" || key.name === "escape" || key.name === "delete") {
         cleanup();
         resolve({ action: "back" });
@@ -393,7 +316,6 @@ function selectSimpleMenu({ title, subtitle = "", items, initialIndex = 0 }) {
   return new Promise((resolve) => {
     let index = Math.min(Math.max(0, initialIndex), items.length - 1);
 
-    readline.emitKeypressEvents(process.stdin);
     if (process.stdin.isTTY) {
       process.stdin.setRawMode(true);
     }
@@ -401,28 +323,26 @@ function selectSimpleMenu({ title, subtitle = "", items, initialIndex = 0 }) {
 
     function render() {
       console.clear();
-      const line = "─".repeat(PANEL_WIDTH - 2);
-      console.log(`\x1b[36m╭${line}╮\x1b[0m`);
-      console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37m${title.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
+      console.log(`\n  ${title}`);
       if (subtitle) {
-        console.log(`\x1b[36m│\x1b[0m  \x1b[90m${subtitle.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
+        console.log(`  \x1b[90m${subtitle}\x1b[0m`);
       }
-      console.log(`\x1b[36m╰${line}╯\x1b[0m`);
-      console.log(" \x1b[90mControls: ↑ / ↓ - Navigate   [ENTER] - Select   [BACKSPACE] - Back\x1b[0m\n");
+      console.log("\n  Controls: ↑ / ↓ - Navigate   [ENTER] - Select   [BACKSPACE] - Back\n");
 
       items.forEach((item, idx) => {
         const isSelected = idx === index;
-        const pointer = isSelected ? "\x1b[36m > " : "   ";
+        const pointer = isSelected ? "  > " : "    ";
         const label = isSelected ? `\x1b[1m\x1b[36m${item.label}\x1b[0m` : item.label;
         const badge = item.badge ? ` \x1b[33m[${item.badge}]\x1b[0m` : "";
         const hint = item.hint ? ` \x1b[90m(${item.hint})\x1b[0m` : "";
         console.log(`${pointer}${label}${badge}${hint}`);
       });
-      console.log("\n");
+
+      console.log("");
 
       const activeItem = items[index];
       if (activeItem && activeItem.info) {
-        printQuickInfoBox(activeItem.info);
+        console.log(`  \x1b[90m${activeItem.info}\x1b[0m\n`);
       }
     }
 
@@ -465,7 +385,6 @@ function adjustAlphaMenu(initialAlpha) {
   return new Promise((resolve) => {
     let alpha = initialAlpha;
 
-    readline.emitKeypressEvents(process.stdin);
     if (process.stdin.isTTY) {
       process.stdin.setRawMode(true);
     }
@@ -473,12 +392,9 @@ function adjustAlphaMenu(initialAlpha) {
 
     function render() {
       console.clear();
-      const line = "─".repeat(PANEL_WIDTH - 2);
-      console.log(`\x1b[36m╭${line}╮\x1b[0m`);
-      console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37mRSF ALPHA WEIGHT BALANCER\x1b[0m${" ".repeat(PANEL_WIDTH - 30)}\x1b[36m│\x1b[0m`);
-      console.log(`\x1b[36m│\x1b[0m  \x1b[90mAdjust Vector Similarity vs BM25 Score Weight\x1b[0m${" ".repeat(PANEL_WIDTH - 49)}\x1b[36m│\x1b[0m`);
-      console.log(`\x1b[36m╰${line}╯\x1b[0m`);
-      console.log(" \x1b[90mControls: ← / → or ↑ / ↓ - Adjust (5% step)   [ENTER] - Save   [BACKSPACE] - Cancel\x1b[0m\n");
+      console.log(`\n  RSF ALPHA WEIGHT BALANCER`);
+      console.log(`  \x1b[90mAdjust Vector Similarity vs BM25 Score Weight\x1b[0m`);
+      console.log("\n  Controls: ← / → or ↑ / ↓ - Adjust (5% step)   [ENTER] - Save   [BACKSPACE] - Cancel\n");
 
       const semPct = Math.round(alpha * 100);
       const lexPct = 100 - semPct;
@@ -542,7 +458,6 @@ function readTextInput(promptText, defaultValue = "") {
   return new Promise((resolve) => {
     let text = defaultValue;
 
-    readline.emitKeypressEvents(process.stdin);
     if (process.stdin.isTTY) {
       process.stdin.setRawMode(true);
     }
@@ -550,11 +465,8 @@ function readTextInput(promptText, defaultValue = "") {
 
     function render() {
       console.clear();
-      const line = "─".repeat(PANEL_WIDTH - 2);
-      console.log(`\x1b[36m╭${line}╮\x1b[0m`);
-      console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37mINPUT: ${promptText.toUpperCase()}\x1b[0m${" ".repeat(Math.max(0, PANEL_WIDTH - 11 - promptText.length))}\x1b[36m│\x1b[0m`);
-      console.log(`\x1b[36m╰${line}╯\x1b[0m`);
-      console.log(" \x1b[90mControls: Type text   [ENTER] - Submit   [BACKSPACE] - Delete / Cancel\x1b[0m\n");
+      console.log(`\n  INPUT: ${promptText.toUpperCase()}`);
+      console.log("  Controls: Type text   [ENTER] - Submit   [BACKSPACE] - Delete / Cancel\n");
       console.log(`  > \x1b[36m${text}\x1b[0m_\n`);
     }
 
@@ -601,7 +513,6 @@ function readTextInput(promptText, defaultValue = "") {
 function waitForEnter() {
   return new Promise((resolve) => {
     console.log("\n \x1b[90mPress [ENTER] or [BACKSPACE] to return to menu...\x1b[0m");
-    readline.emitKeypressEvents(process.stdin);
     if (process.stdin.isTTY) {
       process.stdin.setRawMode(true);
     }
@@ -633,11 +544,65 @@ function waitForEnter() {
 
 function promptText(question) {
   return new Promise((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    rl.question(`\n  ${question}\n  > `, (answer) => {
-      rl.close();
-      resolve(answer.trim());
-    });
+    let input = "";
+    let cursorPos = 0;
+
+    console.log(`\n  ${question}\n  > `);
+
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(true);
+    }
+    process.stdin.resume();
+
+    function render() {
+      process.stdout.write(`\r  > ${input}\x1b[K`);
+      process.stdout.write(`\r  > ${input.substring(0, cursorPos)}`);
+    }
+
+    function onKeypress(str, key) {
+      if (!key) return;
+      if (key.ctrl && key.name === "c") {
+        cleanup();
+        process.exit(0);
+      }
+      if (key.name === "return") {
+        cleanup();
+        resolve(input.trim());
+      } else if (key.name === "backspace") {
+        if (cursorPos > 0) {
+          input = input.substring(0, cursorPos - 1) + input.substring(cursorPos);
+          cursorPos--;
+          render();
+        }
+      } else if (key.name === "delete") {
+        if (cursorPos < input.length) {
+          input = input.substring(0, cursorPos) + input.substring(cursorPos + 1);
+          render();
+        }
+      } else if (key.name === "left") {
+        if (cursorPos > 0) { cursorPos--; render(); }
+      } else if (key.name === "right") {
+        if (cursorPos < input.length) { cursorPos++; render(); }
+      } else if (key.name === "home") {
+        cursorPos = 0; render();
+      } else if (key.name === "end") {
+        cursorPos = input.length; render();
+      } else if (str && !key.ctrl && !key.meta) {
+        input = input.substring(0, cursorPos) + str + input.substring(cursorPos);
+        cursorPos += str.length;
+        render();
+      }
+    }
+
+    function cleanup() {
+      process.stdin.removeListener("keypress", onKeypress);
+      if (process.stdin.isTTY) {
+        process.stdin.setRawMode(false);
+      }
+      process.stdin.pause();
+    }
+
+    process.stdin.on("keypress", onKeypress);
   });
 }
 
@@ -749,197 +714,58 @@ export async function runCli() {
     return;
   }
 
+  readline.emitKeypressEvents(process.stdin);
+
   let running = true;
-  let selectedIndex = 0;
+  let selectedCategory = 0;
 
   while (running) {
-    const config = getConfig();
+    let config = getConfig();
     const stats = await getQuickStats();
     const semPct = Math.round(config.alpha * 100);
     const lexPct = 100 - semPct;
 
-    const mainBlocks = [
+    const categories = [
       {
-        title: "Engine & Hybrid Search Settings",
-        items: [
-          {
-            label: "Fusion Algorithm",
-            badge: config.fusionAlgorithm.toUpperCase(),
-            value: "algo",
-            info: "Choose how vector similarity and BM25 text ranks are fused",
-          },
-          {
-            label: "RSF Alpha Balance",
-            badge: `${semPct}% Sem / ${lexPct}% Lex`,
-            value: "alpha",
-            info: `Current Alpha: ${config.alpha.toFixed(2)}. Adjust ratio of Vector vs BM25 Keyword score`,
-          },
-          {
-            label: "Embedding Model",
-            badge: config.embeddingModel.split("/").pop(),
-            value: "embedding",
-            info: `Model: ${config.embeddingModel}. ONNX Feature Extraction via @huggingface/transformers`,
-          },
-          {
-            label: "Reranker Model",
-            badge: config.rerankerEnabled ? config.rerankerModel.split("/").pop() : "DISABLED",
-            value: "reranker",
-            info: config.rerankerEnabled ? `Reranker active: ${config.rerankerModel}` : "Optional Cross-Encoder re-ranking pass",
-          },
-          {
-            label: "Vector Batch Size",
-            badge: `${config.batchSize || 12} Chunks`,
-            value: "batch_size",
-            info: `Ingestion batch size: ${config.batchSize || 12} micro-chunks per ONNX pass`,
-          },
-          {
-            label: "GPU Attention Budget",
-            badge: `${((config.gpuAttentionBudget || 2000000) / 1000000).toFixed(1)}M Units`,
-            value: "gpu_budget",
-            info: `Micro-batch tensor budget: ${((config.gpuAttentionBudget || 2000000) / 1000000).toFixed(1)}M quadratic units (controls max peak VRAM usage on GPU)`,
-          },
-          {
-            label: "CPU WASM Threads",
-            badge: config.onnxThreads > 0 ? `${config.onnxThreads} Threads` : "AUTO (CPU Cores)",
-            value: "onnx_threads",
-            info: config.onnxThreads > 0 ? `ONNX execution threads manually set to ${config.onnxThreads}` : "Auto-detect optimal physical CPU threads",
-          },
-          {
-            label: "Execution Hardware",
-            badge: (config.executionDevice || "cpu").toUpperCase() === "WEBGPU" || (config.executionDevice || "cpu").toUpperCase() === "GPU" ? "\x1b[31mGPU (EXPERIMENTAL)\x1b[0m" : "CPU (AVX2)",
-            value: "execution_device",
-            info: config.executionDevice === "webgpu" || config.executionDevice === "gpu"
-              ? "⚠️ EXPERIMENTAL: ONNX DirectML GPU execution (high VRAM/padding overhead, CPU AVX2 recommended)"
-              : "CPU inference via AVX2 / WASM SIMD (Recommended for stability & speed)",
-          },
-        ],
+        label: "ENGINE & HYBRID SEARCH SETTINGS",
+        value: "engine",
+        hint: `${config.fusionAlgorithm.toUpperCase()} | ${semPct}% Sem / ${lexPct}% Lex | ${config.embeddingModel.split("/").pop()}`,
+        info: "Configure search algorithm, embedding models, batch sizes, and hardware",
       },
       {
-        title: "Knowledge Base & Storage Management",
-        items: [
-          {
-            label: "[NOTEBOOK] Layer 1 Facts",
-            badge: `${stats.factCount} Facts Saved`,
-            value: "notebook",
-            info: "Inspect & delete durable user identity facts (global & project)",
-          },
-          {
-            label: "[RAG DOCS] Layer 2 RAG Base",
-            badge: `${stats.docCount} Docs / ${stats.chunkCount} Chunks`,
-            value: "rag_docs",
-            info: "Inspect ingested Markdown/code docs & delete chunks from SQLite",
-          },
-          {
-            label: "[SNAPSHOT EXPORT] Export RAG Base Snapshot",
-            value: "export_snapshot",
-            info: "Export full RAG database, vectors & blobs into a snapshot file (.json or .json.gz)",
-          },
-          {
-            label: "[SNAPSHOT IMPORT] Import RAG Base Snapshot",
-            value: "import_snapshot",
-            info: "Import RAG database, vectors & blobs from a snapshot file (.json or .json.gz)",
-          },
-          {
-            label: "[MODELS] Manage & Purge ML Model Cache",
-            value: "manage_models",
-            info: "Inspect cached ONNX models on disk, check status (Ready / Partial / Not Downloaded) & delete models to free disk space",
-          },
-          {
-            label: "[HARD RESET] Purge RAG Base & Blob Storage",
-            value: "hard_reset",
-            info: "Permanently delete all documents, sections, vectors, FTS indexes, and blobs",
-          },
-        ],
+        label: "KNOWLEDGE BASE & STORAGE MANAGEMENT",
+        value: "storage",
+        hint: `${stats.docCount} Docs | ${stats.chunkCount} Chunks | ${stats.factCount} Facts`,
+        info: "Manage facts, RAG documents, snapshots, models, and database",
       },
       {
-        title: "Cloud Synchronization & Turso",
-        items: [
-          {
-            label: "[CLOUD] Login to Turso Cloud",
-            value: "cloud_login",
-            info: "Browser OAuth, account API token, database URL+token, or import from environment (.env) — token/env methods work headless in Docker, Google Jules and VPS",
-          },
-          {
-            label: "[CLOUD] Logout",
-            value: "cloud_logout",
-            info: "Sign out, purge encrypted secrets, and revert mode to only-local",
-          },
-          {
-            label: "[API KEY] Set / Replace Account API Token",
-            value: "cloud_api_set",
-            info: "Paste a Turso account API token to authorize headless (Docker, Google Jules, VPS) — validated and persisted",
-          },
-          {
-            label: "[API KEY] Remove Account API Token",
-            value: "cloud_api_clear",
-            info: "Delete the stored API token; the resolved database session is kept",
-          },
-          {
-            label: "Operational Mode",
-            badge: config.mode.toUpperCase(),
-            value: "cloud_mode",
-            info: "Choose Operational Mode: only-local | only-cloud | hybrid-sync",
-          },
-          {
-            label: "Conflict Strategy",
-            badge: (config.conflictStrategy || "merge").toUpperCase(),
-            value: "conflict_strategy",
-            info: "How hybrid-sync resolves differing local vs cloud stores: merge | cloud-wins | local-wins",
-          },
-        ],
+        label: "CLOUD SYNCHRONIZATION & TURSO",
+        value: "cloud",
+        hint: config.mode.toUpperCase(),
+        info: "Login, logout, API keys, operational mode, and conflict strategy",
       },
       {
-        title: "Global Prompt & Integration Management",
-        items: [
-          {
-            label: "[PROMPT ENABLE] Enable Global Prompt (Antigravity / Codex / Claude)",
-            value: "enable_prompt",
-            info: "Inject memory instructions into ~/.gemini/config/AGENTS.md, ~/.codex/AGENTS.md, ~/.claude/CLAUDE.md",
-          },
-          {
-            label: "[PROMPT DISABLE] Disable Global Prompt",
-            value: "disable_prompt",
-            info: "Remove memory instructions from global AGENTS.md / CLAUDE.md files",
-          },
-        ],
+        label: "GLOBAL PROMPT & INTEGRATION MANAGEMENT",
+        value: "prompt",
+        info: "Enable or disable memory instructions in client configs",
       },
       {
-        title: "Diagnostics & System Actions",
-        items: [
-          {
-            label: "[BENCHMARK] Run Search Quality Benchmark",
-            value: "benchmark",
-            info: "Choose Quick Smoke (9 queries, ~7s) or Full (21 queries + stats, ~32s)",
-          },
-          {
-            label: "[SEARCH] Run Search Verification Query",
-            value: "test",
-            info: "Execute hybrid search query and display result hit scores",
-          },
-          {
-            label: "[CACHE] Clear Benchmark Corpus Cache",
-            value: "clear_cache",
-            info: "Delete cached GitHub README files used by benchmarks",
-          },
-          {
-            label: "[RESET] Reset Config to Factory Defaults",
-            value: "reset",
-            info: "Reset RSF alpha to 50/50 and restore factory default config",
-          },
-          {
-            label: "[EXIT] Exit CLI Menu",
-            value: "exit",
-            info: "Save configuration and exit to terminal",
-          },
-        ],
+        label: "DIAGNOSTICS & SYSTEM ACTIONS",
+        value: "diagnostics",
+        info: "Benchmarks, search verification, cache, and config reset",
+      },
+      {
+        label: "EXIT",
+        value: "exit",
+        info: "Save configuration and exit to terminal",
       },
     ];
 
-    const res = await selectBlockMenu({
+    const res = await selectCategoryMenu({
       title: "MEMORY PLUGIN RAG ENGINE CONTROL PANEL",
       stats,
-      blocks: mainBlocks,
-      initialIndex: selectedIndex,
+      categories,
+      initialIndex: selectedCategory,
     });
 
     if (res.action === "back") {
@@ -949,10 +775,237 @@ export async function runCli() {
       break;
     }
 
-    selectedIndex = res.index;
+    selectedCategory = res.index;
 
-    switch (res.value) {
-      case "algo": {
+    if (res.value === "exit") {
+      running = false;
+      console.clear();
+      console.log("Exiting CLI. Configuration saved.");
+      break;
+    }
+
+    let categoryRunning = true;
+    let categoryItemIndex = 0;
+
+    while (categoryRunning) {
+      config = getConfig();
+      const catRes = await showCategorySubmenu(res.value, config, stats, categoryItemIndex);
+      
+      if (catRes.action === "back") {
+        categoryRunning = false;
+        break;
+      }
+      
+      categoryItemIndex = catRes.index;
+    }
+  }
+}
+
+async function showCategorySubmenu(category, config, stats, initialIndex = 0) {
+  const semPct = Math.round(config.alpha * 100);
+  const lexPct = 100 - semPct;
+
+  let items = [];
+
+  switch (category) {
+    case "engine":
+      items = [
+        {
+          label: "Fusion Algorithm",
+          badge: config.fusionAlgorithm.toUpperCase(),
+          value: "algo",
+          info: "Choose how vector similarity and BM25 text ranks are fused",
+        },
+        {
+          label: "RSF Alpha Balance",
+          badge: `${semPct}% Sem / ${lexPct}% Lex`,
+          value: "alpha",
+          info: `Current Alpha: ${config.alpha.toFixed(2)}. Adjust ratio of Vector vs BM25 Keyword score`,
+        },
+        {
+          label: "Embedding Model",
+          badge: config.embeddingModel.split("/").pop(),
+          value: "embedding",
+          info: `Model: ${config.embeddingModel}. ONNX Feature Extraction via @huggingface/transformers`,
+        },
+        {
+          label: "Reranker Model",
+          badge: config.rerankerEnabled ? config.rerankerModel.split("/").pop() : "DISABLED",
+          value: "reranker",
+          info: config.rerankerEnabled ? `Reranker active: ${config.rerankerModel}` : "Optional Cross-Encoder re-ranking pass",
+        },
+        {
+          label: "Vector Batch Size",
+          badge: `${config.batchSize || 12} Chunks`,
+          value: "batch_size",
+          info: `Ingestion batch size: ${config.batchSize || 12} micro-chunks per ONNX pass`,
+        },
+        {
+          label: "GPU Attention Budget",
+          badge: `${((config.gpuAttentionBudget || 2000000) / 1000000).toFixed(1)}M Units`,
+          value: "gpu_budget",
+          info: `Micro-batch tensor budget: ${((config.gpuAttentionBudget || 2000000) / 1000000).toFixed(1)}M quadratic units (controls max peak VRAM usage on GPU)`,
+        },
+        {
+          label: "CPU WASM Threads",
+          badge: config.onnxThreads > 0 ? `${config.onnxThreads} Threads` : "AUTO (CPU Cores)",
+          value: "onnx_threads",
+          info: config.onnxThreads > 0 ? `ONNX execution threads manually set to ${config.onnxThreads}` : "Auto-detect optimal physical CPU threads",
+        },
+        {
+          label: "Execution Hardware",
+          badge: (config.executionDevice || "cpu").toUpperCase() === "WEBGPU" || (config.executionDevice || "cpu").toUpperCase() === "GPU" ? "\x1b[31mGPU (EXPERIMENTAL)\x1b[0m" : "CPU (AVX2)",
+          value: "execution_device",
+          info: config.executionDevice === "webgpu" || config.executionDevice === "gpu"
+            ? "⚠️ EXPERIMENTAL: ONNX DirectML GPU execution (high VRAM/padding overhead, CPU AVX2 recommended)"
+            : "CPU inference via AVX2 / WASM SIMD (Recommended for stability & speed)",
+        },
+      ];
+      break;
+
+    case "storage":
+      items = [
+        {
+          label: "[NOTEBOOK] Layer 1 Facts",
+          badge: `${stats.factCount} Facts Saved`,
+          value: "notebook",
+          info: "Inspect & delete durable user identity facts (global & project)",
+        },
+        {
+          label: "[RAG DOCS] Layer 2 RAG Base",
+          badge: `${stats.docCount} Docs / ${stats.chunkCount} Chunks`,
+          value: "rag_docs",
+          info: "Inspect ingested Markdown/code docs & delete chunks from SQLite",
+        },
+        {
+          label: "[SNAPSHOT EXPORT] Export RAG Base Snapshot",
+          value: "export_snapshot",
+          info: "Export full RAG database, vectors & blobs into a snapshot file (.json or .json.gz)",
+        },
+        {
+          label: "[SNAPSHOT IMPORT] Import RAG Base Snapshot",
+          value: "import_snapshot",
+          info: "Import RAG database, vectors & blobs from a snapshot file (.json or .json.gz)",
+        },
+        {
+          label: "[MODELS] Manage & Purge ML Model Cache",
+          value: "manage_models",
+          info: "Inspect cached ONNX models on disk, check status (Ready / Partial / Not Downloaded) & delete models to free disk space",
+        },
+        {
+          label: "[HARD RESET] Purge RAG Base & Blob Storage",
+          value: "hard_reset",
+          info: "Permanently delete all documents, sections, vectors, FTS indexes, and blobs",
+        },
+      ];
+      break;
+
+    case "cloud":
+      items = [
+        {
+          label: "[CLOUD] Login to Turso Cloud",
+          value: "cloud_login",
+          info: "Browser OAuth, account API token, database URL+token, or import from environment (.env) — token/env methods work headless in Docker, Google Jules and VPS",
+        },
+        {
+          label: "[CLOUD] Logout",
+          value: "cloud_logout",
+          info: "Sign out, purge encrypted secrets, and revert mode to only-local",
+        },
+        {
+          label: "[API KEY] Set / Replace Account API Token",
+          value: "cloud_api_set",
+          info: "Paste a Turso account API token to authorize headless (Docker, Google Jules, VPS) — validated and persisted",
+        },
+        {
+          label: "[API KEY] Remove Account API Token",
+          value: "cloud_api_clear",
+          info: "Delete the stored API token; the resolved database session is kept",
+        },
+        {
+          label: "Operational Mode",
+          badge: config.mode.toUpperCase(),
+          value: "cloud_mode",
+          info: "Choose Operational Mode: only-local | only-cloud | hybrid-sync",
+        },
+        {
+          label: "Conflict Strategy",
+          badge: (config.conflictStrategy || "merge").toUpperCase(),
+          value: "conflict_strategy",
+          info: "How hybrid-sync resolves differing local vs cloud stores: merge | cloud-wins | local-wins",
+        },
+      ];
+      break;
+
+    case "prompt":
+      items = [
+        {
+          label: "[PROMPT ENABLE] Enable Global Prompt (Antigravity / Codex / Claude)",
+          value: "enable_prompt",
+          info: "Inject memory instructions into ~/.gemini/config/AGENTS.md, ~/.codex/AGENTS.md, ~/.claude/CLAUDE.md",
+        },
+        {
+          label: "[PROMPT DISABLE] Disable Global Prompt",
+          value: "disable_prompt",
+          info: "Remove memory instructions from global AGENTS.md / CLAUDE.md files",
+        },
+      ];
+      break;
+
+    case "diagnostics":
+      items = [
+        {
+          label: "[BENCHMARK] Run Search Quality Benchmark",
+          value: "benchmark",
+          info: "Choose Quick Smoke (9 queries, ~7s) or Full (21 queries + stats, ~32s)",
+        },
+        {
+          label: "[SEARCH] Run Search Verification Query",
+          value: "test",
+          info: "Execute hybrid search query and display result hit scores",
+        },
+        {
+          label: "[CACHE] Clear Benchmark Corpus Cache",
+          value: "clear_cache",
+          info: "Delete cached GitHub README files used by benchmarks",
+        },
+        {
+          label: "[RESET] Reset Config to Factory Defaults",
+          value: "reset",
+          info: "Reset RSF alpha to 50/50 and restore factory default config",
+        },
+      ];
+      break;
+  }
+
+  items.push({ label: "< Back to Main Menu", value: "back" });
+
+  const titles = {
+    engine: "ENGINE & HYBRID SEARCH SETTINGS",
+    storage: "KNOWLEDGE BASE & STORAGE MANAGEMENT",
+    cloud: "CLOUD SYNCHRONIZATION & TURSO",
+    prompt: "GLOBAL PROMPT & INTEGRATION MANAGEMENT",
+    diagnostics: "DIAGNOSTICS & SYSTEM ACTIONS",
+  };
+
+  const subRes = await selectSimpleMenu({
+    title: titles[category],
+    subtitle: "↑ / ↓ Navigate  •  ENTER Select  •  BACKSPACE Back",
+    items,
+    initialIndex,
+  });
+
+  if (subRes.action === "back" || subRes.value === "back") {
+    return { action: "back" };
+  }
+
+  await handleSubmenuItem(subRes.value, config, stats);
+  return { action: "select", index: subRes.index };
+}
+
+async function handleSubmenuItem(value, config, stats) {
+  switch (value) {
+    case "algo": {
         const algoItems = [
           { label: "RSF (Relative Score Fusion)", value: "rsf", info: "Normalized Score Scaling (Recommended)" },
           { label: "RRF (Reciprocal Rank Fusion)", value: "rrf", info: "Rank-based Fusion (1/(k + rank))" },
@@ -1164,11 +1217,8 @@ export async function runCli() {
 
               if (!factList || factList.length === 0) {
                 console.clear();
-                const line = "─".repeat(PANEL_WIDTH - 2);
-                console.log(`\x1b[36m╭${line}╮\x1b[0m`);
-                console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37mNOTEBOOK FACTS: STORE EMPTY\x1b[0m${" ".repeat(PANEL_WIDTH - 30)}\x1b[36m│\x1b[0m`);
-                console.log(`\x1b[36m╰${line}╯\x1b[0m`);
-                console.log(`\n  [*] Notebook store [${key}] has no saved facts.\n`);
+                console.log(`\n  \x1b[1m\x1b[37mNOTEBOOK FACTS: STORE EMPTY\x1b[0m`);
+                console.log(`  [*] Notebook store [${key}] has no saved facts.\n`);
                 await waitForEnter();
                 return;
               }
@@ -1282,11 +1332,8 @@ export async function runCli() {
             while (storeRunning) {
               if (!stores.length) {
                 console.clear();
-                const line = "─".repeat(PANEL_WIDTH - 2);
-                console.log(`\x1b[36m╭${line}╮\x1b[0m`);
-                console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37mPROJECT STORES: NONE FOUND\x1b[0m${" ".repeat(PANEL_WIDTH - 32)}\x1b[36m│\x1b[0m`);
-                console.log(`\x1b[36m╰${line}╯\x1b[0m`);
-                console.log("\n  [*] No project memory stores found.\n");
+                console.log(`\n  \x1b[1m\x1b[37mPROJECT STORES: NONE FOUND\x1b[0m`);
+                console.log("  [*] No project memory stores found.\n");
                 await waitForEnter();
                 storeRunning = false;
                 break;
@@ -1368,10 +1415,7 @@ export async function runCli() {
 
           if (!docs || docs.length === 0) {
             console.clear();
-            const line = "─".repeat(PANEL_WIDTH - 2);
-            console.log(`\x1b[36m╭${line}╮\x1b[0m`);
-            console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37mRAG DOCUMENTS: BASE EMPTY\x1b[0m${" ".repeat(PANEL_WIDTH - 28)}\x1b[36m│\x1b[0m`);
-            console.log(`\x1b[36m╰${line}╯\x1b[0m`);
+            console.log(`\n  \x1b[1m\x1b[37mRAG DOCUMENTS: BASE EMPTY\x1b[0m`);
             console.log("\n  [*] RAG Knowledge Base is empty. No documents ingested.\n");
             await waitForEnter();
             docRunning = false;
@@ -1431,10 +1475,7 @@ export async function runCli() {
             const sampleSections = await db.prepare("SELECT heading FROM sections WHERE doc_id = ? LIMIT 5").all(targetDoc.id);
 
             console.clear();
-            const line = "─".repeat(PANEL_WIDTH - 2);
-            console.log(`\x1b[36m╭${line}╮\x1b[0m`);
-            console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37mDOCUMENT DETAILS\x1b[0m${" ".repeat(PANEL_WIDTH - 20)}\x1b[36m│\x1b[0m`);
-            console.log(`\x1b[36m╰${line}╯\x1b[0m`);
+            console.log(`\n  \x1b[1m\x1b[37mDOCUMENT DETAILS\x1b[0m\n`);
             console.log(`  Title:          ${targetDoc.title || "Untitled"}`);
             console.log(`  ID:             ${targetDoc.id}`);
             console.log(`  Path:           ${targetDoc.path || "N/A"}`);
@@ -1693,10 +1734,7 @@ export async function runCli() {
 
         if (modeRes.value === "graph_test") {
           console.clear();
-          const line = "─".repeat(PANEL_WIDTH - 2);
-          console.log(`\x1b[36m╭${line}╮\x1b[0m`);
-          console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37mGRAPH & NOTEBOOK LINKING VERIFICATION\x1b[0m${" ".repeat(PANEL_WIDTH - 42)}\x1b[36m│\x1b[0m`);
-          console.log(`\x1b[36m╰${line}╯\x1b[0m\n`);
+          console.log(`\n  \x1b[1m\x1b[37mGRAPH & NOTEBOOK LINKING VERIFICATION\x1b[0m\n`);
 
           const sampleDoc = `# Ода о единороге (Секретный проект Unicorn)
 
@@ -1759,11 +1797,8 @@ export async function runCli() {
 
         if (modeRes.value === "gpu_profile") {
           console.clear();
-          const line = "─".repeat(PANEL_WIDTH - 2);
-          console.log(`\x1b[36m╭${line}╮\x1b[0m`);
-          console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37mGPU PROFILER BENCHMARK\x1b[0m${" ".repeat(PANEL_WIDTH - 28)}\x1b[36m│\x1b[0m`);
-          console.log(`\x1b[36m│\x1b[0m  \x1b[90m${"Profiling DirectML tensor execution stages & VRAM throughput".padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
-          console.log(`\x1b[36m╰${line}╯\x1b[0m\n`);
+          console.log(`\n  \x1b[1m\x1b[37mGPU PROFILER BENCHMARK\x1b[0m`);
+          console.log(`  \x1b[90mProfiling DirectML tensor execution stages & VRAM throughput\x1b[0m\n`);
 
           const savedConfig = getConfig();
           try {
@@ -1784,11 +1819,8 @@ export async function runCli() {
 
         if (modeRes.value === "cpu_vs_gpu") {
           console.clear();
-          const line = "─".repeat(PANEL_WIDTH - 2);
-          console.log(`\x1b[36m╭${line}╮\x1b[0m`);
-          console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37mCPU vs GPU COMPARISON BENCHMARK\x1b[0m${" ".repeat(PANEL_WIDTH - 37)}\x1b[36m│\x1b[0m`);
-          console.log(`\x1b[36m│\x1b[0m  \x1b[90m${"Identical workload on CPU then GPU — automatic device switching".padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
-          console.log(`\x1b[36m╰${line}╯\x1b[0m\n`);
+          console.log(`\n  \x1b[1m\x1b[37mCPU vs GPU COMPARISON BENCHMARK\x1b[0m`);
+          console.log(`  \x1b[90mIdentical workload on CPU then GPU — automatic device switching\x1b[0m\n`);
 
           const savedConfig = getConfig();
           try {
@@ -1809,13 +1841,10 @@ export async function runCli() {
 
         const isSmoke = modeRes.value === "smoke";
         console.clear();
-        const line = "─".repeat(PANEL_WIDTH - 2);
         const modeTitle = isSmoke ? "SMOKE BENCHMARK IN PROGRESS" : "BENCHMARK IN PROGRESS";
         const modeSub = isSmoke ? "Fetch 6 docs + Ingest + Eval 9 queries (stats skipped)" : "Fetch Corpus + Ingest + Evaluate 21 Queries";
-        console.log(`\x1b[36m╭${line}╮\x1b[0m`);
-        console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37m${modeTitle.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
-        console.log(`\x1b[36m│\x1b[0m  \x1b[90m${modeSub.padEnd(PANEL_WIDTH - 6)}\x1b[0m  \x1b[36m│\x1b[0m`);
-        console.log(`\x1b[36m╰${line}╯\x1b[0m\n`);
+        console.log(`\n  \x1b[1m\x1b[37m${modeTitle}\x1b[0m`);
+        console.log(`  \x1b[90m${modeSub}\x1b[0m\n`);
 
         const spinFrames = ["|", "/", "-", "\\"];
         let spinIdx = 0;
@@ -1858,10 +1887,7 @@ export async function runCli() {
         const queryRes = await readTextInput("Enter Test Verification Query", "sqlite compact database");
         if (queryRes.action === "submit" && queryRes.value) {
           console.clear();
-          const line = "─".repeat(PANEL_WIDTH - 2);
-          console.log(`\x1b[36m╭${line}╮\x1b[0m`);
-          console.log(`\x1b[36m│\x1b[0m  \x1b[1m\x1b[37mSEARCH QUERY EXECUTION\x1b[0m${" ".repeat(PANEL_WIDTH - 26)}\x1b[36m│\x1b[0m`);
-          console.log(`\x1b[36m╰${line}╯\x1b[0m`);
+          console.log(`\n  \x1b[1m\x1b[37mSEARCH QUERY EXECUTION\x1b[0m`);
           console.log(`\n  [SEARCH] Executing query: "\x1b[36m${queryRes.value}\x1b[0m"...\n`);
           try {
             const results = await hybridQuery({ query: queryRes.value, limit: 3 });
@@ -1869,10 +1895,9 @@ export async function runCli() {
               console.log("  [*] No matching results found in knowledge base.");
             } else {
               results.forEach((r, i) => {
-                console.log(`\n  \x1b[36m╭─ [Hit #${i + 1}] ${r.doc_title || "Doc"} > ${r.breadcrumbs || ""} ─╮\x1b[0m`);
-                console.log(`  \x1b[36m│\x1b[0m Score: \x1b[33m${r.score}\x1b[0m (RSF: ${r.rsf_score}, RRF: ${r.rrf_score}, CosSim: ${r.cosine_sim})`);
-                console.log(`  \x1b[36m│\x1b[0m Snippet: \x1b[90m${r.snippet ? r.snippet.substring(0, 100).replace(/\n/g, " ") : ""}...\x1b[0m`);
-                console.log(`  \x1b[36m╰${"─".repeat(56)}╯\x1b[0m`);
+                console.log(`\n  \x1b[1m[Hit #${i + 1}] ${r.doc_title || "Doc"} > ${r.breadcrumbs || ""}\x1b[0m`);
+                console.log(`  Score: \x1b[33m${r.score}\x1b[0m (RSF: ${r.rsf_score}, RRF: ${r.rrf_score}, CosSim: ${r.cosine_sim})`);
+                console.log(`  Snippet: \x1b[90m${r.snippet ? r.snippet.substring(0, 100).replace(/\n/g, " ") : ""}...\x1b[0m`);
               });
             }
           } catch (err) {
@@ -2063,15 +2088,8 @@ export async function runCli() {
         await waitForEnter();
         break;
       }
-      case "exit": {
-        running = false;
-        console.clear();
-        console.log("Exiting CLI. Configuration saved.");
-        break;
-      }
     }
   }
-}
 
 if (process.argv[1] && process.argv[1].includes("cli.js")) {
   if (typeof global.gc !== "function") {

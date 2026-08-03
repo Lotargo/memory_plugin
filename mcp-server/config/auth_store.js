@@ -7,10 +7,28 @@ import { MEMORY_DIR, ensureDirSync } from "../memory.js";
 
 const SECRETS_FILE = path.join(MEMORY_DIR, "auth_secrets.enc");
 
+// ── Module-level caches ─────────────────────────────────────────────────────
+// These avoid re-running expensive sync operations (execSync, PBKDF2, file I/O)
+// on every CLI navigation or tool call.  invalidateAuthCache() must be called
+// whenever secrets are deleted or the API key is removed.
+let _cachedMachineId = undefined;  // undefined = not yet resolved
+let _cachedFingerprint = null;
+let _cachedEncryptionKey = null;
+let _cachedSecrets = undefined;    // undefined = not loaded, null = no secrets, object = cached
+let _cachedSecretsMtime = 0;
+
+export function invalidateAuthCache() {
+  _cachedSecrets = undefined;
+  _cachedSecretsMtime = 0;
+  // Keep machineId / fingerprint / key cached — they don't change per-session.
+}
+
 // Stable per-machine identifier. Must NOT rely on volatile values (e.g.
 // os.networkInterfaces() — VPN adapters, hotspot IPs and IPv6 privacy
 // addresses rotate constantly and would silently change the AES key).
 function getMachineId() {
+  if (_cachedMachineId !== undefined) return _cachedMachineId;
+  let id = null;
   try {
     if (process.platform === "win32") {
       const out = execSync("reg query HKLM\\SOFTWARE\\Microsoft\\Cryptography /v MachineGuid", {
@@ -18,12 +36,12 @@ function getMachineId() {
         stdio: ["ignore", "pipe", "ignore"],
       });
       const m = out.match(/MachineGuid\s+REG_SZ\s+([0-9a-fA-F-]{36})/i);
-      if (m) return m[1].toLowerCase();
+      if (m) id = m[1].toLowerCase();
     } else if (process.platform === "linux") {
       for (const p of ["/etc/machine-id", "/var/lib/dbus/machine-id"]) {
         try {
           const v = fs.readFileSync(p, "utf8").trim();
-          if (v) return v;
+          if (v) { id = v; break; }
         } catch {}
       }
     } else if (process.platform === "darwin") {
@@ -32,15 +50,17 @@ function getMachineId() {
         stdio: ["ignore", "pipe", "ignore"],
       });
       const m = out.match(/"IOPlatformUUID"\s*=\s*"([^"]+)"/);
-      if (m) return m[1];
+      if (m) id = m[1];
     }
   } catch {}
-  return null;
+  _cachedMachineId = id;
+  return _cachedMachineId;
 }
 
 // Generate a deterministic hardware + system fingerprint (stable across reboots,
 // network changes and user sessions on the same machine).
 function getSystemFingerprint() {
+  if (_cachedFingerprint !== null && _cachedFingerprint !== undefined) return _cachedFingerprint;
   const parts = [
     getMachineId() || "no-machine-id",
     os.hostname() || "localhost",
@@ -48,15 +68,18 @@ function getSystemFingerprint() {
     os.platform() || "unknown",
     os.arch() || "unknown",
   ];
-  return parts.join("|");
+  _cachedFingerprint = parts.join("|");
+  return _cachedFingerprint;
 }
 
 // Derive a 256-bit (32 bytes) key using PBKDF2 with salt derived from fingerprint
 function deriveEncryptionKey() {
+  if (_cachedEncryptionKey) return _cachedEncryptionKey;
   const fingerprint = getSystemFingerprint();
   const salt = crypto.createHash("sha256").update(fingerprint).digest();
   // PBKDF2 with 10,000 iterations to derive a secure 32-byte key
-  return crypto.pbkdf2Sync(fingerprint, salt, 10000, 32, "sha256");
+  _cachedEncryptionKey = crypto.pbkdf2Sync(fingerprint, salt, 10000, 32, "sha256");
+  return _cachedEncryptionKey;
 }
 
 // Encrypt data using AES-256-GCM
@@ -153,17 +176,33 @@ export function resolveEnvSecrets() {
 // Read the encrypted store file ONLY (no environment merge). Returns the raw
 // parsed record, or null when the file is missing / undecryptable.
 function readStoredSecrets() {
-  if (!fs.existsSync(SECRETS_FILE)) return null;
+  try {
+    if (fs.existsSync(SECRETS_FILE)) {
+      const mtime = fs.statSync(SECRETS_FILE).mtimeMs;
+      if (_cachedSecrets !== undefined && mtime === _cachedSecretsMtime) {
+        return _cachedSecrets;
+      }
+      _cachedSecretsMtime = mtime;
+    } else {
+      // File doesn't exist — clear cache
+      if (_cachedSecrets !== undefined && _cachedSecrets === null) return null;
+      _cachedSecrets = null;
+      _cachedSecretsMtime = 0;
+      return null;
+    }
+  } catch {}
   try {
     const encrypted = fs.readFileSync(SECRETS_FILE, "utf-8").trim();
-    if (!encrypted) return null;
-    return JSON.parse(decryptData(encrypted));
+    if (!encrypted) { _cachedSecrets = null; return null; }
+    _cachedSecrets = JSON.parse(decryptData(encrypted));
+    return _cachedSecrets;
   } catch (err) {
     console.error(
       "Failed to decrypt or load cloud secrets:",
       err.message,
       "— the file was encrypted with a different machine key. Re-run login to recreate it."
     );
+    _cachedSecrets = null;
     return null;
   }
 }
@@ -187,7 +226,13 @@ export function saveSecrets(secrets) {
   const plainText = JSON.stringify(secrets);
   const encrypted = encryptData(plainText);
   fs.writeFileSync(SECRETS_FILE, encrypted, "utf-8");
+  _cachedSecrets = undefined;  // invalidate so readStoredSecrets re-reads
+  _cachedSecretsMtime = 0;
+  if (typeof _onSecretsChanged === "function") _onSecretsChanged();
 }
+
+let _onSecretsChanged = null;
+export function onSecretsChanged(cb) { _onSecretsChanged = cb; }
 
 // Load secrets securely. Priority (highest first):
 //   1. Env account API token (TURSO_API_TOKEN) — reused from the store when a
@@ -240,6 +285,8 @@ export function deleteSecrets() {
   if (fs.existsSync(SECRETS_FILE)) {
     try {
       fs.unlinkSync(SECRETS_FILE);
+      _cachedSecrets = null;
+      _cachedSecretsMtime = 0;
       return true;
     } catch (err) {
       console.error("Failed to delete secrets file:", err.message);
