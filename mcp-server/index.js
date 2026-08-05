@@ -517,6 +517,23 @@ server.registerTool(
     }
 
     const stores = await listProjectStores();
+
+    let identityLines = [];
+    try {
+      const { getDatabase } = await import("./db/database.js");
+      const { resolveProjectIdentity, listIdentities } = await import("./identity.js");
+      const db = await getDatabase();
+      const identity = await resolveProjectIdentity(process.cwd());
+      const all = await listIdentities(db);
+      identityLines.push(
+        `Identity: ${identity ? "git" : "no-git"}` +
+          (identity ? ` | key: ${identity.key} | name: ${identity.name}${identity.primaryRemote ? ` | remote: ${identity.primaryRemote}` : ""}` : ""),
+        `Known identities: ${all.length}`
+      );
+    } catch (e) {
+      identityLines.push(`Identity: unavailable (${e.message})`);
+    }
+
     const lines = [
       `Version: ${version}`,
       `MEMORY_DIR: ${MEMORY_DIR}`,
@@ -526,6 +543,7 @@ server.registerTool(
       `Project stores: ${stores.length}`,
       `Facts (global): ${(await readMemoryRaw(GLOBAL_KEY)).length}`,
       `Facts (project): ${(await readMemoryRaw(await projectKey(null, null))).length}`,
+      ...identityLines,
     ];
     if (rag.error) lines.push(`RAG: unavailable (${rag.error})`);
     else lines.push(
@@ -554,6 +572,10 @@ server.registerTool(
   async ({ action, factText, docId, scope, startLine, endLine, relationType }) => {
     const { linkFactToDocument, getLinksForDoc, listAllLinks } = await import("./graph/knowledge_linker.js");
     const key = await scopeKey(scope, null, null);
+
+    if (action === "link" || action === "list_links") {
+      requireProjectKey(key);
+    }
 
     if (action === "link") {
       if (!factText || !docId) {

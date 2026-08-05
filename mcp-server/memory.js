@@ -263,6 +263,23 @@ export async function migrateLegacyStore(legacyKey, targetDir) {
   return { ok: true, key: targetKey, file: memoryPath(targetKey), facts: facts.length };
 }
 
+// Mass-stamp titles onto legacy facts in a store. Returns how many lines were
+// changed. Skips stores that already have titles on every fact (fast no-op).
+export async function migrateStoreTitles(key) {
+  if (!key) return { ok: false, reason: "no_key", changed: 0 };
+  const { withTitle } = await import("./fact_format.js");
+  const facts = await readMemory(key);
+  let changed = 0;
+  const migrated = facts.map((line) => {
+    const next = withTitle(line);
+    if (next !== line) changed++;
+    return next;
+  });
+  if (!changed) return { ok: true, changed: 0 };
+  await writeMemory(key, migrated);
+  return { ok: true, changed };
+}
+
 export function today() {
   const d = new Date();
   const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;

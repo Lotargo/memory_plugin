@@ -21,6 +21,7 @@ const ENTRY_RE = /^- \[(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})\]\s+(.*)$/;
 // Parse a raw entry line into { line, date, time, text, meta }.
 // Returns null if the line is not a fact entry.
 export function parseFactEntry(line) {
+  line = String(line).replace(/\r$/, "");
   const m = ENTRY_RE.exec(line);
   if (!m) return null;
   const [, date, time, rest] = m;
@@ -228,4 +229,16 @@ export function withTitleAndBody(line, { title, body }) {
 
   const newText = `**${newTitle}** — ${newBody}`;
   return formatFactEntry({ date: p.date, time: p.time, text: newText, meta: p.meta });
+}
+
+// Return a new line where a legacy fact WITHOUT a `**Title**` prefix gets one
+// auto-generated (first phrase of the body). Lines that already have a title or
+// are not fact entries are returned unchanged.
+export function withTitle(line) {
+  const p = parseFactEntry(line);
+  if (!p) return line;
+  if (/^\*\*[^*]+\*\*/.test(p.text)) return line;
+  const title = autoGenerateTitle(p.text);
+  if (!title) return line;
+  return formatFactEntry({ date: p.date, time: p.time, text: `**${title}** — ${p.text}`, meta: p.meta });
 }

@@ -769,6 +769,43 @@ export async function runCli() {
     return;
   }
 
+  if (cliArgs[0] === "migrate_titles") {
+    const keyIdx = cliArgs.indexOf("--key");
+    const key = keyIdx >= 0 && cliArgs[keyIdx + 1] ? cliArgs[keyIdx + 1] : null;
+
+    try {
+      const { migrateStoreTitles, migrateLegacyStore, GLOBAL_KEY, projectKey } = await import("./memory.js");
+      const targets = [];
+      if (key) {
+        targets.push(key);
+      } else {
+        const gitKey = await projectKey(process.cwd(), null);
+        if (gitKey) targets.push(gitKey);
+        targets.push(GLOBAL_KEY);
+        const stores = await listProjectStores();
+        for (const s of stores) {
+          if (!targets.includes(s.key)) targets.push(s.key);
+        }
+      }
+
+      let total = 0;
+      for (const k of targets) {
+        const res = await migrateStoreTitles(k);
+        if (res.ok) {
+          total += res.changed;
+          console.log(`  [OK] ${k}: ${res.changed} fact(s) titled`);
+        } else {
+          console.log(`  [SKIP] ${k}: ${res.reason}`);
+        }
+      }
+      console.log(`\n  Done. ${total} fact(s) updated across ${targets.length} store(s).\n`);
+    } catch (err) {
+      console.error(`Error: ${err.message}`);
+      process.exit(1);
+    }
+    return;
+  }
+
   if (cliArgs.includes("--enable-prompt") || cliArgs.includes("enable-prompt")) {
     const { enableGlobalPrompt } = await import("./prompt_manager.js");
     const results = await enableGlobalPrompt();
@@ -1036,6 +1073,11 @@ async function showCategorySubmenu(category, config, stats, initialIndex = 0) {
           label: "[PROJECT IDENTITY] Manage Git Link & Aliases",
           value: "git_identity",
           info: "Link directory to Git project identity, unlink, relink, or view aliases",
+        },
+        {
+          label: "[FACTS] Migrate Titles to Legacy Facts",
+          value: "migrate_titles",
+          info: "Mass-stamp auto titles onto facts that lack a **Title** prefix",
         },
         {
           label: "[RAG DOCS] Layer 2 RAG Base",
@@ -1753,6 +1795,39 @@ async function handleSubmenuItem(value, config, stats) {
             await waitForEnter();
           }
         }
+        break;
+      }
+
+      case "migrate_titles": {
+        console.log(`\n  \x1b[1m\x1b[37mMIGRATE TITLES TO LEGACY FACTS\x1b[0m\n`);
+        console.log("  Scans every store and stamps an auto-generated **Title** onto");
+        console.log("  facts that lack one (Part A1 legacy migration).\n");
+        try {
+          const { migrateStoreTitles, GLOBAL_KEY, projectKey } = await import("./memory.js");
+          const targets = [];
+          const gitKey = await projectKey(process.cwd(), null);
+          if (gitKey) targets.push(gitKey);
+          targets.push(GLOBAL_KEY);
+          const stores = await listProjectStores();
+          for (const s of stores) {
+            if (!targets.includes(s.key)) targets.push(s.key);
+          }
+
+          let total = 0;
+          for (const k of targets) {
+            const res = await migrateStoreTitles(k);
+            if (res.ok) {
+              total += res.changed;
+              console.log(`  [OK] ${k}: ${res.changed} fact(s) titled`);
+            } else {
+              console.log(`  [SKIP] ${k}: ${res.reason}`);
+            }
+          }
+          console.log(`\n  \x1b[32m[DONE] ${total} fact(s) updated across ${targets.length} store(s).\x1b[0m`);
+        } catch (err) {
+          console.log(`\n  \x1b[31m[ERROR] ${err.message}\x1b[0m`);
+        }
+        await waitForEnter();
         break;
       }
 

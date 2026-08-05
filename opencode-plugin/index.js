@@ -108,6 +108,16 @@ const MEMORY_INSTRUCTION =
   "When saving, translate the fact into clear, concise English.\n" +
   "Use `scope: \"global\"` for personal facts, `scope: \"project\"` for project-specific facts.";
 
+function requireProjectKey(key) {
+  if (!key) {
+    throw new Error(
+      "No project memory available: this directory is not inside a git repository. " +
+      "Project memory is tied to a git repo; use scope: 'global' or open a git repository."
+    );
+  }
+  return key;
+}
+
 function sortNewestFirst(entries) {
   return [...entries].sort((a, b) => {
     const pa = parseFactEntry(a);
@@ -195,7 +205,22 @@ const MCP_SERVERS = [
 
 export const MemoryPlugin = async ({ directory, worktree, client }) => {
   await ensureDir();
-  const activeProjectKey = await scopeKey("project", worktree, directory);
+  let activeProjectKey = await scopeKey("project", worktree, directory);
+  let identityResolveAt = 0;
+
+  const currentProjectKey = async () => {
+    const now = Date.now();
+    if (now < identityResolveAt) return activeProjectKey;
+    identityResolveAt = now + 2000;
+    try {
+      const path = client?.path?.get ? await client.path.get() : null;
+      const wt = path?.worktree || worktree;
+      const dir = path?.directory || directory;
+      const key = await scopeKey("project", wt, dir);
+      if (key !== activeProjectKey) activeProjectKey = key;
+    } catch (e) {}
+    return activeProjectKey;
+  };
 
   return {
     "experimental.chat.messages.transform": async (_input, output) => {
@@ -207,7 +232,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
 
       const [globalFacts, projectFacts] = await Promise.all([
         readMemory(GLOBAL_KEY),
-        readMemory(activeProjectKey),
+        readMemory(await currentProjectKey()),
       ]);
 
       const { getConfig } = await import("../mcp-server/config/config_manager.js");
@@ -277,7 +302,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           supersedes: { type: "string", description: "Optional number, id, or text of the fact this one replaces" },
         },
         async execute({ fact, title, scope, docId, startLine, endLine, relationType, ttl, keep, tags, supersedes }, { worktree, directory }) {
-          const key = await scopeKey(scope || "project", worktree, directory);
+          const key = requireProjectKey(await scopeKey(scope || "project", worktree, directory));
           const entries = await readMemory(key);
 
           const explicitTitle = title ? title.trim() : null;
@@ -532,7 +557,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           force: { type: "boolean", description: "Удалить также защищённые (keep) факты" },
         },
         async execute({ query, scope, force }, { worktree, directory }) {
-          const key = await scopeKey(scope || "project", worktree, directory);
+          const key = requireProjectKey(await scopeKey(scope || "project", worktree, directory));
           const entries = await readMemory(key);
           const rangeMatch = /^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(query);
           const num = parseInt(query, 10);
@@ -576,7 +601,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           scope: { type: "string", description: "\x27project\x27 (default) or \x27global\x27", default: "project" },
         },
         async execute({ id, newText, title, scope }, { worktree, directory }) {
-          const key = await scopeKey(scope || "project", worktree, directory);
+          const key = requireProjectKey(await scopeKey(scope || "project", worktree, directory));
           const entries = await readMemory(key);
           const idx = resolveFactIndex(entries, id);
           if (idx === -1) throw new Error(`Fact not found: ${id}`);
@@ -648,12 +673,29 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
             rag.error = e.message;
           }
 
+          let identityLines = [];
+          try {
+            const { getDatabase } = await import("../mcp-server/db/database.js");
+            const { resolveProjectIdentity, listIdentities } = await import("../mcp-server/identity.js");
+            const db = getDatabase();
+            const identity = await resolveProjectIdentity(directory || process.cwd());
+            const all = await listIdentities(db);
+            identityLines.push(
+              `Identity: ${identity ? "git" : "no-git"}` +
+                (identity ? ` | key: ${identity.key} | name: ${identity.name}${identity.primaryRemote ? ` | remote: ${identity.primaryRemote}` : ""}` : ""),
+              `Known identities: ${all.length}`
+            );
+          } catch (e) {
+            identityLines.push(`Identity: unavailable (${e.message})`);
+          }
+
           const lines = [
             `Version: ${version}`,
             `MEMORY_DIR: ${MEMORY_DIR}`,
             `SQLite DB: ${dbPath}`,
             `Global store: ${storeFilePath(GLOBAL_KEY)}`,
             `Project store: ${storeFilePath(activeProjectKey)}`,
+            ...identityLines,
           ];
           if (rag.error) lines.push(`RAG: unavailable (${rag.error})`);
           else
@@ -688,6 +730,10 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           const { linkFactToDocument, getLinksForDoc, listAllLinks } = await import("../mcp-server/graph/knowledge_linker.js");
           const key = await scopeKey(scope || "project", worktree, directory);
           const act = action || "link";
+
+          if (act === "link" || act === "list_links") {
+            requireProjectKey(key);
+          }
 
           if (act === "link") {
             if (!factText || !docId) {
