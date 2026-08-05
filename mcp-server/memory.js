@@ -2,6 +2,7 @@ import { readFile, writeFile, mkdir, unlink, readdir } from "fs/promises";
 import { existsSync, mkdirSync } from "fs";
 import { join, basename, resolve } from "path";
 import { homedir } from "os";
+import { resolveProjectIdentity } from "./identity.js";
 
 function resolveMemoryDir() {
   if (process.env.MEMORY_DIR) return process.env.MEMORY_DIR;
@@ -46,7 +47,6 @@ export function ensureDirSync() {
   if (!existsSync(exportsDir)) mkdirSync(exportsDir, { recursive: true });
 }
 
-// Canonical absolute path key: forward slashes, lowercase drive letter on win32.
 export function canonicalPath(dir) {
   let p = resolve(dir || process.cwd());
   if (process.platform === "win32") {
@@ -55,23 +55,24 @@ export function canonicalPath(dir) {
   return p;
 }
 
-// Project store key = full directory path. This removes basename collisions and
-// binds each store to the real project location.
-export function projectKey(worktree, directory) {
-  return canonicalPath(worktree || directory);
-}
-
-// Display label for a project (basename of the resolved directory).
-export function projectName(worktree, directory) {
+export async function projectKey(worktree, directory) {
   const dir = worktree || directory || process.cwd();
-  return dir ? basename(resolve(dir)) : "default";
+  const identity = await resolveProjectIdentity(dir);
+  return identity ? identity.key : null;
 }
 
-export function scopeKey(scope, worktree, directory) {
-  return scope === "global" ? GLOBAL_KEY : projectKey(worktree, directory);
+export async function projectName(worktree, directory) {
+  const dir = worktree || directory || process.cwd();
+  const identity = await resolveProjectIdentity(dir);
+  return identity ? identity.name : (dir ? basename(resolve(dir)) : "default");
 }
 
-function slugify(key) {
+export async function scopeKey(scope, worktree, directory) {
+  return scope === "global" ? GLOBAL_KEY : await projectKey(worktree, directory);
+}
+
+export function slugify(key) {
+  if (!key) return "null";
   return key.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
@@ -87,44 +88,17 @@ export function storeFilePath(key) {
   return memoryPath(key);
 }
 
-function parseMeta(content) {
-  const m = content.match(/<!-- path: (.+?) -->/);
-  return { path: m ? m[1].trim() : null };
+export function parseMeta(content) {
+  const m = content.match(/<!-- key: (.+?) -->/) || content.match(/<!-- path: (.+?) -->/);
+  return { key: m ? m[1].trim() : null };
 }
 
 function isSimpleKey(key) {
   return /^[a-zA-Z0-9_-]+$/.test(key);
 }
 
-// Lazy migration: when reading a project path store that doesn't exist yet but a
-// legacy <basename>.md store (without path binding) does, claim it under the path.
-async function maybeMigrateLegacy(key) {
-  if (key === GLOBAL_KEY || isSimpleKey(key)) return null;
-  const legacyBasename = basename(key);
-  if (!legacyBasename) return null;
-  const legacyFp = join(MEMORY_DIR, `${legacyBasename}.md`);
-  if (slugify(key) === legacyBasename || !existsSync(legacyFp)) return null;
-  const content = await readFile(legacyFp, "utf-8");
-  if (parseMeta(content).path) return null; // already bound to another project
-  // Collision guard: a different path with the same basename is already bound,
-  // so this legacy store is ambiguous and must not be silently claimed.
-  const files = await readdir(MEMORY_DIR).catch(() => []);
-  for (const f of files) {
-    if (!f.endsWith(".md") || f === `${legacyBasename}.md` || f === `${GLOBAL_KEY}.md`) continue;
-    try {
-      const other = parseMeta(await readFile(join(MEMORY_DIR, f), "utf-8")).path;
-      if (other && basename(other) === legacyBasename) return null;
-    } catch (e) {}
-  }
-  const facts = content.split("\n").filter((l) => l.startsWith("- ["));
-  await writeMemory(key, facts);
-  try {
-    await unlink(legacyFp);
-  } catch (e) {}
-  return facts;
-}
-
 export async function readMemory(key) {
+  if (!key) return [];
   const { getConfig } = await import("./config/config_manager.js");
   const config = getConfig();
   if (config.mode === "only-cloud") {
@@ -143,7 +117,6 @@ export async function readMemory(key) {
 
   const fp = memoryPath(key);
   if (config.mode === "hybrid-sync") {
-    // Pull cloud state down first so cloud-only records appear locally.
     try {
       const { ensureReverseSync } = await import("./db/sync_queue.js");
       await ensureReverseSync();
@@ -155,40 +128,35 @@ export async function readMemory(key) {
     const content = await readFile(fp, "utf-8");
     return content.split("\n").filter((l) => l.startsWith("- ["));
   }
-  const migrated = await maybeMigrateLegacy(key);
-  return migrated || [];
+  return [];
 }
 
 export async function readMemoryRaw(key) {
   return (await readMemory(key)).map((e) => e.slice(2));
 }
 
-// Build the markdown store content for a key from a list of fact lines.
 export function buildMemoryContent(key, entries) {
   const lines = [];
   if (key === GLOBAL_KEY) {
     lines.push("# Global Memory", "");
   } else {
     lines.push(`# Memory: ${basename(key) || key}`, "");
-    if (!isSimpleKey(key)) {
-      lines.push(`<!-- path: ${key} -->`, "");
-    }
+    lines.push(`<!-- key: ${key} -->`, "");
   }
   return lines.join("\n") + "\n" + (entries.length ? entries.join("\n") + "\n" : "");
 }
 
-// Extract fact lines (`- [date] ...`) from a store content string.
 export function extractFacts(content) {
   return (content || "").split("\n").filter((l) => l.startsWith("- ["));
 }
 
-// Write a store file directly to disk WITHOUT enqueueing a cloud sync task.
-// Used by the sync worker to apply pulled cloud state without re-queueing.
 export async function writeMemoryFile(key, content) {
+  if (!key) return;
   await writeFile(memoryPath(key), content);
 }
 
 export async function writeMemory(key, entries) {
+  if (!key) return;
   const content = buildMemoryContent(key, entries);
 
   const { getConfig } = await import("./config/config_manager.js");
@@ -236,11 +204,11 @@ export async function listProjectStores() {
         const meta = parseMeta(content);
         stores.push({
           key,
-          path: meta.path || (key.includes("/") || key.includes(":") ? key : null),
-          basename: basename(meta.path || key) || key,
+          path: meta.key || key,
+          basename: basename(meta.key || key) || key,
           file: `${slugify(key)}.md`,
           count: facts.length,
-          legacy: !meta.path,
+          legacy: !meta.key || meta.key.startsWith("/"),
         });
       }
       stores.sort((a, b) => a.basename.localeCompare(b.basename));
@@ -264,27 +232,29 @@ export async function listProjectStores() {
     }
     const facts = content.split("\n").filter((l) => l.startsWith("- ["));
     const meta = parseMeta(content);
-    const key = meta.path || f.slice(0, -3);
+    const key = meta.key || f.slice(0, -3);
     stores.push({
       key,
-      path: meta.path,
-      basename: basename(meta.path || key) || key,
+      path: meta.key,
+      basename: basename(meta.key || key) || key,
       file: f,
       count: facts.length,
-      legacy: !meta.path,
+      legacy: !meta.key || meta.key.startsWith("/"),
     });
   }
   stores.sort((a, b) => a.basename.localeCompare(b.basename));
   return stores;
 }
 
-// Bind an unbound legacy store (e.g. "comfy-meta-viewer") to a directory path.
 export async function migrateLegacyStore(legacyKey, targetDir) {
   const legacyFp = join(MEMORY_DIR, `${legacyKey.replace(/[^a-zA-Z0-9_-]/g, "_")}.md`);
   if (!existsSync(legacyFp)) return { ok: false, reason: "not_found", key: legacyKey };
   const content = await readFile(legacyFp, "utf-8");
-  if (parseMeta(content).path) return { ok: false, reason: "already_bound", key: legacyKey };
-  const targetKey = projectKey(targetDir, null);
+  if (parseMeta(content).key) return { ok: false, reason: "already_bound", key: legacyKey };
+
+  const targetKey = await projectKey(targetDir, null);
+  if (!targetKey) return { ok: false, reason: "not_a_git_repo", key: legacyKey };
+
   const facts = content.split("\n").filter((l) => l.startsWith("- ["));
   await writeMemory(targetKey, facts);
   try {

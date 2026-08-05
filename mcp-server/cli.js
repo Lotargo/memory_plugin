@@ -104,7 +104,7 @@ async function getQuickStats() {
 
   let factCount = 0;
   try {
-    const projKey = projectKey(null, null);
+    const projKey = await projectKey(null, null);
     const globalF = await readMemoryRaw(GLOBAL_KEY);
     const projF = await readMemoryRaw(projKey);
     factCount = (globalF ? globalF.length : 0) + (projF ? projF.length : 0);
@@ -608,6 +608,167 @@ function promptText(question) {
 
 export async function runCli() {
   const cliArgs = process.argv.slice(2);
+  if (cliArgs[0] === "link") {
+    const dirIdx = cliArgs.indexOf("--dir");
+    const dir = dirIdx >= 0 && cliArgs[dirIdx + 1] ? cliArgs[dirIdx + 1] : process.cwd();
+    const remIdx = cliArgs.indexOf("--remote");
+    const remote = remIdx >= 0 && cliArgs[remIdx + 1] ? cliArgs[remIdx + 1] : null;
+
+    try {
+      const { getDatabase } = await import("./db/database.js");
+      const { resolveProjectIdentity, upsertIdentity, registerAlias, normalizeRemoteUrl } = await import("./identity.js");
+      const { canonicalPath } = await import("./memory.js");
+      const db = await getDatabase();
+
+      const identity = await resolveProjectIdentity(dir);
+      if (!identity && !remote) {
+        console.error("Error: No Git repository detected and no remote URL specified.");
+        process.exit(1);
+      }
+
+      let key = identity ? identity.key : `git:${normalizeRemoteUrl(remote)}`;
+      let name = identity ? identity.name : basename(dir) || "unbound";
+      let primaryRemote = remote ? normalizeRemoteUrl(remote) : (identity ? identity.primaryRemote : null);
+
+      await upsertIdentity(db, { key, name, primaryRemote });
+
+      const aliases = [];
+      if (primaryRemote) {
+        aliases.push({ alias: `remote:${primaryRemote}`, kind: "remote" });
+      }
+      aliases.push({ alias: `path:${canonicalPath(dir)}`, kind: "path" });
+      aliases.push({ alias: `basename:${name}`, kind: "basename" });
+
+      for (const a of aliases) {
+        await registerAlias(db, { alias: a.alias, identityKey: key, kind: a.kind });
+      }
+
+      console.log(`\n  [OK] Linked directory "${dir}" successfully to identity key: ${key}\n`);
+    } catch (err) {
+      console.error(`Error: ${err.message}`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (cliArgs[0] === "unlink") {
+    const dirIdx = cliArgs.indexOf("--dir");
+    const dir = dirIdx >= 0 && cliArgs[dirIdx + 1] ? cliArgs[dirIdx + 1] : process.cwd();
+    const purge = cliArgs.includes("--purge");
+
+    try {
+      const { getDatabase } = await import("./db/database.js");
+      const { unregisterAlias, removeIdentity, resolveProjectIdentity } = await import("./identity.js");
+      const { canonicalPath } = await import("./memory.js");
+      const db = await getDatabase();
+
+      const alias = `path:${canonicalPath(dir)}`;
+      await unregisterAlias(db, alias);
+
+      if (purge) {
+        const identity = await resolveProjectIdentity(dir);
+        if (identity) {
+          await removeIdentity(db, identity.key);
+        }
+      }
+
+      console.log(`\n  [OK] Unlinked directory "${dir}" successfully.\n`);
+    } catch (err) {
+      console.error(`Error: ${err.message}`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (cliArgs[0] === "relink") {
+    const dirIdx = cliArgs.indexOf("--dir");
+    const dir = dirIdx >= 0 && cliArgs[dirIdx + 1] ? cliArgs[dirIdx + 1] : process.cwd();
+    const remIdx = cliArgs.indexOf("--remote");
+    const remote = remIdx >= 0 && cliArgs[remIdx + 1] ? cliArgs[remIdx + 1] : null;
+
+    if (!remote) {
+      console.error("Error: --remote parameter is required for relink.");
+      process.exit(1);
+    }
+
+    try {
+      const { getDatabase } = await import("./db/database.js");
+      const { resolveProjectIdentity, upsertIdentity, removeIdentity, normalizeRemoteUrl } = await import("./identity.js");
+      const db = await getDatabase();
+
+      const sourceIdentity = await resolveProjectIdentity(dir);
+      if (!sourceIdentity) {
+        console.error("Error: Source project identity not detected.");
+        process.exit(1);
+      }
+
+      const targetKey = `git:${normalizeRemoteUrl(remote)}`;
+      const sourceKey = sourceIdentity.key;
+
+      if (sourceKey === targetKey) {
+        console.log("Source and target identities are already identical.");
+        return;
+      }
+
+      const sourceFacts = await readMemory(sourceKey);
+      const targetFacts = await readMemory(targetKey);
+      const seen = new Set(targetFacts.map((e) => factBody(e).toLowerCase().trim()));
+
+      let mergedCount = 0;
+      for (const f of sourceFacts) {
+        const body = factBody(f).toLowerCase().trim();
+        if (!seen.has(body)) {
+          seen.add(body);
+          targetFacts.push(f);
+          mergedCount++;
+        }
+      }
+
+      await writeMemory(targetKey, targetFacts);
+      await db.prepare("UPDATE project_aliases SET identity_key = ? WHERE identity_key = ?;").run(targetKey, sourceKey);
+      await upsertIdentity(db, { key: targetKey, name: sourceIdentity.name, primaryRemote: normalizeRemoteUrl(remote) });
+      await removeIdentity(db, sourceKey);
+
+      try {
+        const sourceFp = storeFilePath(sourceKey);
+        const { existsSync } = await import("node:fs");
+        if (existsSync(sourceFp)) {
+          const { unlink } = await import("fs/promises");
+          await unlink(sourceFp);
+        }
+      } catch (e) {}
+
+      console.log(`\n  [OK] Relinked and merged ${mergedCount} facts successfully!\n`);
+    } catch (err) {
+      console.error(`Error: ${err.message}`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (cliArgs[0] === "identity") {
+    const dirIdx = cliArgs.indexOf("--dir");
+    const dir = dirIdx >= 0 && cliArgs[dirIdx + 1] ? cliArgs[dirIdx + 1] : process.cwd();
+
+    try {
+      const { resolveProjectIdentity } = await import("./identity.js");
+      const identity = await resolveProjectIdentity(dir);
+      console.log(`\n  PROJECT IDENTITY`);
+      if (identity) {
+        console.log(`  - Key: ${identity.key}`);
+        console.log(`  - Name: ${identity.name}`);
+        console.log(`  - Primary Remote: ${identity.primaryRemote || "none"}`);
+        console.log(`  - Toplevel Directory: ${identity.toplevel}`);
+      } else {
+        console.log("  No Git repository detected.");
+      }
+    } catch (err) {
+      console.error(`Error: ${err.message}`);
+      process.exit(1);
+    }
+    return;
+  }
+
   if (cliArgs.includes("--enable-prompt") || cliArgs.includes("enable-prompt")) {
     const { enableGlobalPrompt } = await import("./prompt_manager.js");
     const results = await enableGlobalPrompt();
@@ -870,6 +1031,11 @@ async function showCategorySubmenu(category, config, stats, initialIndex = 0) {
           badge: `${stats.factCount} Facts Saved`,
           value: "notebook",
           info: "Inspect & delete durable user identity facts (global & project)",
+        },
+        {
+          label: "[PROJECT IDENTITY] Manage Git Link & Aliases",
+          value: "git_identity",
+          info: "Link directory to Git project identity, unlink, relink, or view aliases",
         },
         {
           label: "[RAG DOCS] Layer 2 RAG Base",
@@ -1207,7 +1373,7 @@ async function handleSubmenuItem(value, config, stats) {
         let nbRunning = true;
         while (nbRunning) {
           const projKey = projectKey(null, null);
-          const projLabel = projectName(null, null);
+          const projLabel = await projectName(null, null);
 
           async function browseFacts(key, title) {
             let factRunning = true;
@@ -1407,6 +1573,189 @@ async function handleSubmenuItem(value, config, stats) {
         }
         break;
       }
+      case "git_identity": {
+        let giRunning = true;
+        while (giRunning) {
+          const { resolveProjectIdentity, listIdentities } = await import("./identity.js");
+          const identity = await resolveProjectIdentity(process.cwd());
+
+          const giItems = [
+            { label: "Show current identity & aliases", value: "show" },
+            { label: "Link current directory to Git project", value: "link" },
+            { label: "Unlink current directory from project", value: "unlink" },
+            { label: "Relink directory to another remote/identity", value: "relink" },
+            { label: "< Back to Main Menu", value: "back" }
+          ];
+
+          const giRes = await selectSimpleMenu({
+            title: "PROJECT IDENTITY CONTROL",
+            subtitle: identity ? `Current Identity: ${identity.key}` : "No Git repository / project identity linked.",
+            items: giItems,
+          });
+
+          if (giRes.action === "back" || giRes.value === "back") {
+            giRunning = false;
+            break;
+          }
+
+          const action = giRes.value;
+          if (action === "show") {
+            console.clear();
+            console.log(`\n  \x1b[1m\x1b[37mCURRENT PROJECT IDENTITY\x1b[0m\n`);
+            if (identity) {
+              console.log(`  - \x1b[1mKey:\x1b[0m ${identity.key}`);
+              console.log(`  - \x1b[1mName:\x1b[0m ${identity.name}`);
+              console.log(`  - \x1b[1mPrimary Remote:\x1b[0m ${identity.primaryRemote || "none"}`);
+              console.log(`  - \x1b[1mToplevel Directory:\x1b[0m ${identity.toplevel}`);
+
+              const db = await getDatabase();
+              const aliases = await db.prepare("SELECT alias, kind FROM project_aliases WHERE identity_key = ?;").all(identity.key);
+              console.log(`\n  \x1b[1mActive Aliases:\x1b[0m`);
+              for (const a of aliases) {
+                console.log(`    - [${a.kind}] ${a.alias}`);
+              }
+            } else {
+              console.log("  No Git repository detected in the current directory.");
+            }
+            console.log(`\n  \x1b[1mAll Known Project Identities in SQLite Registry:\x1b[0m`);
+            const db = await getDatabase();
+            const { listIdentities } = await import("./identity.js");
+            const ids = await listIdentities(db);
+            if (ids.length > 0) {
+              for (const id of ids) {
+                console.log(`    - \x1b[1m${id.key}\x1b[0m (${id.name})`);
+                for (const a of id.aliases) {
+                  console.log(`      - [${a.kind}] ${a.alias}`);
+                }
+              }
+            } else {
+              console.log("    None registered yet.");
+            }
+            await waitForEnter();
+          } else if (action === "link") {
+            console.clear();
+            console.log(`\n  \x1b[1m\x1b[37mLINK PROJECT TO IDENTITY\x1b[0m\n`);
+            const remoteUrl = await promptText("Enter optional explicit remote URL (or press ENTER to auto-detect):");
+
+            try {
+              const { getDatabase } = await import("./db/database.js");
+              const { resolveProjectIdentity, upsertIdentity, registerAlias, normalizeRemoteUrl } = await import("./identity.js");
+              const db = await getDatabase();
+
+              const dir = process.cwd();
+              const identity = await resolveProjectIdentity(dir);
+              if (!identity && !remoteUrl) {
+                console.log("\n  \x1b[31m[ERROR] No Git repository detected and no remote URL specified.\x1b[0m");
+                await waitForEnter();
+                continue;
+              }
+
+              let key = identity ? identity.key : `git:${normalizeRemoteUrl(remoteUrl)}`;
+              let name = identity ? identity.name : basename(dir) || "unbound";
+              let primaryRemote = remoteUrl ? normalizeRemoteUrl(remoteUrl) : (identity ? identity.primaryRemote : null);
+
+              await upsertIdentity(db, { key, name, primaryRemote });
+
+              const aliases = [];
+              if (primaryRemote) {
+                aliases.push({ alias: `remote:${primaryRemote}`, kind: "remote" });
+              }
+              aliases.push({ alias: `path:${canonicalPath(dir)}`, kind: "path" });
+              aliases.push({ alias: `basename:${name}`, kind: "basename" });
+
+              for (const a of aliases) {
+                await registerAlias(db, { alias: a.alias, identityKey: key, kind: a.kind });
+              }
+
+              console.log(`\n  \x1b[32m[SUCCESS] Successfully linked project!\x1b[0m`);
+              console.log(`  Identity Key: ${key}`);
+            } catch (err) {
+              console.log(`\n  \x1b[31m[ERROR] Link failed: ${err.message}\x1b[0m`);
+            }
+            await waitForEnter();
+          } else if (action === "unlink") {
+            console.clear();
+            console.log(`\n  \x1b[1m\x1b[37mUNLINK PROJECT IDENTITY\x1b[0m\n`);
+            const confirm = await promptText("Are you sure you want to unlink the current path alias? (y/N):");
+            if (confirm.toLowerCase() === "y" || confirm.toLowerCase() === "yes") {
+              try {
+                const { getDatabase } = await import("./db/database.js");
+                const { unregisterAlias } = await import("./identity.js");
+                const db = await getDatabase();
+                const alias = `path:${canonicalPath(process.cwd())}`;
+                await unregisterAlias(db, alias);
+                console.log(`\n  \x1b[32m[SUCCESS] Unlinked path alias: ${alias}\x1b[0m`);
+              } catch (err) {
+                console.log(`\n  \x1b[31m[ERROR] Unlink failed: ${err.message}\x1b[0m`);
+              }
+            }
+            await waitForEnter();
+          } else if (action === "relink") {
+            console.clear();
+            console.log(`\n  \x1b[1m\x1b[37mRELINK PROJECT IDENTITY\x1b[0m\n`);
+            if (!identity) {
+              console.log("  No Git repository detected in the current directory.");
+              await waitForEnter();
+              continue;
+            }
+            const targetRemote = await promptText("Enter new target remote URL:");
+            if (!targetRemote) {
+              console.log("  Target remote URL cannot be empty.");
+              await waitForEnter();
+              continue;
+            }
+            try {
+              const { getDatabase } = await import("./db/database.js");
+              const { upsertIdentity, removeIdentity, normalizeRemoteUrl } = await import("./identity.js");
+              const db = await getDatabase();
+
+              const targetKey = `git:${normalizeRemoteUrl(targetRemote)}`;
+              const sourceKey = identity.key;
+
+              if (sourceKey === targetKey) {
+                console.log("  Source and target identities are already identical.");
+                await waitForEnter();
+                continue;
+              }
+
+              const sourceFacts = await readMemory(sourceKey);
+              const targetFacts = await readMemory(targetKey);
+              const seen = new Set(targetFacts.map((e) => factBody(e).toLowerCase().trim()));
+
+              let mergedCount = 0;
+              for (const f of sourceFacts) {
+                const body = factBody(f).toLowerCase().trim();
+                if (!seen.has(body)) {
+                  seen.add(body);
+                  targetFacts.push(f);
+                  mergedCount++;
+                }
+              }
+
+              await writeMemory(targetKey, targetFacts);
+              await db.prepare("UPDATE project_aliases SET identity_key = ? WHERE identity_key = ?;").run(targetKey, sourceKey);
+              await upsertIdentity(db, { key: targetKey, name: identity.name, primaryRemote: normalizeRemoteUrl(targetRemote) });
+              await removeIdentity(db, sourceKey);
+
+              try {
+                const sourceFp = storeFilePath(sourceKey);
+                const { existsSync } = await import("node:fs");
+                if (existsSync(sourceFp)) {
+                  const { unlink } = await import("fs/promises");
+                  await unlink(sourceFp);
+                }
+              } catch (e) {}
+
+              console.log(`\n  \x1b[32m[SUCCESS] Relinked and merged ${mergedCount} facts successfully!\x1b[0m`);
+            } catch (err) {
+              console.log(`\n  \x1b[31m[ERROR] Relink failed: ${err.message}\x1b[0m`);
+            }
+            await waitForEnter();
+          }
+        }
+        break;
+      }
+
       case "rag_docs": {
         let docRunning = true;
         while (docRunning) {

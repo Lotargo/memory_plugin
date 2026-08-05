@@ -110,6 +110,34 @@ const MIGRATIONS = [
       } catch (e) {}
     },
   },
+  {
+    version: 4,
+    name: "004_git_project_identity",
+    up: async (db) => {
+      await db.exec(`
+        CREATE TABLE IF NOT EXISTS project_identities (
+          key           TEXT PRIMARY KEY,
+          name          TEXT NOT NULL,
+          primary_remote TEXT,
+          created_at    INTEGER NOT NULL,
+          updated_at    INTEGER NOT NULL
+        );
+      `);
+
+      await db.exec(`
+        CREATE TABLE IF NOT EXISTS project_aliases (
+          alias        TEXT PRIMARY KEY,
+          identity_key TEXT NOT NULL REFERENCES project_identities(key) ON DELETE CASCADE,
+          kind         TEXT NOT NULL,
+          created_at   INTEGER NOT NULL
+        );
+      `);
+
+      await db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_aliases_identity ON project_aliases(identity_key);
+      `);
+    },
+  },
 ];
 
 export async function runMigrations(db) {
