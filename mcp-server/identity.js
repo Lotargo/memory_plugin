@@ -21,7 +21,7 @@ export async function detectGitToplevel(dir) {
   const absoluteDir = resolve(dir || process.cwd());
   try {
     const { stdout } = await execFileAsync("git", ["rev-parse", "--show-toplevel"], { cwd: absoluteDir });
-    return stdout.trim();
+    return resolve(stdout.trim());
   } catch (err) {
     let current = absoluteDir;
     while (true) {

@@ -2,6 +2,7 @@ import assert from "node:assert";
 import { rmSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { execSync } from "node:child_process";
 
 const TEST_DIR = join(tmpdir(), `memory_verification_${Date.now()}`);
 process.env.MEMORY_DIR = TEST_DIR;
@@ -17,13 +18,14 @@ console.log(`Test Directory: ${TEST_DIR}`);
 
 try {
   await ensureDir();
+  execSync("git init", { cwd: TEST_DIR, stdio: "ignore" });
 
   // ----------------------------------------------------
   // TEST 1: KEY-VALUE FACT MEMORY LOGIC
   // ----------------------------------------------------
   console.log("\n--- 1. Testing Key-Value Fact Memory Logic ---");
-  const projectKey = scopeKey("project", null, TEST_DIR);
-  const globalKey = scopeKey("global", null, TEST_DIR);
+  const projectKey = await scopeKey("project", null, TEST_DIR);
+  const globalKey = await scopeKey("global", null, TEST_DIR);
 
   console.log(`Project key resolved to: '${projectKey}'`);
   console.log(`Global key resolved to: '${globalKey}'`);

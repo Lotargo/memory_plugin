@@ -10,6 +10,8 @@ import {
   withMeta,
   nextFactId,
   isKeepFact,
+  isExpiredLine,
+  isSuperseded,
   displayFact,
   formatFactEntry,
   matchesQuery,
@@ -67,6 +69,17 @@ const defStr = (fallback) =>
 const defBool = (fallback) => z.boolean().nullish().transform((v) => (v === null || v === undefined ? fallback : v));
 const defNum = (fallback) => z.number().nullish().transform((v) => (v === null || v === undefined ? fallback : v));
 
+// Project memory is git-based: outside a git repository there is no project key.
+function requireProjectKey(key) {
+  if (!key) {
+    throw new Error(
+      "No project memory available: this directory is not inside a git repository. " +
+      "Project memory is tied to a git repo; use scope: 'global' or open a git repository."
+    );
+  }
+  return key;
+}
+
 // --- Legacy Key-Value Memory Tools ---
 
 // --- Legacy Key-Value Memory Tools & Agent Graph Linking ---
@@ -101,7 +114,7 @@ server.registerTool(
     }),
   },
   async ({ fact, title, scope, docId, startLine, endLine, relationType, ttl, keep, tags, supersedes }) => {
-    const key = await scopeKey(scope, null, null);
+    const key = requireProjectKey(await scopeKey(scope, null, null));
     const entries = await readMemory(key);
 
     const explicitTitle = title ? title.trim() : null;
@@ -367,7 +380,7 @@ server.registerTool(
     }),
   },
   async ({ query, scope, force }) => {
-    const key = await scopeKey(scope, null, null);
+    const key = requireProjectKey(await scopeKey(scope, null, null));
     const entries = await readMemory(key);
     const rangeMatch = /^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(query);
     const num = parseInt(query, 10);
@@ -416,7 +429,7 @@ server.registerTool(
     }),
   },
   async ({ id, newText, title, scope }) => {
-    const key = await scopeKey(scope, null, null);
+    const key = requireProjectKey(await scopeKey(scope, null, null));
     const entries = await readMemory(key);
     const idx = resolveFactIndex(entries, id);
     if (idx === -1) throw new Error(`Fact not found: ${id}`);

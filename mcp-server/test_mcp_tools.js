@@ -1,5 +1,5 @@
 import assert from "node:assert";
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const temp = mkdtempSync(join(tmpdir(), "mcp-tools-"));
 const MEMORY_DIR = join(temp, "mem");
+execSync("git init", { cwd: temp, stdio: "ignore" });
 
 let id = 0;
 const pending = new Map();
@@ -56,34 +57,44 @@ const ok = (name) => {
   console.log(`  \x1b[32m✓\x1b[0m ${name}`);
 };
 
+function waitExit(c) {
+  return new Promise((res) => {
+    if (c.exitCode !== null) res();
+    else c.once("exit", res);
+  });
+}
+
+function attach(c) {
+  c.stdout.setEncoding("utf8");
+  c.stderr.setEncoding("utf8");
+  c.stdout.on("data", (d) => {
+    buf += d;
+    let nl;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl);
+      buf = buf.slice(nl + 1);
+      if (line.trim()) {
+        try {
+          onLine(line);
+        } catch (e) {
+          output.push(`[PARSE ERR] ${line}: ${e.message}`);
+        }
+      }
+    }
+  });
+  c.stderr.on("data", (d) => {
+    output.push(`[stderr] ${d.trim()}`);
+  });
+  c.on("error", (e) => output.push(`[spawn error] ${e.message}`));
+  c.on("exit", (code, signal) => output.push(`[exit] code=${code} signal=${signal}`));
+}
+
 child = spawn(process.execPath, [join(ROOT, "mcp-server/index.js")], {
   cwd: temp,
   env: { ...process.env, MEMORY_DIR },
   stdio: ["pipe", "pipe", "pipe"],
 });
-
-child.stdout.setEncoding("utf8");
-child.stderr.setEncoding("utf8");
-child.stdout.on("data", (d) => {
-  buf += d;
-  let nl;
-  while ((nl = buf.indexOf("\n")) >= 0) {
-    const line = buf.slice(0, nl);
-    buf = buf.slice(nl + 1);
-    if (line.trim()) {
-      try {
-        onLine(line);
-      } catch (e) {
-        output.push(`[PARSE ERR] ${line}: ${e.message}`);
-      }
-    }
-  }
-});
-child.stderr.on("data", (d) => {
-  output.push(`[stderr] ${d.trim()}`);
-});
-child.on("error", (e) => output.push(`[spawn error] ${e.message}`));
-child.on("exit", (code, signal) => output.push(`[exit] code=${code} signal=${signal}`));
+attach(child);
 
 try {
   await withTimeout(request("initialize", {
@@ -97,7 +108,7 @@ try {
   assert.ok(r1.includes("Memory updated"), r1);
   ok("remember: plain fact");
 
-  const storeFile = join(MEMORY_DIR, readdirSync(MEMORY_DIR).find((f) => f.endsWith(".md")));
+  const storeFile = join(MEMORY_DIR, readdirSync(MEMORY_DIR).find((f) => f.endsWith(".md") && f !== "global.md"));
 
   const r2 = toolResult(await request("tools/call", { name: "remember", arguments: { scope: "project", fact: "alpha workspace uses ESM", ttl: "30d", keep: true, tags: "setup,pref" } }));
   assert.ok(r2.includes("Memory updated"), r2);
@@ -125,8 +136,9 @@ try {
   const u1 = toolResult(await request("tools/call", { name: "update_fact", arguments: { scope: "project", id: "alpha prefers vanilla ice cream", newText: "alpha prefers matcha ice cream" } }));
   assert.ok(u1.includes("Fact updated"), u1);
   const storeAfterUpdate = readFileSync(storeFile, "utf8");
-  assert.ok(storeAfterUpdate.includes("matcha") && !storeAfterUpdate.includes("vanilla"), storeAfterUpdate);
-  ok("update_fact: rewrites text, preserves date/meta");
+  assert.ok(storeAfterUpdate.includes("**alpha prefers vanilla ice cream** — alpha prefers matcha ice cream"), storeAfterUpdate);
+  assert.ok(!storeAfterUpdate.includes("**alpha prefers vanilla ice cream** — alpha prefers vanilla ice cream"), storeAfterUpdate);
+  ok("update_fact: rewrites body, preserves title/date/meta");
 
   const f1 = toolResult(await request("tools/call", { name: "forget", arguments: { scope: "project", query: "alpha workspace uses ESM" } }));
   assert.ok(f1.includes("protected"), f1);
@@ -153,6 +165,28 @@ try {
   const lines = readFileSync(storeFile, "utf8").split("\n").filter((l) => l.startsWith("- ["));
   assert.equal(lines.length, 1, JSON.stringify(lines));
   ok("store file left with exactly 1 fact (superseding v2)");
+
+  // B2.4: remember(scope:"project") must error when cwd is not a git repo
+  child.kill();
+  await waitExit(child);
+  buf = "";
+  output = [];
+  const nonGitDir = mkdtempSync(join(tmpdir(), "mcp-nongit-"));
+  child = spawn(process.execPath, [join(ROOT, "mcp-server/index.js")], {
+    cwd: nonGitDir,
+    env: { ...process.env, MEMORY_DIR: join(nonGitDir, "mem") },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  attach(child);
+  await withTimeout(request("initialize", {
+    protocolVersion: "2024-11-05",
+    capabilities: {},
+    clientInfo: { name: "hermetic-test", version: "1.0.0" },
+  }), 15000, "initialize");
+  send({ jsonrpc: "2.0", method: "notifications/initialized", params: {} });
+  const neg = toolResult(await request("tools/call", { name: "remember", arguments: { scope: "project", fact: "must fail outside git" } }));
+  assert.ok(!neg.includes("Memory updated") && /git/i.test(neg), neg);
+  ok("remember: project scope errors outside a git repo (B2.4)");
 } finally {
   child.kill();
   try {
