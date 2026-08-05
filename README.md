@@ -92,12 +92,34 @@ npm install -g @lotargo/memory_plugin && memory_plugin setup --codex
    - **Scope**: User preferences, identity, project conventions, system rules.
    - **Storage**: Human-readable Markdown format (`global` and per-project stores).
    - **Performance**: Guaranteed 100% precision instant lookup without vector degradation or threshold filtering.
-   - **Project Scoping**: Project stores are bound to their canonical directory path (e.g. `f__projects_plugins_memory.md`), so identical project names in different folders never collide. Legacy basename stores are migrated automatically with a collision guard.
+   - **Project Scoping**: Project stores are bound to a **Git-based project identity** — the normalized remote URL (`git:github.com/owner/repo`) or, without a remote, `git:local:<repo basename>` — never to a directory path. The same repository yields the same store on any machine/OS and from any subdirectory (git toplevel resolution). Outside a Git repository there is no project memory (only `global`). Legacy path/basename stores are migrated via `link_project_memory` with a collision guard.
 
 2. **Layer 2: RAG Knowledge Base (Technical Documents & Codebases)**
    - **Tools**: `ingest_document`, `query_knowledge_base`, `manage_knowledge_base`, `link_knowledge`
    - **Capabilities**: Ingests raw text files, Markdown, HTML, Web URLs, and full code repositories.
    - **Engine Components**: 3-tier hierarchy chunking (Big / Medium / Small), SQLite FTS5 BM25 search, ONNX dense vector embeddings (`multilingual-e5-small`), Reciprocal Rank Fusion (RRF / RSF), cross-encoder reranking (optional), and GraphRAG Lite code symbol extraction.
+
+---
+
+## Fact Schema, Injection & Project Identity
+
+### Fact schema: title + body
+- Every fact is a Markdown line `**Title** — body`.
+- `remember` requires a `title` parameter (for both `global` and `project` scopes); the title is stored as the `**Title**` prefix. Legacy lines without a `**Title**` prefix are read as legacy facts (title = first phrase of the body, text untouched) and can be bulk-migrated via `migrate_titles` (CLI/`withTitle()`).
+- Line metadata badges: `[inject]`, `[archive]`, `[keep]`, date, tags. `inject:1` marks a fact for full-text injection (the only fact type that gets injected in full).
+
+### Injection: headers + limit
+- The injected `<MEMORY>` block contains **only titles** (plus ids/badges), never full fact text — keeping the system prompt lean.
+- A fact marked `inject:1` is injected in full text. `injectLimit` (default `10`) caps the number of injected entries; when more facts exist, a counter (`... and N more`) is shown.
+- Ordering: `inject:1` facts first, then regular facts, newest-first.
+- Full records or ranges are fetched on demand via `recall` (`mode: "headers"|"full"`, `offset`/`limit`) and `get_fact({ id })`.
+- Outside a Git repository the injected block contains only the `## Global` section.
+
+### Project identity
+- Project memory is keyed by **Git identity**, never by directory path: normalized remote URL (`git:github.com/owner/repo`) when a remote exists, otherwise `git:local:<repo basename>`.
+- The same repository yields the same store on any machine/OS and from any subdirectory (git toplevel resolution unifies the key). Outside a Git repository there is no project memory — only `global`.
+- Tools: `link_project_memory` (bind the current directory to a git identity, register aliases, optionally merge legacy path/basename stores with dedup), `unlink_project_memory`, `relink_project_memory`. CLI equivalents: `memory-cli link|unlink|relink|identity` and the interactive `[PROJECT]` menu.
+- The identity/alias registry lives in SQLite (`project_identities`, `project_aliases`) and is multi-user/cloud-friendly.
 
 ---
 
@@ -111,7 +133,7 @@ npm install -g @lotargo/memory_plugin && memory_plugin setup --codex
 - **3-Tier Hierarchy Chunking**: Document (Big) -> Section (Medium) -> Micro-Chunk (Small).
 - **Hybrid RRF/RSF Fusion**: Combines SQLite FTS5 keyword precision with ONNX dense vector similarity; lexical-only fallback when embeddings are disabled.
 - **Semantic Search**: Cosine-similarity vector retrieval with multilingual ONNX embeddings (E5 / BGE model families).
-- **Path-Based Project Memory**: Per-project stores keyed by canonical directory path, with automatic migration of legacy stores.
+- **Git-Based Project Identity**: Per-project stores keyed by normalized Git remote URL (or repo basename), so memories follow the repository across machines, OSes, and subdirectories; legacy path/basename stores are migrated via `link_project_memory` with fact-text dedup and a collision guard.
 - **GraphRAG Lite**: Automatically links documents and extracted code symbols (classes, functions, types).
 - **Memory-to-Knowledge Linking**: Associate notebook facts with specific documents or line ranges in the RAG base.
 - **Content-Addressable Storage (CAS)**: Local S3-style compressed blob store for raw original documents.
