@@ -15,6 +15,9 @@ import {
   matchesQuery,
   matchesTags,
   inDateRange,
+  factTitle,
+  factBody,
+  autoGenerateTitle,
 } from "./fact_format.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -76,32 +79,52 @@ server.registerTool(
       "(name, goals, constraints, tech preferences, project conventions). " +
       "docId/startLine/endLine/relationType are OPTIONAL and only used to link the fact to a " +
       "Knowledge Base document or line range; omit them when no linking is needed. " +
-      "ttl is OPTIONAL (e.g. '90d', '2w', '24h') — expired facts are shown with [EXPIRED] but not auto-deleted. " +
+      "ttl is OPTIONAL (e.g. \x2790d\x27, \x272w\x27, \x2724h\x27) — expired facts are shown with [EXPIRED] but not auto-deleted. " +
       "keep=true protects the fact from forget deletion unless force=true. " +
       "tags is OPTIONAL comma-separated text for filtering. " +
       "supersedes is OPTIONAL: a number (from recall), id, or text of a fact this one replaces; " +
       "the target is then marked [SUPERSEDED]. " +
       "Translate the fact into English and keep it concise. " +
-      "scope: 'project' (default) or 'global'",
+      "scope: \x27project\x27 (default) or \x27global\x27",
     inputSchema: z.object({
       fact: z.string().describe("The fact to remember, written in English"),
-      scope: defStr("project").describe("'project' (default) or 'global'"),
+      title: optStr().describe("Optional title for the fact. If not specified, one is auto-generated."),
+      scope: defStr("project").describe("\x27project\x27 (default) or \x27global\x27"),
       docId: optStr().describe("Optional document ID, title, or path to link this fact to"),
       startLine: optNum().describe("Optional starting line number in target document"),
       endLine: optNum().describe("Optional ending line number in target document"),
-      relationType: defStr("LINKS_TO").describe("Relation type (e.g. 'RULES_FOR', 'IMPLEMENTS', 'REFERENCES')"),
-      ttl: optStr().describe("Optional time-to-live, e.g. '90d', '2w', '24h', '12m'"),
+      relationType: defStr("LINKS_TO").describe("Relation type (e.g. \x27RULES_FOR\x27, \x27IMPLEMENTS\x27, \x27REFERENCES\x27)"),
+      ttl: optStr().describe("Optional time-to-live, e.g. \x2790d\x27, \x272w\x27, \x2724h\x27, \x2712m\x27"),
       keep: defBool(false).describe("Protect the fact from forget deletion unless force=true"),
-      tags: optStr().describe("Optional comma-separated tags, e.g. 'pref,arch'"),
+      tags: optStr().describe("Optional comma-separated tags, e.g. \x27pref,arch\x27"),
       supersedes: optStr().describe("Optional number, id, or text of the fact this one replaces"),
     }),
   },
-  async ({ fact, scope, docId, startLine, endLine, relationType, ttl, keep, tags, supersedes }) => {
-    const key = scopeKey(scope, null, null);
+  async ({ fact, title, scope, docId, startLine, endLine, relationType, ttl, keep, tags, supersedes }) => {
+    const key = await scopeKey(scope, null, null);
     const entries = await readMemory(key);
-    const factNormalized = fact.toLowerCase().trim();
+
+    const explicitTitle = title ? title.trim() : null;
+    let finalTitle = explicitTitle;
+    let finalFact = fact.trim();
+
+    // If fact already contains a title pattern, extract it
+    const titleMatch = /^\\*\\*([^\x2a]+)\\*\\*\\s*(?:—|--|-|:)?\\s*(.*)$/.exec(finalFact);
+    if (titleMatch) {
+      if (!finalTitle) {
+        finalTitle = titleMatch[1].trim();
+      }
+      finalFact = titleMatch[2].trim();
+    }
+
+    if (!finalTitle) {
+      finalTitle = autoGenerateTitle(finalFact);
+    }
+
+    const text = `**${finalTitle}** — ${finalFact}`;
+    const factBodyNormalized = finalFact.toLowerCase();
     let duplicate = false;
-    if (entries.some((e) => factText(e).toLowerCase().trim() === factNormalized)) {
+    if (entries.some((e) => factBody(e).toLowerCase().trim() === factBodyNormalized)) {
       duplicate = true;
     }
 
@@ -125,7 +148,7 @@ server.registerTool(
         }
       }
       if (!meta.id) meta.id = nextFactId(entries);
-      entries.push(formatFactEntry({ date, time, text: fact, meta }));
+      entries.push(formatFactEntry({ date, time, text, meta }));
       await writeMemory(key, entries);
     }
 
@@ -135,7 +158,7 @@ server.registerTool(
       try {
         const linkRes = linkFactToDocument({
           factKey: key,
-          factText: fact,
+          factText: finalFact,
           docId,
           startLine,
           endLine,
@@ -157,28 +180,56 @@ server.registerTool(
   {
     description:
       "Show saved facts with any Agent-linked Knowledge Base documents/lines. " +
-      "scope: 'project', 'global', 'all' (default), or 'list_projects'. " +
-      "Use project: '<directory path>' with scope 'project'/'all' to read facts of a specific project from any working directory. " +
+      "scope: \x27project\x27, \x27global\x27, \x27all\x27 (default), or \x27list_projects\x27. " +
+      "Use project: \x27<directory path>\x27 with scope \x27project\x27/\x27all\x27 to read facts of a specific project from any working directory. " +
       "query filters by keyword (all space-separated terms must match). " +
       "tags filters by comma-separated tags. since/until filter by date (YYYY-MM-DD, inclusive). " +
       "Expired facts are shown with [EXPIRED], protected ones with [KEEP]. The response includes the store file paths.",
     inputSchema: z.object({
-      scope: defStr("all").describe("'project', 'global', 'all', or 'list_projects'"),
-      project: optStr().describe("Directory path of the project to read facts from (e.g. 'F:/projects/plugins/memory')"),
+      scope: defStr("all").describe("\x27project\x27, \x27global\x27, \x27all\x27, or \x27list_projects\x27"),
+      project: optStr().describe("Directory path of the project to read facts from (e.g. \x27F:/projects/plugins/memory\x27)"),
       query: optStr().describe("Optional keyword filter; all space-separated terms must match"),
       tags: optStr().describe("Optional comma-separated tag filter (any match)"),
       since: optStr().describe("Optional start date filter, YYYY-MM-DD (inclusive)"),
       until: optStr().describe("Optional end date filter, YYYY-MM-DD (inclusive)"),
+      mode: z.enum(["headers", "full"]).nullish().transform((v) => v || "headers").describe("Result mode: \x27headers\x27 (title and badges only) or \x27full\x27 (with body)"),
+      offset: defNum(0).describe("Pagination offset (default: 0)"),
+      limit: defNum(10).describe("Pagination limit (default: 10)"),
     }),
   },
-  async ({ scope, project, query, tags, since, until }) => {
+  async ({ scope, project, query, tags, since, until, mode, offset, limit }) => {
     const { getLinksForFact } = await import("./graph/knowledge_linker.js");
     const results = [];
+    const now = Date.now();
 
-    const formatFactWithLinks = async (factLine, key) => {
-      let line = displayFact(factLine);
+    const formatRecallFact = async (factLine, index, key) => {
+      const p = parseFactEntry(factLine);
+      if (!p) return factLine;
+
+      const title = factTitle(factLine);
+      const body = factBody(factLine);
+      const meta = p.meta;
+
+      const badges = [];
+      if (isExpiredLine(factLine, now)) badges.push("EXPIRED");
+      if (isKeepFact(factLine)) badges.push("KEEP");
+      if (isSuperseded(factLine)) badges.push("SUPERSEDED");
+      if (meta.inject === "1") badges.push("INJECT");
+      if (meta.id) badges.push(`id:${meta.id}`);
+      if (meta.tags) badges.push(`tags:${meta.tags}`);
+      badges.push(`${p.date} ${p.time}`);
+
+      const badgesStr = badges.length ? ` [${badges.join("] [")}]` : "";
+
+      let lineText;
+      if (mode === "headers") {
+        lineText = `**${title}**${badgesStr}`;
+      } else {
+        lineText = `**${title}** — ${body}${badgesStr}`;
+      }
+
       try {
-        const links = await getLinksForFact(key, factText(factLine));
+        const links = await getLinksForFact(key, p.text);
         if (links && links.length > 0) {
           const docStr = links
             .map((l) => {
@@ -186,21 +237,29 @@ server.registerTool(
               return `${l.doc_title || l.doc_path}${range}`;
             })
             .join(", ");
-          line += ` 🔗 [Linked Docs: ${docStr}]`;
+          lineText += ` 🔗 [Linked Docs: ${docStr}]`;
         }
       } catch (e) {}
-      return line;
+
+      return `${index}. ${lineText}`;
     };
 
     const collect = async (entries, key) => {
+      // Recall search query matches against full raw line (both title and body)
       const matched = entries.filter(
         (e) => matchesQuery(e, query) && matchesTags(e, tags) && inDateRange(e, since, until)
       );
       if (!matched.length) return;
       if (results.length) results.push("");
       results.push(`--- ${key === GLOBAL_KEY ? "Global" : `Project: ${key === target ? label : key}`} ---`);
-      for (let i = 0; i < matched.length; i++) {
-        results.push(`${i + 1}. ${await formatFactWithLinks(matched[i], key)}`);
+
+      const paginated = matched.slice(offset, offset + limit);
+      for (let i = 0; i < paginated.length; i++) {
+        results.push(await formatRecallFact(paginated[i], offset + i + 1, key));
+      }
+
+      if (matched.length > limit) {
+        results.push(`Showing entries ${offset + 1}-${Math.min(offset + limit, matched.length)} of ${matched.length}`);
       }
       results.push(`Store file: ${storeFilePath(key)}`);
     };
@@ -223,8 +282,8 @@ server.registerTool(
       };
     }
 
-    const target = project ? canonicalPath(project) : projectKey(null, null);
-    const label = project ? target : projectName();
+    const target = project ? canonicalPath(project) : await projectKey(null, null);
+    const label = project ? target : await projectName();
     if (scope !== "project") {
       const global = await readMemory(GLOBAL_KEY);
       await collect(global, GLOBAL_KEY);
@@ -244,6 +303,58 @@ server.registerTool(
 );
 
 server.registerTool(
+  "get_fact",
+  {
+    description: "Get the full text and metadata of a single fact by its metadata id.",
+    inputSchema: z.object({
+      id: z.string().describe("The unique metadata id of the fact (e.g. \x278f3a2c\x27)"),
+      scope: defStr("all").describe("\x27project\x27, \x27global\x27, or \x27all\x27 (default)"),
+    }),
+  },
+  async ({ id, scope }) => {
+    const results = [];
+    const targetId = String(id || "").trim();
+    if (!targetId) throw new Error("ID parameter is required.");
+
+    const check = async (key) => {
+      const entries = await readMemory(key);
+      const match = entries.find((e) => factMeta(e).id === targetId);
+      if (match) {
+        const title = factTitle(match);
+        const body = factBody(match);
+        const meta = factMeta(match);
+        results.push({
+          key,
+          title,
+          body,
+          meta,
+          line: match
+        });
+      }
+    };
+
+    if (scope !== "project") {
+      await check(GLOBAL_KEY);
+    }
+    if (scope !== "global") {
+      const target = await projectKey(null, null);
+      await check(target);
+    }
+
+    if (!results.length) {
+      return { content: [{ type: "text", text: `Fact with ID "${targetId}" not found.` }] };
+    }
+
+    const lines = results.map((r) => {
+      const metaStr = Object.entries(r.meta).map(([k, v]) => `${k}:${v}`).join(", ");
+      return `[Store: ${r.key === GLOBAL_KEY ? "Global" : "Project"}]\nTitle: ${r.title}\nBody: ${r.body}\nMetadata: ${metaStr ? `<!-- ${metaStr} -->` : "none"}`;
+    });
+
+    return { content: [{ type: "text", text: lines.join("\n\n") }] };
+  }
+);
+
+server.registerTool(
   "forget",
   {
     description:
@@ -256,7 +367,7 @@ server.registerTool(
     }),
   },
   async ({ query, scope, force }) => {
-    const key = scopeKey(scope, null, null);
+    const key = await scopeKey(scope, null, null);
     const entries = await readMemory(key);
     const rangeMatch = /^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(query);
     const num = parseInt(query, 10);
@@ -300,17 +411,39 @@ server.registerTool(
     inputSchema: z.object({
       id: z.string().describe("Number (from recall), metadata id, or text of the fact to update"),
       newText: z.string().describe("New fact text"),
-      scope: defStr("project").describe("'project' (default) or 'global'"),
+      title: optStr().describe("Optional new title for the fact"),
+      scope: defStr("project").describe("\x27project\x27 (default) or \x27global\x27"),
     }),
   },
-  async ({ id, newText, scope }) => {
-    const key = scopeKey(scope, null, null);
+  async ({ id, newText, title, scope }) => {
+    const key = await scopeKey(scope, null, null);
     const entries = await readMemory(key);
     const idx = resolveFactIndex(entries, id);
     if (idx === -1) throw new Error(`Fact not found: ${id}`);
     const p = parseFactEntry(entries[idx]);
     const oldText = p ? p.text : entries[idx];
-    const newLine = formatFactEntry({ date: p.date, time: p.time, text: newText, meta: p.meta });
+    const oldBody = factBody(entries[idx]) || oldText;
+
+    const explicitTitle = title ? title.trim() : null;
+    let finalTitle = explicitTitle;
+    let finalFact = newText.trim();
+
+    // Check if newText has a title
+    const titleMatch = /^\\*\\*([^\x2a]+)\\*\\*\\s*(?:—|--|-|:)?\\s*(.*)$/.exec(finalFact);
+    if (titleMatch) {
+      if (!finalTitle) {
+        finalTitle = titleMatch[1].trim();
+      }
+      finalFact = titleMatch[2].trim();
+    }
+
+    // If no new title is specified, preserve the old title
+    if (!finalTitle) {
+      finalTitle = factTitle(entries[idx]) || autoGenerateTitle(finalFact);
+    }
+
+    const newTextFormatted = `**${finalTitle}** — ${finalFact}`;
+    const newLine = formatFactEntry({ date: p.date, time: p.time, text: newTextFormatted, meta: p.meta });
     entries[idx] = newLine;
     await writeMemory(key, entries);
 
@@ -322,7 +455,7 @@ server.registerTool(
         .prepare(
           "UPDATE knowledge_links SET fact_text = ? WHERE fact_key = ? AND fact_text = ?"
         )
-        .run(newText, key, oldText);
+        .run(finalFact, key, oldBody);
       linksUpdated = res.changes;
     } catch (e) {}
 
@@ -345,7 +478,7 @@ server.registerTool(
   async () => {
     const dbPath = join(MEMORY_DIR, "storage", "memory.sqlite");
     const globalFile = storeFilePath(GLOBAL_KEY);
-    const projectFile = storeFilePath(projectKey(null, null));
+    const projectFile = storeFilePath(await projectKey(null, null));
 
     let version = "unknown";
     try {
@@ -379,7 +512,7 @@ server.registerTool(
       `Project store: ${projectFile}`,
       `Project stores: ${stores.length}`,
       `Facts (global): ${(await readMemoryRaw(GLOBAL_KEY)).length}`,
-      `Facts (project): ${(await readMemoryRaw(projectKey(null, null))).length}`,
+      `Facts (project): ${(await readMemoryRaw(await projectKey(null, null))).length}`,
     ];
     if (rag.error) lines.push(`RAG: unavailable (${rag.error})`);
     else lines.push(
@@ -407,7 +540,7 @@ server.registerTool(
   },
   async ({ action, factText, docId, scope, startLine, endLine, relationType }) => {
     const { linkFactToDocument, getLinksForDoc, listAllLinks } = await import("./graph/knowledge_linker.js");
-    const key = scopeKey(scope, null, null);
+    const key = await scopeKey(scope, null, null);
 
     if (action === "link") {
       if (!factText || !docId) {
@@ -442,6 +575,204 @@ server.registerTool(
     }
 
     throw new Error(`Unknown action: ${action}`);
+  }
+);
+
+server.registerTool(
+  "link_project_memory",
+  {
+    description: "Link the current directory to a Git-based project identity, register aliases, and optionally migrate legacy/path stores.",
+    inputSchema: z.object({
+      directory: optStr().describe("Directory path to link (default: current directory)"),
+      remote: optStr().describe("Optional explicit remote URL to use as primary identity key"),
+    }),
+  },
+  async ({ directory, remote }) => {
+    const { getDatabase } = await import("./db/database.js");
+    const { resolveProjectIdentity, upsertIdentity, registerAlias, normalizeRemoteUrl } = await import("./identity.js");
+    const db = await getDatabase();
+
+    const dir = directory || process.cwd();
+    const identity = await resolveProjectIdentity(dir);
+    if (!identity && !remote) {
+      throw new Error("No Git repository detected and no remote URL specified.");
+    }
+
+    let key = identity ? identity.key : `git:${normalizeRemoteUrl(remote)}`;
+    let name = identity ? identity.name : basename(dir) || "unbound";
+    let primaryRemote = remote ? normalizeRemoteUrl(remote) : (identity ? identity.primaryRemote : null);
+
+    await upsertIdentity(db, { key, name, primaryRemote });
+
+    const aliases = [];
+    if (primaryRemote) {
+      aliases.push({ alias: `remote:${primaryRemote}`, kind: "remote" });
+    }
+    aliases.push({ alias: `path:${canonicalPath(dir)}`, kind: "path" });
+    aliases.push({ alias: `basename:${name}`, kind: "basename" });
+
+    for (const a of aliases) {
+      await registerAlias(db, { alias: a.alias, identityKey: key, kind: a.kind });
+    }
+
+    let migrated = false;
+    const legacyPathKey = canonicalPath(dir);
+    const legacyEntries = await readMemory(legacyPathKey);
+    if (legacyEntries && legacyEntries.length > 0) {
+      const gitEntries = await readMemory(key);
+      const seen = new Set(gitEntries.map((e) => factBody(e).toLowerCase().trim()));
+      let mergedCount = 0;
+      for (const entry of legacyEntries) {
+        const body = factBody(entry).toLowerCase().trim();
+        if (!seen.has(body)) {
+          seen.add(body);
+          gitEntries.push(entry);
+          mergedCount++;
+        }
+      }
+      if (mergedCount > 0) {
+        await writeMemory(key, gitEntries);
+        migrated = true;
+      }
+      try {
+        const legacyFp = storeFilePath(legacyPathKey);
+        const { existsSync } = await import("node:fs");
+        if (existsSync(legacyFp)) {
+          const { unlink } = await import("fs/promises");
+          await unlink(legacyFp);
+        }
+      } catch (e) {}
+    }
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            status: "success",
+            key,
+            name,
+            primaryRemote,
+            aliases: aliases.map((a) => a.alias),
+            migrated
+          }, null, 2)
+        }
+      ]
+    };
+  }
+);
+
+server.registerTool(
+  "unlink_project_memory",
+  {
+    description: "Remove the path alias link for the specified project directory.",
+    inputSchema: z.object({
+      directory: optStr().describe("Directory path to unlink (default: current directory)"),
+      purge: defBool(false).describe("If true, completely purge the project identity from the SQLite store"),
+    }),
+  },
+  async ({ directory, purge }) => {
+    const { getDatabase } = await import("./db/database.js");
+    const { unregisterAlias, removeIdentity, resolveProjectIdentity } = await import("./identity.js");
+    const db = await getDatabase();
+
+    const dir = directory || process.cwd();
+    const alias = `path:${canonicalPath(dir)}`;
+    await unregisterAlias(db, alias);
+
+    let key = null;
+    if (purge) {
+      const identity = await resolveProjectIdentity(dir);
+      if (identity) {
+        key = identity.key;
+        await removeIdentity(db, key);
+      }
+    }
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            status: "success",
+            alias,
+            purgedIdentityKey: key
+          }, null, 2)
+        }
+      ]
+    };
+  }
+);
+
+server.registerTool(
+  "relink_project_memory",
+  {
+    description: "Move or merge project memories from the current identity to a new target identity.",
+    inputSchema: z.object({
+      directory: optStr().describe("Directory path to relink (default: current directory)"),
+      remote: z.string().describe("New target remote URL / identity key to move memories to"),
+    }),
+  },
+  async ({ directory, remote }) => {
+    const { getDatabase } = await import("./db/database.js");
+    const { resolveProjectIdentity, upsertIdentity, removeIdentity, normalizeRemoteUrl } = await import("./identity.js");
+    const db = await getDatabase();
+
+    const dir = directory || process.cwd();
+    const sourceIdentity = await resolveProjectIdentity(dir);
+    if (!sourceIdentity) {
+      throw new Error("Source project identity not detected.");
+    }
+
+    const targetKey = `git:${normalizeRemoteUrl(remote)}`;
+    const sourceKey = sourceIdentity.key;
+
+    if (sourceKey === targetKey) {
+      return { content: [{ type: "text", text: "Source and target identities are already identical." }] };
+    }
+
+    const sourceFacts = await readMemory(sourceKey);
+    const targetFacts = await readMemory(targetKey);
+    const seen = new Set(targetFacts.map((e) => factBody(e).toLowerCase().trim()));
+
+    let mergedCount = 0;
+    for (const f of sourceFacts) {
+      const body = factBody(f).toLowerCase().trim();
+      if (!seen.has(body)) {
+        seen.add(body);
+        targetFacts.push(f);
+        mergedCount++;
+      }
+    }
+
+    await writeMemory(targetKey, targetFacts);
+
+    await db.prepare("UPDATE project_aliases SET identity_key = ? WHERE identity_key = ?;").run(targetKey, sourceKey);
+    await upsertIdentity(db, { key: targetKey, name: sourceIdentity.name, primaryRemote: normalizeRemoteUrl(remote) });
+    await removeIdentity(db, sourceKey);
+
+    try {
+      const sourceFp = storeFilePath(sourceKey);
+      const { existsSync } = await import("node:fs");
+      if (existsSync(sourceFp)) {
+        const { unlink } = await import("fs/promises");
+        await unlink(sourceFp);
+      }
+    } catch (e) {}
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            status: "success",
+            sourceKey,
+            targetKey,
+            mergedFacts: mergedCount
+          }, null, 2)
+        }
+      ]
+    };
   }
 );
 

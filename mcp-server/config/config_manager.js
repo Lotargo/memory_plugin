@@ -15,6 +15,7 @@ export const DEFAULT_CONFIG = {
   onnxThreads: 0,          // ONNX WASM threads: 0 = auto-detect CPU cores, or 1-16
   executionDevice: "cpu",  // "cpu" | "webgpu"
   mode: "only-local",     // "only-local" | "only-cloud" | "hybrid-sync"
+  injectLimit: 10,
   conflictStrategy: "merge", // "merge" | "cloud-wins" | "local-wins"
   tursoUrl: "",           // Connection endpoint URL for Turso DB
   failoverUrl: "",        // Failover connection endpoint URL (Fly.io + LiteFS)

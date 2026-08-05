@@ -14,7 +14,7 @@
 //   supersededBy id of the fact that replaced this one
 //   tags         comma-separated free-form tags for recall filtering
 
-const META_KEYS = ["id", "ttl", "keep", "supersedes", "supersededBy", "tags"];
+const META_KEYS = ["id", "ttl", "keep", "supersedes", "supersededBy", "tags", "inject"];
 
 const ENTRY_RE = /^- \[(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})\]\s+(.*)$/;
 
@@ -174,4 +174,58 @@ export function displayFact(factLine, now = Date.now()) {
   const text = factText(factLine);
   const badges = metaBadges(factLine, now);
   return badges.length ? `${text}  [${badges.join("] [")}]` : text;
+}
+
+// Part A1: Title + Body support
+
+export function factTitle(line) {
+  const p = parseFactEntry(line);
+  if (!p) return "";
+  const text = p.text;
+  const m = /^\*\*([^*]+)\*\*\s*(?:—|--|-|:)?\s*(.*)$/.exec(text);
+  if (m) {
+    return m[1].trim();
+  }
+  const parts = text.split(/(?:\s*(?:—|--)\s*|\s+-\s+|\.)/);
+  if (parts.length > 0 && parts[0].trim()) {
+    return parts[0].trim();
+  }
+  return text.trim();
+}
+
+export function factBody(line) {
+  const p = parseFactEntry(line);
+  if (!p) return "";
+  const text = p.text;
+  const m = /^\*\*([^*]+)\*\*\s*(?:—|--|-|:)?\s*(.*)$/.exec(text);
+  if (m) {
+    return m[2].trim();
+  }
+  return text;
+}
+
+export function autoGenerateTitle(fact) {
+  const f = String(fact || "").trim();
+  const m = /^\*\*([^*]+)\*\*\s*(?:—|--|-|:)?\s*(.*)$/.exec(f);
+  if (m) {
+    return m[1].trim();
+  }
+  const parts = f.split(/(?:\s*(?:—|--)\s*|\s+-\s+|\.)/);
+  if (parts.length > 0 && parts[0].trim()) {
+    return parts[0].trim();
+  }
+  return f.slice(0, 50).trim();
+}
+
+export function withTitleAndBody(line, { title, body }) {
+  const p = parseFactEntry(line);
+  if (!p) return line;
+  const currentTitle = factTitle(line);
+  const currentBody = factBody(line);
+
+  const newTitle = title !== undefined && title !== null ? String(title).trim() : currentTitle;
+  const newBody = body !== undefined && body !== null ? String(body).trim() : currentBody;
+
+  const newText = `**${newTitle}** — ${newBody}`;
+  return formatFactEntry({ date: p.date, time: p.time, text: newText, meta: p.meta });
 }
