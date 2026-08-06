@@ -112,7 +112,7 @@ npm install -g @lotargo/memory_plugin && memory_plugin setup --codex
 - The injected `<MEMORY>` block contains **only titles** (plus ids/badges), never full fact text — keeping the system prompt lean.
 - A fact marked `inject:1` is injected in full text. `injectLimit` (default `10`) caps the number of injected entries; when more facts exist, a counter (`... and N more`) is shown.
 - Ordering: `inject:1` facts first, then regular facts, newest-first.
-- Full records or ranges are fetched on demand via `recall` (`mode: "headers"|"full"`, `offset`/`limit`) and `get_fact({ id })`.
+- Full records or ranges are fetched on demand via `recall` (`mode: "full"|"headers"`, optional `offset`/`limit`) and `get_fact({ id })`.
 - Outside a Git repository the injected block contains only the `## Global` section.
 
 ### Project identity

@@ -392,16 +392,15 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           tags: { type: "string", description: "Optional comma-separated tag filter (any match)" },
           since: { type: "string", description: "Optional start date filter, YYYY-MM-DD (inclusive)" },
           until: { type: "string", description: "Optional end date filter, YYYY-MM-DD (inclusive)" },
-          mode: { type: "string", description: "Result mode: \x27headers\x27 (title and badges only) or \x27full\x27 (with body)", default: "headers" },
-          offset: { type: "number", description: "Pagination offset (default: 0)", default: 0 },
-          limit: { type: "number", description: "Pagination limit (default: 10)", default: 10 },
+          mode: { type: "string", description: "Result mode: 'full' (with body, default) or 'headers' (title and badges only)", default: "full" },
+          offset: { type: "number", description: "Pagination offset (optional)" },
+          limit: { type: "number", description: "Pagination limit (optional)" },
         },
         async execute({ scope, project, query, tags, since, until, mode, offset, limit }, { worktree, directory }) {
           const results = [];
           const now = Date.now();
-          const targetMode = mode || "headers";
+          const targetMode = mode || "full";
           const targetOffset = offset !== undefined ? offset : 0;
-          const targetLimit = limit !== undefined ? limit : 10;
 
           let getLinksForFact;
           try {
@@ -432,7 +431,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
             if (targetMode === "headers") {
               lineText = `**${title}**${badgesStr}`;
             } else {
-              lineText = `**${title}** — ${body}${badgesStr}`;
+              lineText = p.text;
             }
 
             if (getLinksForFact) {
@@ -463,12 +462,14 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
             if (results.length) results.push("");
             results.push(`--- ${key === GLOBAL_KEY ? "Global" : `Project: ${key === target ? label : key}`} ---`);
 
+            const targetLimit = limit !== undefined ? limit : matched.length;
+
             const paginated = matched.slice(targetOffset, targetOffset + targetLimit);
             for (let i = 0; i < paginated.length; i++) {
               results.push(await formatFactWithLinks(paginated[i], targetOffset + i + 1, key));
             }
 
-            if (matched.length > targetLimit) {
+            if (limit !== undefined && matched.length > targetLimit) {
               results.push(`Showing entries ${targetOffset + 1}-${Math.min(targetOffset + targetLimit, matched.length)} of ${matched.length}`);
             }
             results.push(`Store file: ${storeFilePath(key)}`);

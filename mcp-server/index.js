@@ -205,9 +205,9 @@ server.registerTool(
       tags: optStr().describe("Optional comma-separated tag filter (any match)"),
       since: optStr().describe("Optional start date filter, YYYY-MM-DD (inclusive)"),
       until: optStr().describe("Optional end date filter, YYYY-MM-DD (inclusive)"),
-      mode: z.enum(["headers", "full"]).nullish().transform((v) => v || "headers").describe("Result mode: \x27headers\x27 (title and badges only) or \x27full\x27 (with body)"),
-      offset: defNum(0).describe("Pagination offset (default: 0)"),
-      limit: defNum(10).describe("Pagination limit (default: 10)"),
+      mode: z.enum(["headers", "full"]).nullish().transform((v) => v || "full").describe("Result mode: 'full' (with body, default) or 'headers' (title and badges only)"),
+      offset: optNum().describe("Pagination offset (optional)"),
+      limit: optNum().describe("Pagination limit (optional)"),
     }),
   },
   async ({ scope, project, query, tags, since, until, mode, offset, limit }) => {
@@ -238,7 +238,7 @@ server.registerTool(
       if (mode === "headers") {
         lineText = `**${title}**${badgesStr}`;
       } else {
-        lineText = `**${title}** — ${body}${badgesStr}`;
+        lineText = p.text;
       }
 
       try {
@@ -266,13 +266,16 @@ server.registerTool(
       if (results.length) results.push("");
       results.push(`--- ${key === GLOBAL_KEY ? "Global" : `Project: ${key === target ? label : key}`} ---`);
 
-      const paginated = matched.slice(offset, offset + limit);
+      const targetOffset = offset !== undefined ? offset : 0;
+      const targetLimit = limit !== undefined ? limit : matched.length;
+
+      const paginated = matched.slice(targetOffset, targetOffset + targetLimit);
       for (let i = 0; i < paginated.length; i++) {
-        results.push(await formatRecallFact(paginated[i], offset + i + 1, key));
+        results.push(await formatRecallFact(paginated[i], targetOffset + i + 1, key));
       }
 
-      if (matched.length > limit) {
-        results.push(`Showing entries ${offset + 1}-${Math.min(offset + limit, matched.length)} of ${matched.length}`);
+      if (limit !== undefined && matched.length > targetLimit) {
+        results.push(`Showing entries ${targetOffset + 1}-${Math.min(targetOffset + targetLimit, matched.length)} of ${matched.length}`);
       }
       results.push(`Store file: ${storeFilePath(key)}`);
     };
