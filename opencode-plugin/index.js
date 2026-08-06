@@ -130,7 +130,7 @@ function sortNewestFirst(entries) {
   });
 }
 
-function formatInjectedFacts(entries, limit, injectMode = "full", now = Date.now()) {
+function formatInjectedFacts(entries, limit, now = Date.now()) {
   const activeEntries = entries.filter((e) => !isSuperseded(e));
   const sorted = sortNewestFirst(activeEntries);
 
@@ -156,7 +156,7 @@ function formatInjectedFacts(entries, limit, injectMode = "full", now = Date.now
     const isPriority = meta.inject === "1";
 
     let contentStr;
-    if (isPriority || injectMode === "full") {
+    if (isPriority) {
       contentStr = displayFact(entry, now);
     } else {
       const title = factTitle(entry);
@@ -176,15 +176,15 @@ function formatInjectedFacts(entries, limit, injectMode = "full", now = Date.now
   return formattedLines.join("\n");
 }
 
-function buildMemoryContext(globalFacts, projectFacts, projectKey, injectLimit, injectMode = "full", now = Date.now()) {
+function buildMemoryContext(globalFacts, projectFacts, projectKey, injectLimit, now = Date.now()) {
   const parts = [MEMORY_INSTRUCTION];
 
   if (globalFacts.length) {
-    const formatted = formatInjectedFacts(globalFacts, injectLimit, injectMode, now);
+    const formatted = formatInjectedFacts(globalFacts, injectLimit, now);
     if (formatted) parts.push("## Global\n" + formatted);
   }
   if (projectFacts.length) {
-    const formatted = formatInjectedFacts(projectFacts, injectLimit, injectMode, now);
+    const formatted = formatInjectedFacts(projectFacts, injectLimit, now);
     if (formatted) parts.push(`## Project: ${projectKey}\n` + formatted);
   }
   return `<MEMORY>\n${parts.join("\n\n")}\n</MEMORY>`;
@@ -237,10 +237,9 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
 
       const { getConfig } = await import("../mcp-server/config/config_manager.js");
       const config = getConfig();
-      const injectLimit = config.injectLimit !== undefined ? config.injectLimit : 10;
-      const injectMode = config.injectMode || "full";
+      const injectLimit = config.injectLimit !== undefined ? config.injectLimit : 100;
 
-      const context = buildMemoryContext(globalFacts, projectFacts, activeProjectKey, injectLimit, injectMode);
+      const context = buildMemoryContext(globalFacts, projectFacts, activeProjectKey, injectLimit);
       const ref = firstUser.parts[0];
       firstUser.parts.unshift({ ...ref, type: "text", text: context });
     },
@@ -393,16 +392,14 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           tags: { type: "string", description: "Optional comma-separated tag filter (any match)" },
           since: { type: "string", description: "Optional start date filter, YYYY-MM-DD (inclusive)" },
           until: { type: "string", description: "Optional end date filter, YYYY-MM-DD (inclusive)" },
-          mode: { type: "string", description: "Result mode: 'full' (with body) or 'headers' (title and badges only). Defaults to config injectMode." },
+          mode: { type: "string", description: "Result mode: 'full' (with body, default) or 'headers' (title and badges only)", default: "full" },
           offset: { type: "number", description: "Pagination offset (optional)" },
           limit: { type: "number", description: "Pagination limit (optional)" },
         },
         async execute({ scope, project, query, tags, since, until, mode, offset, limit }, { worktree, directory }) {
           const results = [];
           const now = Date.now();
-          const { getConfig } = await import("../mcp-server/config/config_manager.js");
-          const config = getConfig();
-          const targetMode = mode || config.injectMode || "full";
+          const targetMode = mode || "full";
           const targetOffset = offset !== undefined ? offset : 0;
 
           let getLinksForFact;

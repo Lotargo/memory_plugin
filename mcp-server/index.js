@@ -205,15 +205,12 @@ server.registerTool(
       tags: optStr().describe("Optional comma-separated tag filter (any match)"),
       since: optStr().describe("Optional start date filter, YYYY-MM-DD (inclusive)"),
       until: optStr().describe("Optional end date filter, YYYY-MM-DD (inclusive)"),
-      mode: z.enum(["headers", "full"]).nullish().describe("Result mode: 'full' (with body) or 'headers' (title and badges only). Defaults to config injectMode."),
+      mode: z.enum(["headers", "full"]).nullish().transform((v) => v || "full").describe("Result mode: 'full' (with body, default) or 'headers' (title and badges only)"),
       offset: optNum().describe("Pagination offset (optional)"),
       limit: optNum().describe("Pagination limit (optional)"),
     }),
   },
   async ({ scope, project, query, tags, since, until, mode, offset, limit }) => {
-    const { getConfig } = await import("./config/config_manager.js");
-    const config = getConfig();
-    const targetMode = mode || config.injectMode || "full";
     const { getLinksForFact } = await import("./graph/knowledge_linker.js");
     const results = [];
     const now = Date.now();
@@ -238,7 +235,7 @@ server.registerTool(
       const badgesStr = badges.length ? ` [${badges.join("] [")}]` : "";
 
       let lineText;
-      if (targetMode === "headers") {
+      if (mode === "headers") {
         lineText = `**${title}**${badgesStr}`;
       } else {
         lineText = p.text;
