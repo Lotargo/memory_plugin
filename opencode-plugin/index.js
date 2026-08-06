@@ -99,6 +99,7 @@ async function notify(client, message, variant = "success") {
 const MEMORY_INSTRUCTION =
   "MANDATORY FIRST STEP (READ MEMORIES FIRST):\n" +
   "At the start of every session, you MUST thoroughly review all saved memories provided below BEFORE performing any user task or editing code.\n" +
+  "If calling `recall` manually, your very first action MUST BE to request ALL global memories (`scope: \"all\"` without restrictive query filters) to ensure no global facts or preferences are missed.\n" +
   "PROACTIVE MEMORY DIRECTIVE:\n" +
   "You MUST automatically and proactively call `remember` whenever the user shares durable facts, personal preferences, coding guidelines, tech stack choices, architecture decisions, or project conventions.\n" +
   "Do NOT wait for explicit user commands like \"remember this\". Automatically capture high-signal facts in real time.\n" +
