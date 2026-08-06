@@ -52,14 +52,23 @@ const injectedText = transformResult.messages[0].parts[0].text;
 console.log("Injected Context:");
 console.log(injectedText);
 
-// Assertions on the injected context
+// Assertions on the default injected context (injectMode = 'full')
 assert(injectedText.includes("<MEMORY>"), "Should contain memory block");
 assert(injectedText.includes("## Global"), "Should contain Global section");
 assert(injectedText.includes("Title Fact 12"), "Should contain Title Fact 12");
-assert(injectedText.includes("body of fact 11"), "Fact 11 (inject:1) should have body injected");
-assert(injectedText.includes("body of fact 5"), "Fact 5 (inject:1) should have body injected");
-assert(!injectedText.includes("body of fact 12"), "Fact 12 should only have header (no body)");
+assert(injectedText.includes("body of fact 12"), "Fact 12 should have body in full mode");
 assert(injectedText.includes("and 2 more of 12 memories"), "Should have X of Y counter");
+
+// Now test with injectMode = 'headers'
+const { updateConfig } = await import("./config/config_manager.js");
+updateConfig({ injectMode: "headers" });
+const transformHeaders = { messages: [{ info: { role: "user" }, parts: [{ type: "text", text: "task" }] }] };
+await plugin["experimental.chat.messages.transform"](null, transformHeaders);
+const headersText = transformHeaders.messages[0].parts[0].text;
+
+assert(headersText.includes("body of fact 11"), "Fact 11 (inject:1) should have body in headers mode");
+assert(!headersText.includes("body of fact 12"), "Fact 12 should NOT have body in headers mode");
+updateConfig({ injectMode: "full" });
 
 console.log("✅ Part A2 & A3 Integration Tests Passed!");
 

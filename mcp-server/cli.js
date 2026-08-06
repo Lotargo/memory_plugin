@@ -1051,6 +1051,18 @@ async function showCategorySubmenu(category, config, stats, initialIndex = 0) {
           info: config.onnxThreads > 0 ? `ONNX execution threads manually set to ${config.onnxThreads}` : "Auto-detect optimal physical CPU threads",
         },
         {
+          label: "Injection Mode",
+          badge: (config.injectMode || "full").toUpperCase(),
+          value: "inject_mode",
+          info: `Current: ${config.injectMode || "full"}. Default format for injected <MEMORY> block (full: complete fact text | headers: titles only)`,
+        },
+        {
+          label: "Injection Limit",
+          badge: `${config.injectLimit !== undefined ? config.injectLimit : 10} Items`,
+          value: "inject_limit",
+          info: `Current: ${config.injectLimit !== undefined ? config.injectLimit : 10}. Max items injected into <MEMORY> prompt block`,
+        },
+        {
           label: "Execution Hardware",
           badge: (config.executionDevice || "cpu").toUpperCase() === "WEBGPU" || (config.executionDevice || "cpu").toUpperCase() === "GPU" ? "\x1b[31mGPU (EXPERIMENTAL)\x1b[0m" : "CPU (AVX2)",
           value: "execution_device",
@@ -1408,6 +1420,54 @@ async function handleSubmenuItem(value, config, stats) {
         });
         if (subRes.action === "select") {
           updateConfig({ executionDevice: subRes.value });
+        }
+        break;
+      }
+      case "inject_mode": {
+        const modeItems = [
+          {
+            label: "full (Full Fact Text - DEFAULT)",
+            value: "full",
+            info: "Inject complete fact text with date, title, and body into <MEMORY> prompt block",
+          },
+          {
+            label: "headers (Titles Only)",
+            value: "headers",
+            info: "Inject only title and badges into <MEMORY> block, keeping prompt lean (full body fetched on demand)",
+          },
+        ];
+        const currentInjectMode = config.injectMode || "full";
+        const initialModeIdx = Math.max(0, modeItems.findIndex((i) => i.value === currentInjectMode));
+        const subRes = await selectSimpleMenu({
+          title: "SELECT INJECTION MODE",
+          subtitle: "Default display format for facts injected into system prompt <MEMORY> block",
+          items: modeItems,
+          initialIndex: initialModeIdx,
+        });
+        if (subRes.action === "select") {
+          updateConfig({ injectMode: subRes.value });
+        }
+        break;
+      }
+      case "inject_limit": {
+        const limitItems = [
+          { label: "5 Items", value: 5, info: "Compact prompt footprint" },
+          { label: "10 Items (Default)", value: 10, info: "Balanced prompt injection cap" },
+          { label: "15 Items", value: 15, info: "Extended prompt injection capacity" },
+          { label: "20 Items", value: 20, info: "High prompt injection capacity" },
+          { label: "30 Items", value: 30, info: "Large prompt context window allocation" },
+          { label: "50 Items (Max)", value: 50, info: "Maximum prompt context injection" },
+        ];
+        const currentLimit = config.injectLimit !== undefined ? config.injectLimit : 10;
+        const initialLimitIdx = Math.max(0, limitItems.findIndex((i) => i.value === currentLimit));
+        const subRes = await selectSimpleMenu({
+          title: "SELECT INJECTION LIMIT",
+          subtitle: "Maximum number of facts auto-injected into system prompt <MEMORY> block",
+          items: limitItems,
+          initialIndex: initialLimitIdx,
+        });
+        if (subRes.action === "select") {
+          updateConfig({ injectLimit: subRes.value });
         }
         break;
       }

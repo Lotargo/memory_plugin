@@ -108,11 +108,12 @@ npm install -g @lotargo/memory_plugin && memory_plugin setup --codex
 - `remember` requires a `title` parameter (for both `global` and `project` scopes); the title is stored as the `**Title**` prefix. Legacy lines without a `**Title**` prefix are read as legacy facts (title = first phrase of the body, text untouched) and can be bulk-migrated via `migrate_titles` (CLI/`withTitle()`).
 - Line metadata badges: `[inject]`, `[archive]`, `[keep]`, date, tags. `inject:1` marks a fact for full-text injection (the only fact type that gets injected in full).
 
-### Injection: headers + limit
-- The injected `<MEMORY>` block contains **only titles** (plus ids/badges), never full fact text — keeping the system prompt lean.
-- A fact marked `inject:1` is injected in full text. `injectLimit` (default `10`) caps the number of injected entries; when more facts exist, a counter (`... and N more`) is shown.
+### Injection: mode + limit
+- The injected `<MEMORY>` block format is controlled by `injectMode` in config (`"full"` by default, or `"headers"`). In `"full"` mode, complete fact text is injected. In `"headers"` mode, only titles (plus ids/badges) are injected to keep the system prompt lean.
+- A fact marked `inject:1` is always injected in full text regardless of `injectMode`. `injectLimit` (default `10`) caps the number of injected entries; when more facts exist, a counter (`... and N more`) is shown.
+- Both `injectMode` (`full` / `headers`) and `injectLimit` can be configured interactively via CLI (`memory-cli`).
 - Ordering: `inject:1` facts first, then regular facts, newest-first.
-- Full records or ranges are fetched on demand via `recall` (`mode: "full"|"headers"`, optional `offset`/`limit`) and `get_fact({ id })`.
+- Full records or ranges can also be fetched on demand via `recall` (`mode: "full"|"headers"`, optional `offset`/`limit`) and `get_fact({ id })`.
 - Outside a Git repository the injected block contains only the `## Global` section.
 
 ### Project identity
