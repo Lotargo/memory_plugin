@@ -73,7 +73,7 @@ export async function scopeKey(scope, worktree, directory) {
 
 export function slugify(key) {
   if (!key) return "null";
-  return key.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return String(key).replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
 function memoryPath(key) {

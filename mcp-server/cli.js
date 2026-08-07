@@ -87,6 +87,11 @@ let _quickStatsCache = null;
 let _quickStatsAt = 0;
 const QUICK_STATS_TTL_MS = 3_000;  // 3s — enough for one submenu round-trip
 
+function invalidateQuickStats() {
+  _quickStatsCache = null;
+  _quickStatsAt = 0;
+}
+
 async function getQuickStats() {
   const now = Date.now();
   if (_quickStatsCache && (now - _quickStatsAt) < QUICK_STATS_TTL_MS) {
@@ -987,7 +992,9 @@ export async function runCli() {
 
     while (categoryRunning) {
       config = getConfig();
-      const catRes = await showCategorySubmenu(res.value, config, stats, categoryItemIndex);
+      invalidateQuickStats();
+      const currentStats = await getQuickStats();
+      const catRes = await showCategorySubmenu(res.value, config, currentStats, categoryItemIndex);
       
       if (catRes.action === "back") {
         categoryRunning = false;
@@ -1414,7 +1421,7 @@ async function handleSubmenuItem(value, config, stats) {
       case "notebook": {
         let nbRunning = true;
         while (nbRunning) {
-          const projKey = projectKey(null, null);
+          const projKey = await projectKey(null, null);
           const projLabel = await projectName(null, null);
 
           async function browseFacts(key, title) {
