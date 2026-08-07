@@ -1,24 +1,23 @@
 import assert from "node:assert";
-import { rmSync, existsSync } from "node:fs";
+import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { extractSymbolsFromContent } from "./graph/graph_extractor.js";
-import { extractTitle } from "./ingest/normalizer.js";
-import { validateUrlForSsrf } from "./ingest/normalizer.js";
-import { exportDocumentToJsonString } from "./ingest/exporter.js";
-import { sanitizeFtsQuery as retrieverSanitizeFts } from "./retrieval/retriever.js";
-import { updateConfig, getConfig, resetConfig } from "./config/config_manager.js";
-import { validateSnapshotPath } from "./admin/snapshot.js";
-import { getDatabase } from "./db/database.js";
-import { ingestDocument } from "./ingest/pipeline.js";
+import { extractSymbolsFromContent } from "../../mcp-server/graph/graph_extractor.js";
+import { extractTitle, validateUrlForSsrf } from "../../mcp-server/ingest/normalizer.js";
+import { exportDocumentToJsonString } from "../../mcp-server/ingest/exporter.js";
+import { sanitizeFtsQuery as retrieverSanitizeFts } from "../../mcp-server/retrieval/retriever.js";
+import { updateConfig, getConfig, resetConfig } from "../../mcp-server/config/config_manager.js";
+import { validateSnapshotPath } from "../../mcp-server/admin/snapshot.js";
+import { getDatabase } from "../../mcp-server/db/database.js";
+import { ingestDocument } from "../../mcp-server/ingest/pipeline.js";
 
 const TEST_DIR = join(tmpdir(), `memory_test_audit_${Date.now()}`);
 const TEST_DB_PATH = join(TEST_DIR, "test_memory.sqlite");
 
-console.log("--- Running Unit Tests for Audited Functions & Security Checks ---");
+export async function runAuditUnitTests() {
+  console.log("--- Running Unit Tests: unit_audit_fixes ---");
 
-async function runAuditUnitTests() {
   // 1. Test extractSymbolsFromContent
   console.log("1. Testing extractSymbolsFromContent...");
   const polyglotCode = `
@@ -102,10 +101,12 @@ async function runAuditUnitTests() {
     rmSync(TEST_DIR, { recursive: true, force: true });
   } catch {}
 
-  console.log("\n✅ ALL AUDIT UNIT TESTS PASSED SUCCESSFULLY!");
+  console.log("✅ ALL AUDIT UNIT TESTS PASSED SUCCESSFULLY!");
 }
 
-runAuditUnitTests().catch((err) => {
-  console.error("❌ Test failed:", err);
-  process.exit(1);
-});
+if (process.argv[1] && process.argv[1].endsWith("unit_audit_fixes.test.js")) {
+  runAuditUnitTests().catch((err) => {
+    console.error("❌ Test failed:", err);
+    process.exit(1);
+  });
+}

@@ -9,7 +9,6 @@
   },
   "scripts": {
     "cli": "node cli.js",
-    "test": "node test_phase4.js",
     "benchmark": "node benchmarks/run_benchmarks.js"
   },
   "dependencies": {

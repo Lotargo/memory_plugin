@@ -3,23 +3,22 @@ import { rmSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const TEST_DIR = join(tmpdir(), `memory_test_reverse_sync_${Date.now()}`);
-mkdirSync(TEST_DIR, { recursive: true });
+export async function runReverseSyncTests() {
+  console.log("--- Running Integration Tests: reverse_sync ---");
+  const TEST_DIR = join(tmpdir(), `memory_test_reverse_sync_${Date.now()}`);
+  mkdirSync(TEST_DIR, { recursive: true });
+  process.env.MEMORY_DIR = TEST_DIR;
 
-process.env.MEMORY_DIR = TEST_DIR;
+  const CLOUD_DB_PATH = `file:${join(TEST_DIR, "cloud_memory.sqlite")}`;
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const CLOUD_DB_PATH = `file:${join(TEST_DIR, "cloud_memory.sqlite")}`;
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-async function runTests() {
-  const { getDatabase, closeDatabase } = await import("./db/database.js");
-  const { readMemory, writeMemory, writeMemoryFile, storeFilePath } = await import("./memory.js");
-  const { updateConfig, resetConfig } = await import("./config/config_manager.js");
-  const { syncFromCloud, triggerBackgroundSync } = await import("./db/sync_queue.js");
-
-  console.log("--- Reverse Sync & Conflict Resolution Tests ---");
+  const { getDatabase, closeDatabase } = await import("../../mcp-server/db/database.js");
+  const { readMemory, writeMemory, writeMemoryFile } = await import("../../mcp-server/memory.js");
+  const { updateConfig, resetConfig } = await import("../../mcp-server/config/config_manager.js");
+  const { syncFromCloud, triggerBackgroundSync, resetReverseSyncThrottle } = await import("../../mcp-server/db/sync_queue.js");
 
   try {
+    closeDatabase();
     updateConfig({ mode: "only-local", tursoUrl: CLOUD_DB_PATH });
 
     // Clean cloud database
@@ -43,9 +42,8 @@ async function runTests() {
     // --- 1. Cloud-only store gets pulled down locally ---
     console.log("1. Cloud-only store pulled down to local...");
     const dbCloudSeed = await getDatabase();
-    // Simulate a store that exists ONLY in the cloud (e.g. written from another device)
     await dbCloudSeed.cloudClient.execute({
-      sql: "INSERT INTO notebooks (key, content, updated_at) VALUES (?, ?, ?);",
+      sql: "INSERT OR REPLACE INTO notebooks (key, content, updated_at) VALUES (?, ?, ?);",
       args: ["cloud_only_key", "# Memory: cloud_only_key\n\n- [2026-08-02 10:00] Cloud only fact <!-- id:c1 -->\n", Date.now()],
     });
     closeDatabase();
@@ -78,12 +76,10 @@ async function runTests() {
     // --- 3. Merge strategy: union of facts, no data loss ---
     console.log("3. Merge strategy unions differing local + cloud stores...");
     updateConfig({ conflictStrategy: "merge" });
-    // Local store with fact A
     await writeMemoryFile("conflict_key", "# Memory: conflict_key\n\n- [2026-08-02 12:00] Local fact A <!-- id:a -->\n");
-    // Cloud store with fact B (different)
     const dbCloudSeed2 = await getDatabase();
     await dbCloudSeed2.cloudClient.execute({
-      sql: "INSERT INTO notebooks (key, content, updated_at) VALUES (?, ?, ?);",
+      sql: "INSERT OR REPLACE INTO notebooks (key, content, updated_at) VALUES (?, ?, ?);",
       args: ["conflict_key", "# Memory: conflict_key\n\n- [2026-08-02 12:30] Cloud fact B <!-- id:b -->\n", Date.now()],
     });
     closeDatabase();
@@ -111,7 +107,7 @@ async function runTests() {
     await writeMemoryFile("cw_key", "# Memory: cw_key\n\n- [2026-08-02 13:00] Local fact <!-- id:a -->\n");
     const dbCloudSeed3 = await getDatabase();
     await dbCloudSeed3.cloudClient.execute({
-      sql: "INSERT INTO notebooks (key, content, updated_at) VALUES (?, ?, ?);",
+      sql: "INSERT OR REPLACE INTO notebooks (key, content, updated_at) VALUES (?, ?, ?);",
       args: ["cw_key", "# Memory: cw_key\n\n- [2026-08-02 13:30] Cloud fact wins <!-- id:b -->\n", Date.now()],
     });
     closeDatabase();
@@ -129,7 +125,7 @@ async function runTests() {
     await writeMemoryFile("lw_key", "# Memory: lw_key\n\n- [2026-08-02 14:00] Local fact wins <!-- id:a -->\n");
     const dbCloudSeed4 = await getDatabase();
     await dbCloudSeed4.cloudClient.execute({
-      sql: "INSERT INTO notebooks (key, content, updated_at) VALUES (?, ?, ?);",
+      sql: "INSERT OR REPLACE INTO notebooks (key, content, updated_at) VALUES (?, ?, ?);",
       args: ["lw_key", "# Memory: lw_key\n\n- [2026-08-02 14:30] Cloud fact <!-- id:b -->\n", Date.now()],
     });
     closeDatabase();
@@ -149,13 +145,11 @@ async function runTests() {
     await writeMemoryFile("auto_pull_key", "");
     const dbCloudSeed5 = await getDatabase();
     await dbCloudSeed5.cloudClient.execute({
-      sql: "INSERT INTO notebooks (key, content, updated_at) VALUES (?, ?, ?);",
+      sql: "INSERT OR REPLACE INTO notebooks (key, content, updated_at) VALUES (?, ?, ?);",
       args: ["auto_pull_key", "# Memory: auto_pull_key\n\n- [2026-08-02 15:00] Auto pulled fact <!-- id:a -->\n", Date.now()],
     });
     closeDatabase();
 
-    // Reset throttle so readMemory actually performs the pull
-    const { ensureReverseSync, resetReverseSyncThrottle } = await import("./db/sync_queue.js");
     resetReverseSyncThrottle();
     const autoFacts = await readMemory("auto_pull_key");
     assert.strictEqual(autoFacts.length, 1, "readMemory should reverse-sync and find cloud fact");
@@ -163,10 +157,7 @@ async function runTests() {
     console.log("  [PASS]");
 
     resetConfig();
-    console.log("\n✅ ALL REVERSE SYNC & CONFLICT RESOLUTION TESTS PASSED SUCCESSFULLY!");
-  } catch (err) {
-    console.error("\n❌ REVERSE SYNC TEST FAILED:", err);
-    process.exit(1);
+    console.log("✅ ALL REVERSE SYNC & CONFLICT RESOLUTION TESTS PASSED!");
   } finally {
     closeDatabase();
     if (existsSync(TEST_DIR)) {
@@ -177,4 +168,9 @@ async function runTests() {
   }
 }
 
-runTests();
+if (process.argv[1] && process.argv[1].endsWith("reverse_sync.test.js")) {
+  runReverseSyncTests().catch((err) => {
+    console.error("❌ Test failed:", err);
+    process.exit(1);
+  });
+}

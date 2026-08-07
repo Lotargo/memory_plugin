@@ -6,7 +6,7 @@
   "main": "opencode-plugin/index.js",
   "scripts": {
     "preinstall": "node mcp-server/preinstall.js || true",
-    "test": "node mcp-server/test.js",
+    "test": "node tests/run_all.js",
     "benchmark": "node mcp-server/benchmarks/run_benchmarks.js"
   },
   "bin": {

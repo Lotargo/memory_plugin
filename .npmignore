@@ -6,8 +6,6 @@ mcp-server/package.json
 # Tests, benchmarks, and scratch scripts
 mcp-server/test*
 mcp-server/benchmarks/**
-mcp-server/export*.js
-mcp-server/-p
 
 # Dev docs, assets, exports, and local databases
 dev_docs/
@@ -18,7 +16,6 @@ exports/
 *.db
 local_test.db
 *.log
-reoort_jules.md
 
 # Git
 .git/
