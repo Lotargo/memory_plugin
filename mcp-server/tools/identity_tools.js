@@ -33,7 +33,7 @@ export function registerIdentityTools(server) {
         if (!factText || !docId) {
           throw new Error("factText and docId are required parameters for link action");
         }
-        const res = linkFactToDocument({
+        const res = await linkFactToDocument({
           factKey: key,
           factText,
           docId,
@@ -48,14 +48,14 @@ export function registerIdentityTools(server) {
 
       if (action === "get_doc_links") {
         if (!docId) throw new Error("docId parameter is required for get_doc_links action");
-        const links = getLinksForDoc(docId);
+        const links = await getLinksForDoc(docId);
         return {
           content: [{ type: "text", text: JSON.stringify(links, null, 2) }],
         };
       }
 
       if (action === "list_links") {
-        const links = listAllLinks(key);
+        const links = await listAllLinks(key);
         return {
           content: [{ type: "text", text: JSON.stringify(links, null, 2) }],
         };

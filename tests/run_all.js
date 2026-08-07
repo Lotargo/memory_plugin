@@ -10,12 +10,14 @@ const testSuites = [
   { category: "Unit", name: "identity", file: "tests/unit/identity.test.js" },
   { category: "Unit", name: "project_identity", file: "tests/unit/project_identity.test.js" },
   { category: "Unit", name: "unit_audit_fixes", file: "tests/unit/unit_audit_fixes.test.js" },
+  { category: "Unit", name: "chunker", file: "tests/unit/chunker.test.js" },
 
   // --- 2. INTEGRATION TESTS ---
   { category: "Integration", name: "expanded_features", file: "tests/integration/expanded_features.test.js" },
   { category: "Integration", name: "memory_verification", file: "tests/integration/memory_verification.test.js" },
   { category: "Integration", name: "mcp_tools", file: "tests/integration/mcp_tools.test.js" },
   { category: "Integration", name: "reverse_sync", file: "tests/integration/reverse_sync.test.js" },
+  { category: "Integration", name: "rag_mcp_tools", file: "tests/integration/rag_mcp_tools.test.js" },
 
   // --- 3. CLOUD TESTS ---
   { category: "Cloud", name: "phase1_cloud", file: "tests/cloud/phase1_cloud.test.js" },
