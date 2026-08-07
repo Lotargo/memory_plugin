@@ -23,6 +23,7 @@
     "mcp-server/ml",
     "mcp-server/retrieval",
     "mcp-server/storage",
+    "mcp-server/cli",
     "mcp-server/cli.js",
     "mcp-server/index.js",
     "mcp-server/fact_format.js",
