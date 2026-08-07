@@ -20,6 +20,7 @@ const {
   factBody,
   autoGenerateTitle,
   metaBadges,
+  isExpiredLine,
 } = await import("../mcp-server/fact_format.js");
 
 const {
@@ -452,7 +453,17 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
             return `${index}. ${lineText}`;
           };
 
-          const target = project ? canonicalPath(project) : await projectKey(worktree, directory);
+          const resolveTargetKey = async (projectPath) => {
+            if (!projectPath) return null;
+            try {
+              const { resolveProjectIdentity } = await import("../mcp-server/identity.js");
+              const identity = await resolveProjectIdentity(projectPath);
+              if (identity) return identity.key;
+            } catch (e) {}
+            return canonicalPath(projectPath);
+          };
+
+          const target = await resolveTargetKey(project) ?? await projectKey(worktree, directory);
           const label = project ? target : await projectName(worktree, directory);
 
           const collect = async (entries, key) => {
@@ -665,7 +676,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           let rag = {};
           try {
             const { getDatabase } = await import("../mcp-server/db/database.js");
-            const db = getDatabase();
+            const db = await getDatabase();
             rag.documents = db.prepare("SELECT COUNT(*) AS c FROM documents").get().c;
             rag.sections = db.prepare("SELECT COUNT(*) AS c FROM sections").get().c;
             rag.chunks = db.prepare("SELECT COUNT(*) AS c FROM micro_chunks").get().c;
@@ -679,7 +690,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           try {
             const { getDatabase } = await import("../mcp-server/db/database.js");
             const { resolveProjectIdentity, listIdentities } = await import("../mcp-server/identity.js");
-            const db = getDatabase();
+            const db = await getDatabase();
             const identity = await resolveProjectIdentity(directory || process.cwd());
             const all = await listIdentities(db);
             identityLines.push(
@@ -864,7 +875,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
         },
         async execute({ action, docId, snapshotPath }) {
           const { getDatabase } = await import("../mcp-server/db/database.js");
-          const db = getDatabase();
+          const db = await getDatabase();
 
           if (action === "stats") {
             const docCount = db.prepare("SELECT COUNT(*) as cnt FROM documents").get().cnt;

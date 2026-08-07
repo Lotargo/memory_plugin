@@ -247,7 +247,17 @@ export function registerMemoryTools(server) {
         };
       }
 
-      const target = project ? canonicalPath(project) : await projectKey(null, null);
+      const resolveTargetKey = async (projectPath) => {
+        if (!projectPath) return null;
+        try {
+          const { resolveProjectIdentity } = await import("../identity.js");
+          const identity = await resolveProjectIdentity(projectPath);
+          if (identity) return identity.key;
+        } catch (e) {}
+        return canonicalPath(projectPath);
+      };
+
+      const target = (await resolveTargetKey(project)) ?? (await projectKey(null, null));
       const label = project ? target : await projectName();
       if (scope !== "project") {
         const global = await readMemory(GLOBAL_KEY);
