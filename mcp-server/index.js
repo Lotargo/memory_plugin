@@ -32,7 +32,7 @@ await ensureDir();
 
 const server = new McpServer({
   name: "memory-agent",
-  version: "1.0.0",
+  version: "1.5.0",
 });
 
 registerAllTools(server);
