@@ -17,7 +17,7 @@ You have access to a persistent dual-layer memory engine supercharged with an **
 
 | Scenario / Intent | Target Tool | Key Parameters |
 |-------------------|-------------|----------------|
-| User shares identity, tech stack preference, or workflow rule | `remember` | `fact` (English), `scope`, optional `docId`, `startLine`, `endLine` |
+| User shares identity, tech stack preference, or workflow rule | `remember` | `fact` (English), `title` (concise 2-5 word headline), `scope`, optional `docId`, `startLine`, `endLine` |
 | User asks what you remember about them, the project, or linked docs | `recall` | `scope` ("all", "global", "project", "list_projects"), `mode` ("full", "headers"), `offset`, `limit`, optional `query`, `tags`, `since`, `until`, `project` (at session start, MUST fetch all memories with `scope: "all"` without restrictive query filters) |
 | Get a single fact's text and metadata by ID | `get_fact` | `id` (metadata id e.g. "8f3a2c"), `scope` |
 | User corrects/updates an old saved fact | `update_fact` | `id` (number/id/text), `newText`, `scope` |
@@ -48,10 +48,13 @@ Whenever you ingest project documentation, web pages, or local files, you should
 
 ### What to Save and Link (`remember` & `link_knowledge`)
 - **High-Signal Facts**: User name, role, language preferences, architectural constraints, framework choices, coding standards, test rules.
-- **Formating**: Always translate the fact into clear, concise English before calling `remember`.
+- **Formatting & Fact Titles**:
+  - Always translate the fact into clear, concise English before calling `remember`.
+  - **Always specify a descriptive `title` parameter** (a 2-5 word headline, e.g., `title: "Backend Framework Preference"`).
+  - Facts are stored in `**Title** — body` format. In `mode: "full"` (default in `recall`), both title and body are displayed. In `mode: "headers"` and in auto-injected `<MEMORY>` system prompt blocks, only `**Title**` is displayed to keep the system prompt lean.
 - **Linking to Knowledge Base Documents**:
   - Pass `docId` (or document title/path) and optional `startLine` / `endLine` when calling `remember` or `link_knowledge`.
-  - Example: `remember(fact: "Use Fastify instead of Express for backend services", scope: "project", docId: "arch_specs.md", startLine: 5, endLine: 7)`
+  - Example: `remember(title: "Backend Framework Preference", fact: "Use Fastify instead of Express for backend services", scope: "project", docId: "arch_specs.md", startLine: 5, endLine: 7)`
   - Example: `link_knowledge(factText: "Use PostgreSQL 16 for primary persistence", docId: "database_guide.md", startLine: 20, endLine: 35, relationType: "IMPLEMENTS")`
 
 ### How Linked Memory Appears (`recall`)
