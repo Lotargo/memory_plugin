@@ -119,17 +119,17 @@ _Environment: Google Jules Cloud Workspace (KVM Virtualization, 4-core Intel Xeo
 This benchmark evaluates how `@lotargo/memory_plugin` performs in constrained, isolated cloud container environments (Google Jules) without hardware GPU acceleration.
 
 #### Environment & Ingestion Metrics:
-- **Total Micro-Chunks Vectorized**: 1,202 vectors (384 dimensions)
-- **Ingestion Time**: 63.45 s (CPU vectorization speed: 18.94 vectors/sec)
-- **SQLite Database Footprint**: 5.14 MB
+- **Total Micro-Chunks Vectorized**: 1,203 vectors (384 dimensions)
+- **Ingestion Time**: 51.71 s (CPU vectorization speed: 23.26 vectors/sec)
+- **SQLite Database Footprint**: 5.19 MB
 - **CAS Blob Footprint**: 0.1 MB
 
 #### Retrieval Quality Comparison (Google Jules Environment):
 
 | Retrieval Strategy            |   MRR@5    |  Recall@5   |   NDCG@5   | Top-1 Wins | 95% Bootstrap CI (MRR) |
 | ----------------------------- | :--------: | :---------: | :--------: | :--------: | :--------------------: |
-| BM25 Lexical Search Only      |   0.6706   |   76.19%    |   0.6934   |  11 / 21   |   [0.4802, 0.8492]     |
-| Dense ONNX Vector Only        |   0.8135   |   100.00%   |   0.8612   |  15 / 21   |   [0.7024, 0.9286]     |
+| BM25 Lexical Search Only      |   0.6706   |   76.19%    |   0.6934   |  13 / 21   |   [0.4802, 0.8492]     |
+| Dense ONNX Vector Only        |   0.8135   |   100.00%   |   0.8612   |  14 / 21   |   [0.7024, 0.9286]     |
 | Hybrid RRF ($k=10$)           |   0.8810   |   95.24%    |   0.8997   |  17 / 21   |   [0.7381, 0.9762]     |
 | **Hybrid RSF ($\alpha=0.5$)** | **0.9286** | **100.00%** | **0.9473** | **18 / 21**| **[0.8571, 1.0000]**   |
 
@@ -141,9 +141,9 @@ _Key Insight_: In the Google Jules cloud sandbox, Relative Score Fusion (RSF) re
 
 | Category               | Query Count (N) | BM25 MRR@5 | Dense Vector MRR@5 | Hybrid RSF MRR@5 | RSF Recall@5 |
 | ---------------------- | :-------------: | :--------: | :----------------: | :--------------: | :----------: |
-| Semantic RU -> EN      |        7        |   0.3571   |       0.8571       |      0.9048      |   100.00%    |
-| Cross-Lingual Concepts |        7        |   0.4048   |       0.6429       |      0.8571      |    85.71%    |
-| Direct Code & Keyword  |        7        |   1.0000   |       1.0000       |      1.0000      |   100.00%    |
+| Semantic RU -> EN      |        7        |   0.6190   |       0.7500       |      0.8571      |   100.00%    |
+| Cross-Lingual Concepts |        7        |   0.3929   |       0.7619       |      0.9286      |   100.00%    |
+| Direct Code & Keyword  |        7        |   1.0000   |       0.9286       |      1.0000      |   100.00%    |
 
 ---
 
