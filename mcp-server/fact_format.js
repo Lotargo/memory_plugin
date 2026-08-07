@@ -14,7 +14,7 @@
 //   supersededBy id of the fact that replaced this one
 //   tags         comma-separated free-form tags for recall filtering
 
-const META_KEYS = ["id", "ttl", "keep", "supersedes", "supersededBy", "tags", "inject"];
+const META_KEYS = ["id", "ttl", "keep", "supersededBy", "supersedes", "tags", "inject"];
 
 const ENTRY_RE = /^- \[(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})\]\s+(.*)$/;
 
