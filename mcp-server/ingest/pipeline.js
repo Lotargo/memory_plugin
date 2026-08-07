@@ -85,12 +85,9 @@ export async function ingestDocument({
   try {
     const existingDoc = await db.prepare("SELECT id FROM documents WHERE path = ?").get(docPath);
     if (existingDoc) {
-      const microChunks = await db.prepare("SELECT id FROM micro_chunks WHERE doc_id = ?").all(existingDoc.id);
-      for (const mc of microChunks) {
-        try {
-          await db.prepare("DELETE FROM micro_chunks_fts WHERE id = ?").run(mc.id);
-        } catch {}
-      }
+      try {
+        await db.prepare("DELETE FROM micro_chunks_fts WHERE id IN (SELECT id FROM micro_chunks WHERE doc_id = ?);").run(existingDoc.id);
+      } catch {}
       await db.prepare("DELETE FROM graph_edges WHERE source_id = ? OR target_id = ?").run(existingDoc.id, existingDoc.id);
       await db.prepare("DELETE FROM documents WHERE id = ?").run(existingDoc.id);
     }
@@ -184,8 +181,6 @@ export async function deleteDocument(docIdOrPath, customDb = null, customBlobDir
     return { deleted: false, reason: "Document not found" };
   }
 
-  const microChunks = await db.prepare("SELECT id FROM micro_chunks WHERE doc_id = ?").all(doc.id);
-
   // Collect every id owned by this document so we can purge dangling graph edges
   // (graph_edges has no FK constraints, so section/chunk/doc references would otherwise leak).
   const ownedIds = [doc.id];
@@ -196,11 +191,9 @@ export async function deleteDocument(docIdOrPath, customDb = null, customBlobDir
 
   await db.exec("BEGIN IMMEDIATE;");
   try {
-    for (const mc of microChunks) {
-      try {
-        await db.prepare("DELETE FROM micro_chunks_fts WHERE id = ?").run(mc.id);
-      } catch {}
-    }
+    try {
+      await db.prepare("DELETE FROM micro_chunks_fts WHERE id IN (SELECT id FROM micro_chunks WHERE doc_id = ?);").run(doc.id);
+    } catch {}
 
     // Auto-clean Agent knowledge graph links pointing at this document.
     await db.prepare("DELETE FROM knowledge_links WHERE doc_id = ?").run(doc.id);

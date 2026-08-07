@@ -85,11 +85,26 @@ export async function saveGraphEdges(db, edges) {
   }
 }
 
-export async function getRelatedSymbols(db, sectionId) {
+export async function getRelatedSymbolsBatch(db, sectionIds) {
+  if (!sectionIds || sectionIds.length === 0) return new Map();
+  const placeholders = sectionIds.map(() => "?").join(",");
   const stmt = db.prepare(`
-    SELECT target_id, relation_type FROM graph_edges
-    WHERE source_id = ? AND relation_type = 'DEFINES_SYMBOL';
+    SELECT source_id, target_id FROM graph_edges
+    WHERE source_id IN (${placeholders}) AND relation_type = 'DEFINES_SYMBOL';
   `);
-  const rows = await stmt.all(sectionId);
-  return rows.map((r) => r.target_id.replace("symbol:", ""));
+  const rows = await stmt.all(...sectionIds);
+  const result = new Map();
+  for (const r of rows) {
+    const list = result.get(r.source_id) || [];
+    list.push(r.target_id.replace("symbol:", ""));
+    result.set(r.source_id, list);
+  }
+  return result;
 }
+
+export async function getRelatedSymbols(db, sectionId) {
+  if (!sectionId) return [];
+  const map = await getRelatedSymbolsBatch(db, [sectionId]);
+  return map.get(sectionId) || [];
+}
+

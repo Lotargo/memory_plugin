@@ -263,57 +263,74 @@ export async function hybridQuery({
 
   // Parent-Child Rollup: Deduplicate hits sharing the same medium_id or section_id to prevent noise
   const parentDeduplicatedHits = [];
-  const seenParents = new Set();
-  const parentLookupStmt = db.prepare(`
-    SELECT medium_id, section_id FROM micro_chunks WHERE id = ?;
-  `);
+  if (fusedHits.length > 0) {
+    const hitIds = fusedHits.map((h) => h.id);
+    const placeholders = hitIds.map(() => "?").join(",");
+    const rows = await db.prepare(`
+      SELECT id, medium_id, section_id FROM micro_chunks WHERE id IN (${placeholders});
+    `).all(...hitIds);
+    const parentMap = new Map(rows.map((r) => [r.id, r]));
 
-  for (const hit of fusedHits) {
-    const row = await parentLookupStmt.get(hit.id);
-    const parentKey = row ? (row.medium_id || row.section_id) : hit.id;
-    if (!seenParents.has(parentKey)) {
-      seenParents.add(parentKey);
-      parentDeduplicatedHits.push(hit);
+    const seenParents = new Set();
+    for (const hit of fusedHits) {
+      const row = parentMap.get(hit.id);
+      const parentKey = row ? (row.medium_id || row.section_id) : hit.id;
+      if (!seenParents.has(parentKey)) {
+        seenParents.add(parentKey);
+        parentDeduplicatedHits.push(hit);
+      }
     }
   }
 
   const topHits = parentDeduplicatedHits.slice(0, limit);
   const results = [];
 
-  const secStmt = db.prepare(`
-    SELECT s.id as section_id, s.heading, s.breadcrumbs, s.content as section_content,
-           med.content as medium_content, d.title as doc_title, d.path as doc_path
-    FROM micro_chunks m
-    JOIN sections s ON m.section_id = s.id
-    JOIN documents d ON m.doc_id = d.id
-    LEFT JOIN medium_chunks med ON m.medium_id = med.id
-    WHERE m.id = ?;
-  `);
+  if (topHits.length > 0) {
+    const topIds = topHits.map((h) => h.id);
+    const placeholders = topIds.map(() => "?").join(",");
+    const details = await db.prepare(`
+      SELECT m.id as micro_id, s.id as section_id, s.heading, s.breadcrumbs, s.content as section_content,
+             med.content as medium_content, d.title as doc_title, d.path as doc_path
+      FROM micro_chunks m
+      JOIN sections s ON m.section_id = s.id
+      JOIN documents d ON m.doc_id = d.id
+      LEFT JOIN medium_chunks med ON m.medium_id = med.id
+      WHERE m.id IN (${placeholders});
+    `).all(...topIds);
 
-  for (const hit of topHits) {
-    const detail = await secStmt.get(hit.id);
-    if (!detail) continue;
+    const detailMap = new Map(details.map((d) => [d.micro_id, d]));
 
-    let symbols = [];
+    let symbolsBySection = new Map();
     if (includeGraphContext) {
-      symbols = await getRelatedSymbols(db, detail.section_id);
+      const sectionIds = [...new Set(details.map((d) => d.section_id).filter(Boolean))];
+      if (sectionIds.length > 0) {
+        const { getRelatedSymbolsBatch } = await import("../graph/graph_extractor.js");
+        symbolsBySection = await getRelatedSymbolsBatch(db, sectionIds);
+      }
     }
 
-    results.push({
-      chunk_id: hit.id,
-      doc_title: detail.doc_title,
-      doc_path: detail.doc_path,
-      heading: detail.heading,
-      breadcrumbs: detail.breadcrumbs,
-      snippet: hit.content,
-      paragraph_context: detail.medium_content || hit.content,
-      full_section_content: detail.section_content,
-      score: parseFloat((hit.score || 0).toFixed(4)),
-      rsf_score: hit.rsf_score ? parseFloat(hit.rsf_score.toFixed(4)) : null,
-      rrf_score: hit.rrf_score ? parseFloat(hit.rrf_score.toFixed(4)) : null,
-      cosine_sim: hit.cosine_sim ? parseFloat(hit.cosine_sim.toFixed(4)) : null,
-      defined_symbols: symbols,
-    });
+    for (const hit of topHits) {
+      const detail = detailMap.get(hit.id);
+      if (!detail) continue;
+
+      const symbols = symbolsBySection.get(detail.section_id) || [];
+
+      results.push({
+        chunk_id: hit.id,
+        doc_title: detail.doc_title,
+        doc_path: detail.doc_path,
+        heading: detail.heading,
+        breadcrumbs: detail.breadcrumbs,
+        snippet: hit.content,
+        paragraph_context: detail.medium_content || hit.content,
+        full_section_content: detail.section_content,
+        score: parseFloat((hit.score || 0).toFixed(4)),
+        rsf_score: hit.rsf_score ? parseFloat(hit.rsf_score.toFixed(4)) : null,
+        rrf_score: hit.rrf_score ? parseFloat(hit.rrf_score.toFixed(4)) : null,
+        cosine_sim: hit.cosine_sim ? parseFloat(hit.cosine_sim.toFixed(4)) : null,
+        defined_symbols: symbols,
+      });
+    }
   }
 
   return results;

@@ -1,4 +1,4 @@
-import { bm25Search, vectorSearch, hybridQuery, rrfFusion, rsfFusion } from "../retrieval/retriever.js";
+import { bm25Search, vectorSearch, rrfFusion, rsfFusion } from "../retrieval/retriever.js";
 import { embedText } from "../ml/model_manager.js";
 import { basename } from "node:path";
 
@@ -106,13 +106,6 @@ async function rankFromPrepared(prepared, docMetaStmt, qObj, mode, K = 5, { alph
     return 0;
   }
   return await rankHitsById(hits, docMetaStmt, qObj.expectedDocIds, K);
-}
-
-async function runQueryForMode(db, docMetaStmt, qObj, mode, K = 5, opts = {}) {
-  const bm25Hits = await bm25Search(db, qObj.query, Math.max(30, K));
-  const qVec = await embedText(qObj.query, true);
-  const vectorHits = await vectorSearch(db, qVec, Math.max(30, K), 0.10);
-  return rankFromPrepared({ bm25Hits, qVec, vectorHits }, docMetaStmt, qObj, mode, K, opts);
 }
 
 // Compute per-query metric contribution

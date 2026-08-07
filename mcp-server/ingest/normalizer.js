@@ -30,15 +30,51 @@ export function cleanHtml(html) {
   return cleaned;
 }
 
+export function validateUrlForSsrf(urlStr) {
+  if (typeof urlStr !== "string" || !urlStr.trim()) {
+    throw new Error(`Unsupported URL for ingestion: '${urlStr}'. Only http/https URLs are supported.`);
+  }
+  let parsed;
+  try {
+    parsed = new URL(urlStr.trim());
+  } catch {
+    throw new Error(`Invalid URL format for ingestion: '${urlStr}'`);
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`Unsupported URL scheme '${parsed.protocol}'. Only http/https are allowed.`);
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+
+  const isBlocked =
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1" ||
+    hostname === "169.254.169.254" ||
+    hostname === "metadata.google.internal" ||
+    /^127\./.test(hostname) ||
+    /^10\./.test(hostname) ||
+    /^192\.168\./.test(hostname) ||
+    /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname) ||
+    /^169\.254\./.test(hostname) ||
+    /^0\./.test(hostname);
+
+  if (isBlocked) {
+    throw new Error(`Ingestion blocked: URL '${urlStr}' targets a private/local IP address or metadata service.`);
+  }
+
+  return parsed;
+}
+
 // Fetch a web page and convert it to Markdown/text. Used by the 'url' ingestion type
 // so the RAG store gets the page CONTENT, not just the URL string.
 export async function fetchUrlContent(url) {
-  if (typeof url !== "string" || !/^https?:\/\//i.test(url.trim())) {
-    throw new Error(`Unsupported URL for ingestion: '${url}'. Only http/https URLs are supported.`);
-  }
+  const parsed = validateUrlForSsrf(url);
+  const targetUrl = parsed.toString();
   let res;
   try {
-    res = await fetch(url.trim(), {
+    res = await fetch(targetUrl, {
       headers: {
         "User-Agent": "memory-agent-rag/1.0",
         Accept: "text/html,application/xhtml+xml,application/json,text/plain,*/*",

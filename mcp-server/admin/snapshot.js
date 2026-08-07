@@ -1,9 +1,23 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { gzipSync, gunzipSync } from "node:zlib";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { getDatabase, BLOBS_DIR } from "../db/database.js";
 import { readBlob, saveBlob } from "../storage/blob_store.js";
 import { ensureExportsDir } from "../ingest/exporter.js";
+
+export function validateSnapshotPath(pathStr, isExport = false) {
+  if (typeof pathStr !== "string" || !pathStr.trim()) {
+    throw new Error("Snapshot path cannot be empty.");
+  }
+  const resolved = resolve(pathStr.trim());
+  if (!resolved.endsWith(".json") && !resolved.endsWith(".json.gz")) {
+    throw new Error(`Invalid snapshot file extension for path '${pathStr}'. Path must end with .json or .json.gz`);
+  }
+  if (!isExport && !existsSync(resolved)) {
+    throw new Error(`Snapshot file not found: ${pathStr}`);
+  }
+  return resolved;
+}
 
 export function listAvailableSnapshots() {
   const exportsDir = ensureExportsDir();
@@ -79,7 +93,7 @@ export async function exportSnapshot({ customDb = null, customBlobDir = BLOBS_DI
   };
 
   const jsonStr = JSON.stringify(snapshot, null, 2);
-  const targetPath = outputPath || join(ensureExportsDir(), `rag_snapshot_${Date.now()}.json.gz`);
+  const targetPath = outputPath ? validateSnapshotPath(outputPath, true) : join(ensureExportsDir(), `rag_snapshot_${Date.now()}.json.gz`);
 
   if (targetPath.endsWith(".gz")) {
     const gzipped = gzipSync(Buffer.from(jsonStr, "utf-8"));
@@ -96,11 +110,9 @@ export async function importSnapshot({ customDb = null, customBlobDir = BLOBS_DI
   let snapshot;
 
   if (typeof snapshotPathOrData === "string") {
-    if (!existsSync(snapshotPathOrData)) {
-      throw new Error(`Snapshot file not found: ${snapshotPathOrData}`);
-    }
-    const raw = readFileSync(snapshotPathOrData);
-    if (snapshotPathOrData.endsWith(".gz")) {
+    const validPath = validateSnapshotPath(snapshotPathOrData, false);
+    const raw = readFileSync(validPath);
+    if (validPath.endsWith(".gz")) {
       const decompressed = gunzipSync(raw);
       snapshot = JSON.parse(decompressed.toString("utf-8"));
     } else {
