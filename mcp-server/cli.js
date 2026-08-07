@@ -1526,7 +1526,12 @@ async function handleSubmenuItem(value, config, stats) {
 
           const scopeItems = [
             { label: "Global Memory", value: "global", badge: "global.md", info: "User facts stored across all projects" },
-            { label: `Project Memory (${projLabel})`, value: "project", badge: memoryFileName(projKey), info: `Facts bound to ${projKey}` },
+            {
+              label: projKey ? `Project Memory (${projLabel})` : `Project Memory (${projLabel} - Not in git)`,
+              value: "project",
+              badge: projKey ? memoryFileName(projKey) : "none",
+              info: projKey ? `Facts bound to ${projKey}` : "Current directory is not a Git repository",
+            },
             { label: "Project Stores (All Projects)", value: "projects", info: "List & browse every project memory store; bind legacy stores" },
             { label: "< Back to Main Menu", value: "back" },
           ];

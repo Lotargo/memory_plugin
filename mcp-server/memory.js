@@ -208,7 +208,7 @@ export async function listProjectStores() {
           basename: basename(meta.key || key) || key,
           file: `${slugify(key)}.md`,
           count: facts.length,
-          legacy: !meta.key || meta.key.startsWith("/"),
+          legacy: !meta.key || (!meta.key.startsWith("git:") && !meta.key.startsWith("git_")),
         });
       }
       stores.sort((a, b) => a.basename.localeCompare(b.basename));
@@ -239,7 +239,7 @@ export async function listProjectStores() {
       basename: basename(meta.key || key) || key,
       file: f,
       count: facts.length,
-      legacy: !meta.key || meta.key.startsWith("/"),
+      legacy: !meta.key || (!meta.key.startsWith("git:") && !meta.key.startsWith("git_")),
     });
   }
   stores.sort((a, b) => a.basename.localeCompare(b.basename));
