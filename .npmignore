@@ -3,16 +3,20 @@
 **/package-lock.json
 mcp-server/package.json
 
-# Tests and benchmarks
-mcp-server/test*.js
+# Tests, benchmarks, and scratch scripts
+mcp-server/test*
 mcp-server/benchmarks/**
+mcp-server/export*.js
+mcp-server/-p
 
-# Dev docs, assets, and exports
+# Dev docs, assets, exports, and local databases
 dev_docs/
 docs/
 assets/
 scripts/
 exports/
+*.db
+local_test.db
 *.log
 reoort_jules.md
 

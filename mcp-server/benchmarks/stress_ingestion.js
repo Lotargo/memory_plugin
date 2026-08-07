@@ -37,7 +37,7 @@ export async function runIngestionBenchmark(options = {}) {
   const TEST_DB_PATH = join(TEST_DIR, "bench_memory.sqlite");
   const TEST_BLOB_DIR = join(TEST_DIR, "blobs");
 
-  const db = getDatabase(TEST_DB_PATH);
+  const db = await getDatabase(TEST_DB_PATH);
 
   if (!silent) {
     printRichPanel("DOCUMENT INGESTION BENCHMARK", `Embeddings ONNX Enabled: ${options.generateEmbeddings}`);

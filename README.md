@@ -326,6 +326,17 @@ npm run benchmark
 
 For complete methodology details and search quality evaluation metrics, see [`docs/BENCHMARKS.md`](./docs/BENCHMARKS.md).
 
+### Empirical Search Quality Results
+
+Evaluated across a 32-document technical corpus (21 queries) using Mean Reciprocal Rank (MRR@5), Recall@5, and Normalized Discounted Cumulative Gain (NDCG@5):
+
+| Retrieval Strategy            |   MRR@5    |  Recall@5   |   NDCG@5   |
+| :---------------------------- | :--------: | :---------: | :--------: |
+| BM25 Lexical Search Only      |   0.6706   |   76.19%    |   0.6934   |
+| Dense ONNX Vector Only        |   0.8135   |   100.00%   |   0.8612   |
+| Hybrid RRF ($k=10$)           |   0.8810   |   95.24%    |   0.8997   |
+| **Hybrid RSF ($\alpha=0.5$)** | **0.9286** | **100.00%** | **0.9473** |
+
 ---
 
 ## Storage & Privacy

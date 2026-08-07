@@ -4,8 +4,8 @@ import { getDatabase } from "./db/database.js";
 import { runMigrations } from "./db/migrations.js";
 
 async function run() {
-  const db = getDatabase();
-  runMigrations(db);
+  const db = await getDatabase();
+  await runMigrations(db);
 
   const sampleDoc = `# Руководство по архитектуре RAG и HTTP клиенту
 

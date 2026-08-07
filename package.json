@@ -5,7 +5,9 @@
   "type": "module",
   "main": "opencode-plugin/index.js",
   "scripts": {
-    "preinstall": "node mcp-server/preinstall.js || true"
+    "preinstall": "node mcp-server/preinstall.js || true",
+    "test": "node mcp-server/test.js",
+    "benchmark": "node mcp-server/benchmarks/run_benchmarks.js"
   },
   "bin": {
     "memory_plugin": "mcp-server/index.js",
@@ -15,7 +17,7 @@
   "files": [
     "opencode-plugin",
     "mcp-server/admin",
-    "mcp-server/benchmarks",
+    "mcp-server/cli",
     "mcp-server/config",
     "mcp-server/db",
     "mcp-server/graph",
@@ -23,10 +25,11 @@
     "mcp-server/ml",
     "mcp-server/retrieval",
     "mcp-server/storage",
-    "mcp-server/cli",
+    "mcp-server/tools",
     "mcp-server/cli.js",
     "mcp-server/index.js",
     "mcp-server/fact_format.js",
+    "mcp-server/identity.js",
     "mcp-server/memory.js",
     "mcp-server/setup.js",
     "mcp-server/preinstall.js",

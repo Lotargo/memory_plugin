@@ -261,19 +261,14 @@ async function showCategorySubmenu(category, config, stats, initialIndex = 0) {
     case "diagnostics":
       items = [
         {
-          label: "[BENCHMARK] Run Search Quality Benchmark",
-          value: "benchmark",
-          info: "Choose Quick Smoke (9 queries, ~7s) or Full (21 queries + stats, ~32s)",
-        },
-        {
           label: "[SEARCH] Run Search Verification Query",
           value: "test",
           info: "Execute hybrid search query and display result hit scores",
         },
         {
-          label: "[CACHE] Clear Benchmark Corpus Cache",
-          value: "clear_cache",
-          info: "Delete cached GitHub README files used by benchmarks",
+          label: "[GRAPH] Graph & Notebook Linking Verification",
+          value: "graph_test",
+          info: "Ingest sample doc + save Notebook fact linked to line range + verify recall & raw document reader",
         },
         {
           label: "[RESET] Reset Config to Factory Defaults",

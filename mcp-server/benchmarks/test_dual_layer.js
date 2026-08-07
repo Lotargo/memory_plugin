@@ -33,7 +33,7 @@ export async function testDualLayerArchitecture() {
   };
 
   try {
-    const db = getDatabase(TEST_DB_PATH);
+    const db = await getDatabase(TEST_DB_PATH);
 
     // 1. Setup Layer 1: Persistent Personal Facts (Notebook Store)
     console.log("\n  1. Testing Layer 1: Persistent Personal Facts (Notebook Store)...");
@@ -104,7 +104,8 @@ It supports Full-Text Search FTS5 and Write-Ahead Logging WAL mode.
     // 3. Test Architectural Isolation
     console.log("\n  3. Testing Architectural Isolation between Notebook & RAG...");
     
-    const docsInDb = db.prepare("SELECT COUNT(*) as cnt FROM documents").get().cnt;
+    const docRow = await db.prepare("SELECT COUNT(*) as cnt FROM documents").get();
+    const docsInDb = docRow ? docRow.cnt : 0;
     assert.strictEqual(docsInDb, 2, "SQLite DB should contain exactly 2 ingested documents, 0 notebook facts");
 
     const emptyRagResults = await hybridQuery({

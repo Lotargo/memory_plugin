@@ -68,22 +68,22 @@ function deriveSourceId(docMeta) {
   return basename(p).replace(/\.[^.]+$/, "");
 }
 
-function getTopHitSourceId(hits, docMetaStmt) {
+async function getTopHitSourceId(hits, docMetaStmt) {
   if (!Array.isArray(hits) || hits.length === 0) return "NONE";
   const hit = hits[0];
   let meta = null;
-  if (hit.id && docMetaStmt) meta = docMetaStmt.get(hit.id);
-  else if (hit.chunk_id && docMetaStmt) meta = docMetaStmt.get(hit.chunk_id);
+  if (hit.id && docMetaStmt) meta = await docMetaStmt.get(hit.id);
+  else if (hit.chunk_id && docMetaStmt) meta = await docMetaStmt.get(hit.chunk_id);
   return deriveSourceId(meta || hit) || "UNKNOWN";
 }
 
-function rankHitsById(hits, docMetaStmt, expectedDocIds, K = 5) {
+async function rankHitsById(hits, docMetaStmt, expectedDocIds, K = 5) {
   const top = Array.isArray(hits) ? hits.slice(0, K) : [];
   for (let r = 0; r < top.length; r++) {
     const hit = top[r];
     let meta = null;
-    if (hit.id && docMetaStmt) meta = docMetaStmt.get(hit.id);
-    else if (hit.chunk_id && docMetaStmt) meta = docMetaStmt.get(hit.chunk_id);
+    if (hit.id && docMetaStmt) meta = await docMetaStmt.get(hit.id);
+    else if (hit.chunk_id && docMetaStmt) meta = await docMetaStmt.get(hit.chunk_id);
     const sourceId = deriveSourceId(meta || hit);
     if (sourceId && expectedDocIds.includes(sourceId)) return r + 1;
   }
@@ -92,7 +92,7 @@ function rankHitsById(hits, docMetaStmt, expectedDocIds, K = 5) {
 
 // Computes rank given pre-fetched candidate lists. Avoids redundant embedText
 // (ONNX inference) calls per query, which previously inflated latency ~4x.
-function rankFromPrepared(prepared, docMetaStmt, qObj, mode, K = 5, { alpha = 0.5, rrfK = 60 } = {}) {
+async function rankFromPrepared(prepared, docMetaStmt, qObj, mode, K = 5, { alpha = 0.5, rrfK = 60 } = {}) {
   let hits = [];
   if (mode === "bm25_only") {
     hits = prepared.bm25Hits.slice(0, K);
@@ -105,13 +105,13 @@ function rankFromPrepared(prepared, docMetaStmt, qObj, mode, K = 5, { alpha = 0.
   } else {
     return 0;
   }
-  return rankHitsById(hits, docMetaStmt, qObj.expectedDocIds, K);
+  return await rankHitsById(hits, docMetaStmt, qObj.expectedDocIds, K);
 }
 
 async function runQueryForMode(db, docMetaStmt, qObj, mode, K = 5, opts = {}) {
-  const bm25Hits = bm25Search(db, qObj.query, Math.max(30, K));
+  const bm25Hits = await bm25Search(db, qObj.query, Math.max(30, K));
   const qVec = await embedText(qObj.query, true);
-  const vectorHits = vectorSearch(db, qVec, Math.max(30, K), 0.10);
+  const vectorHits = await vectorSearch(db, qVec, Math.max(30, K), 0.10);
   return rankFromPrepared({ bm25Hits, qVec, vectorHits }, docMetaStmt, qObj, mode, K, opts);
 }
 
@@ -309,7 +309,7 @@ export async function evaluateSearchQualityComparison(db, {
 } = {}) {
   if (!db) {
     const { getDatabase } = await import("../db/database.js");
-    db = getDatabase();
+    db = await getDatabase();
   }
   const isSmoke = mode === "smoke";
   // In smoke mode we drop grid search: nothing produced, no cost.
@@ -373,16 +373,16 @@ export async function evaluateSearchQualityComparison(db, {
     // Pre-fetch bm25 hits, query embedding, and vector hits ONCE — reused across
     // all 4 modes and the grid search. Eliminates ~3 redundant ONNX inferences per query.
     const startQ = performance.now();
-    const bm25Hits = bm25Search(db, qObj.query, 30);
+    const bm25Hits = await bm25Search(db, qObj.query, 30);
     const qVec = await embedText(qObj.query, true, null, null, qObj.instruction || null);
-    const vectorHits = vectorSearch(db, qVec, 30, 0.10);
+    const vectorHits = await vectorSearch(db, qVec, 30, 0.10);
     const prepared = { bm25Hits, qVec, vectorHits };
     const qLatencyMs = performance.now() - startQ;
 
-    const bm25Rank = rankFromPrepared(prepared, docMetaStmt, qObj, "bm25_only", K);
-    const vecRank = rankFromPrepared(prepared, docMetaStmt, qObj, "vector_only", K);
-    const rrfRank = rankFromPrepared(prepared, docMetaStmt, qObj, "hybrid_rrf", K, { rrfK: defaultRrfK });
-    const rsfRank = rankFromPrepared(prepared, docMetaStmt, qObj, "hybrid_rsf", K, { alpha: defaultAlpha });
+    const bm25Rank = await rankFromPrepared(prepared, docMetaStmt, qObj, "bm25_only", K);
+    const vecRank = await rankFromPrepared(prepared, docMetaStmt, qObj, "vector_only", K);
+    const rrfRank = await rankFromPrepared(prepared, docMetaStmt, qObj, "hybrid_rrf", K, { rrfK: defaultRrfK });
+    const rsfRank = await rankFromPrepared(prepared, docMetaStmt, qObj, "hybrid_rsf", K, { alpha: defaultAlpha });
 
     perQueryRanks.bm25.push({ rank: bm25Rank, idx: i, latencyMs: qLatencyMs });
     perQueryRanks.vector.push({ rank: vecRank, idx: i, latencyMs: qLatencyMs });
@@ -400,7 +400,7 @@ export async function evaluateSearchQualityComparison(db, {
     // Grid search: reuse pre-fetched hits; fusion is in-memory, cheap.
     for (const a of alphaGrid) {
       const fused = rsfFusion(bm25Hits, vectorHits, a, 0.01);
-      const r = rankHitsById(fused, docMetaStmt, qObj.expectedDocIds, K);
+      const r = await rankHitsById(fused, docMetaStmt, qObj.expectedDocIds, K);
       const m = metricFromRank(r);
       const acc = rsfGridAcc.get(a);
       acc.mrr += m.mrr;
@@ -410,7 +410,7 @@ export async function evaluateSearchQualityComparison(db, {
     }
     for (const k of kGrid) {
       const fused = rrfFusion(bm25Hits, vectorHits, k, 0.01);
-      const r = rankHitsById(fused, docMetaStmt, qObj.expectedDocIds, K);
+      const r = await rankHitsById(fused, docMetaStmt, qObj.expectedDocIds, K);
       const m = metricFromRank(r);
       const acc = rrfGridAcc.get(k);
       acc.mrr += m.mrr;
@@ -422,13 +422,13 @@ export async function evaluateSearchQualityComparison(db, {
     if (onProgress) onProgress({ phase: "evaluate", current: i + 1, total });
 
     const rsfHits = rsfFusion(bm25Hits, vectorHits, defaultAlpha, 0.01);
-    const topHitDoc = getTopHitSourceId(rsfHits, docMetaStmt);
+    const topHitDoc = await getTopHitSourceId(rsfHits, docMetaStmt);
     const topHitObj = Array.isArray(rsfHits) && rsfHits.length > 0 ? rsfHits[0] : null;
 
     let targetDocTokens = 0;
     if (qObj.expectedDocIds && qObj.expectedDocIds.length > 0) {
       const primaryTarget = qObj.expectedDocIds[0];
-      const match = targetTokensStmt.get(`%${primaryTarget}%`, primaryTarget);
+      const match = await targetTokensStmt.get(`%${primaryTarget}%`, primaryTarget);
       if (match) targetDocTokens = match.doc_tokens || 0;
     }
 

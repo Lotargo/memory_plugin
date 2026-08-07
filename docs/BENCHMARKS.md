@@ -87,12 +87,12 @@ _Model: Xenova/multilingual-e5-small without asymmetric passage/query prefix enf
 
 _Model: Xenova/multilingual-e5-small over full 32-document technical corpus (21 queries)._
 
-| Retrieval Strategy            |   MRR@5    |  Recall@5  |   NDCG@5   | Performance Gain vs Baseline |
-| ----------------------------- | :--------: | :--------: | :--------: | :--------------------------: |
-| BM25 Lexical Search Only      |   0.5873   |   66.67%   |   0.6077   |           Baseline           |
-| Dense Vector Only             |   0.8333   |   85.71%   |   0.8396   |      +41.8% Vector MRR       |
-| Hybrid RRF ($k=60$)           |   0.9048   |   90.48%   |   0.9048   |        +46.3% RRF MRR        |
-| **Hybrid RSF ($\alpha=0.5$)** | **0.9206** | **95.24%** | **0.9286** |      **+56.7% RSF MRR**      |
+| Retrieval Strategy            |   MRR@5    |  Recall@5   |   NDCG@5   | Performance Gain vs Baseline |
+| ----------------------------- | :--------: | :---------: | :--------: | :--------------------------: |
+| BM25 Lexical Search Only      |   0.6706   |   76.19%    |   0.6934   |           Baseline           |
+| Dense ONNX Vector Only        |   0.8135   |   100.00%   |   0.8612   |      +21.3% Vector MRR       |
+| Hybrid RRF ($k=10$)           |   0.8810   |   95.24%    |   0.8997   |        +31.4% RRF MRR        |
+| **Hybrid RSF ($\alpha=0.5$)** | **0.9286** | **100.00%** | **0.9473** |      **+38.5% RSF MRR**      |
 
 ---
 
