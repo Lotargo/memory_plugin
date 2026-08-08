@@ -11,6 +11,7 @@ export const DEFAULT_CONFIG = {
   rerankerModel: "none",   // "none" | "Xenova/bge-reranker-base" | custom HF model
   rerankerEnabled: false,
   batchSize: 12,           // Ingestion vector batch size [1 - 256] (default 12)
+  vectorScanLimit: 50000,  // Max micro-chunks scanned per vector query (0 = unlimited)
   gpuAttentionBudget: 2000000, // GPU micro-batch attention budget [1M - 16M] (default 2.0M ~1.5GB VRAM)
   onnxThreads: 0,          // ONNX WASM threads: 0 = auto-detect CPU cores, or 1-16
   executionDevice: "cpu",  // "cpu" | "webgpu"

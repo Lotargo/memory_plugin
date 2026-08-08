@@ -77,7 +77,7 @@ export async function ingestDocument({
     }
   } else {
     for (const micro of hierarchy.microChunks) {
-      micro.vector = Buffer.alloc(384 * 4);
+      micro.vector = Buffer.alloc(0);
     }
   }
 

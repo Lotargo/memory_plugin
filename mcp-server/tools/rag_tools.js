@@ -1,7 +1,14 @@
 import * as z from "zod/v4";
 import { optStr, defBool, defNum } from "./helpers.js";
+import { MEMORY_DIR } from "../memory.js";
+import { registerSnapshotDir } from "../admin/snapshot.js";
+import { ensureExportsDir } from "../ingest/exporter.js";
 
 export function registerRagTools(server) {
+  // Restrict snapshot export/import paths to the plugin's own data directories.
+  registerSnapshotDir(ensureExportsDir());
+  registerSnapshotDir(MEMORY_DIR);
+
   server.registerTool(
     "ingest_document",
     {

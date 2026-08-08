@@ -179,10 +179,16 @@ async function openDatabase(customPath, mode) {
           authToken: token || undefined,
         });
       }
-      // In hybrid-sync mode, ensure remote schema is also fully migrated and up to date
+      // In hybrid-sync mode, ensure remote schema is also fully migrated and up to date.
+      // Use a dedicated short-lived client so closing it doesn't kill the shared one.
       if (mode === "hybrid-sync") {
-        const cloudDbWrapper = new DatabaseWrapper(null, cloudClient, "only-cloud", failoverClient);
+        const remoteClient = createClient({
+          url: tursoUrl,
+          authToken: token || undefined,
+        });
+        const cloudDbWrapper = new DatabaseWrapper(null, remoteClient, "only-cloud", null);
         await runMigrations(cloudDbWrapper);
+        cloudDbWrapper.close();
       }
     } else if (mode === "only-cloud") {
       throw new Error("Turso URL is required for only-cloud mode. Please login first.");

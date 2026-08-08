@@ -26,15 +26,24 @@ function openBrowser(url) {
 
 // Starts a temporary loopback HTTP server to receive the OAuth callback.
 // Turso redirects the browser back to the root path:  /?jwt=<JWT>&username=<USERNAME>
-export function startAuthLoopbackServer(port = 48900) {
+// `expectedState` protects against OAuth CSRF: the callback is only accepted
+// when it echoes the random `state` value that was embedded in the login URL.
+export function startAuthLoopbackServer(port = 48900, expectedState = null) {
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
       const url = new URL(req.url, `http://${req.headers.host}`);
       const token = url.searchParams.get("jwt") || url.searchParams.get("token");
       const username = url.searchParams.get("username");
       const error = url.searchParams.get("error");
+      const receivedState = url.searchParams.get("state");
 
       if (token) {
+        if (expectedState && receivedState !== expectedState) {
+          res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+          res.end("Invalid state parameter");
+          server.close(() => reject(new Error("OAuth callback rejected: state parameter mismatch (possible CSRF attempt).")));
+          return;
+        }
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
         res.end(`
           <!DOCTYPE html>
@@ -379,9 +388,9 @@ export async function loginToCloud({
   let received;
   if (simulated && simulatedParams) {
     received = await new Promise((resolve, reject) => {
-      const serverPromise = startAuthLoopbackServer(customPort);
+      const serverPromise = startAuthLoopbackServer(customPort, state);
       const req = http.request(
-        `http://127.0.0.1:${customPort}/?jwt=${encodeURIComponent(simulatedParams.jwt)}&username=${encodeURIComponent(simulatedParams.username)}`,
+        `http://127.0.0.1:${customPort}/?jwt=${encodeURIComponent(simulatedParams.jwt)}&username=${encodeURIComponent(simulatedParams.username)}&state=${encodeURIComponent(state)}`,
         { method: "GET" },
         (res) => {
           res.resume();
@@ -393,7 +402,7 @@ export async function loginToCloud({
     });
   } else {
     openBrowser(loginUrl);
-    received = await startAuthLoopbackServer(customPort);
+    received = await startAuthLoopbackServer(customPort, state);
   }
 
   const { token, username } = received;

@@ -1,6 +1,6 @@
 import { readFile, readdir } from "fs/promises";
 import { join, basename } from "path";
-import { MEMORY_DIR, GLOBAL_KEY, buildMemoryContent, extractFacts, writeMemoryFile, storeFilePath, memoryFileName } from "../memory.js";
+import { MEMORY_DIR, GLOBAL_KEY, buildMemoryContent, extractFacts, writeMemoryFile, storeFilePath } from "../memory.js";
 
 let isSyncing = false;
 
@@ -170,11 +170,6 @@ export async function enqueueSyncTask(action, keyOrId, payload = null) {
   triggerBackgroundSync().catch((err) => {
     console.error("Background sync trigger error:", err.message);
   });
-}
-
-// Map a store key to its local file path, mirroring memory.js naming.
-function localFilePath(key) {
-  return join(MEMORY_DIR, memoryFileName(key));
 }
 
 // Enumerate local store files as { key, path }.

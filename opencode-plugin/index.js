@@ -37,6 +37,14 @@ const {
   today,
 } = await import("../mcp-server/memory.js");
 
+process.on("exit", () => {
+  import("../mcp-server/db/database.js").then(({ closeDatabase }) => {
+    try {
+      closeDatabase();
+    } catch {}
+  }).catch(() => {});
+});
+
 // Resolve a fact reference (1-based number, metadata id, or text) to an index.
 function resolveFactIndex(entries, ref) {
   const trimmed = String(ref || "").trim();
@@ -356,7 +364,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           if (docId) {
             try {
               const { linkFactToDocument } = await import("../mcp-server/graph/knowledge_linker.js");
-              const linkRes = linkFactToDocument({
+              const linkRes = await linkFactToDocument({
                 factKey: key,
                 factText: finalFact,
                 docId,
@@ -649,7 +657,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           try {
             const { getDatabase } = await import("../mcp-server/db/database.js");
             const db = await getDatabase();
-            const res = db
+            const res = await db
               .prepare("UPDATE knowledge_links SET fact_text = ? WHERE fact_key = ? AND fact_text = ?")
               .run(finalFact, key, oldBody);
             linksUpdated = res.changes;
@@ -677,11 +685,16 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           try {
             const { getDatabase } = await import("../mcp-server/db/database.js");
             const db = await getDatabase();
-            rag.documents = db.prepare("SELECT COUNT(*) AS c FROM documents").get().c;
-            rag.sections = db.prepare("SELECT COUNT(*) AS c FROM sections").get().c;
-            rag.chunks = db.prepare("SELECT COUNT(*) AS c FROM micro_chunks").get().c;
-            rag.edges = db.prepare("SELECT COUNT(*) AS c FROM graph_edges").get().c;
-            rag.links = db.prepare("SELECT COUNT(*) AS c FROM knowledge_links").get().c;
+            const docRow = await db.prepare("SELECT COUNT(*) AS c FROM documents").get();
+            rag.documents = docRow ? docRow.c : 0;
+            const secRow = await db.prepare("SELECT COUNT(*) AS c FROM sections").get();
+            rag.sections = secRow ? secRow.c : 0;
+            const chunkRow = await db.prepare("SELECT COUNT(*) AS c FROM micro_chunks").get();
+            rag.chunks = chunkRow ? chunkRow.c : 0;
+            const edgeRow = await db.prepare("SELECT COUNT(*) AS c FROM graph_edges").get();
+            rag.edges = edgeRow ? edgeRow.c : 0;
+            const linkRow = await db.prepare("SELECT COUNT(*) AS c FROM knowledge_links").get();
+            rag.links = linkRow ? linkRow.c : 0;
           } catch (e) {
             rag.error = e.message;
           }
@@ -752,7 +765,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
             if (!factText || !docId) {
               throw new Error("factText and docId are required parameters for link action");
             }
-            const res = linkFactToDocument({
+            const res = await linkFactToDocument({
               factKey: key,
               factText,
               docId,
@@ -765,12 +778,12 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
 
           if (act === "get_doc_links") {
             if (!docId) throw new Error("docId parameter is required for get_doc_links action");
-            const links = getLinksForDoc(docId);
+            const links = await getLinksForDoc(docId);
             return JSON.stringify(links, null, 2);
           }
 
           if (act === "list_links") {
-            const links = listAllLinks(key);
+            const links = await listAllLinks(key);
             return JSON.stringify(links, null, 2);
           }
 
@@ -878,10 +891,14 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           const db = await getDatabase();
 
           if (action === "stats") {
-            const docCount = db.prepare("SELECT COUNT(*) as cnt FROM documents").get().cnt;
-            const secCount = db.prepare("SELECT COUNT(*) as cnt FROM sections").get().cnt;
-            const chunkCount = db.prepare("SELECT COUNT(*) as cnt FROM micro_chunks").get().cnt;
-            const edgeCount = db.prepare("SELECT COUNT(*) as cnt FROM graph_edges").get().cnt;
+            const docCountRow = await db.prepare("SELECT COUNT(*) as cnt FROM documents").get();
+            const docCount = docCountRow ? docCountRow.cnt : 0;
+            const secCountRow = await db.prepare("SELECT COUNT(*) as cnt FROM sections").get();
+            const secCount = secCountRow ? secCountRow.cnt : 0;
+            const chunkCountRow = await db.prepare("SELECT COUNT(*) as cnt FROM micro_chunks").get();
+            const chunkCount = chunkCountRow ? chunkCountRow.cnt : 0;
+            const edgeCountRow = await db.prepare("SELECT COUNT(*) as cnt FROM graph_edges").get();
+            const edgeCount = edgeCountRow ? edgeCountRow.cnt : 0;
             return JSON.stringify(
               {
                 documents: docCount,
@@ -895,7 +912,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           }
 
           if (action === "list") {
-            const docs = db
+            const docs = await db
               .prepare("SELECT id, title, path, blob_hash, created_at FROM documents ORDER BY created_at DESC")
               .all();
             return JSON.stringify(docs, null, 2);
@@ -903,7 +920,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
 
           if (action === "read_document") {
             if (!docId) throw new Error("docId parameter is required for read_document action");
-            const doc = db
+            const doc = await db
               .prepare("SELECT id, title, path, blob_hash, created_at FROM documents WHERE id = ? OR path = ? OR title = ?")
               .get(docId, docId, docId);
             if (!doc) {

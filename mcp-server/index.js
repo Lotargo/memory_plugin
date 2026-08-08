@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ensureDir, MEMORY_DIR } from "./memory.js";
 import { registerAllTools } from "./tools/index.js";
+import { closeDatabase } from "./db/database.js";
 
 const cliArgs = process.argv.slice(2);
 
@@ -29,6 +30,20 @@ if (
 }
 
 await ensureDir();
+
+process.on("exit", () => {
+  try {
+    closeDatabase();
+  } catch {}
+});
+for (const sig of ["SIGINT", "SIGTERM"]) {
+  process.on(sig, () => {
+    try {
+      closeDatabase();
+    } catch {}
+    process.exit(0);
+  });
+}
 
 const server = new McpServer({
   name: "memory-agent",

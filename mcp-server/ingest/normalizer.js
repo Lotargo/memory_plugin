@@ -71,20 +71,39 @@ export function validateUrlForSsrf(urlStr) {
 // so the RAG store gets the page CONTENT, not just the URL string.
 export async function fetchUrlContent(url) {
   const parsed = validateUrlForSsrf(url);
-  const targetUrl = parsed.toString();
-  let res;
-  try {
-    res = await fetch(targetUrl, {
-      headers: {
-        "User-Agent": "memory-agent-rag/1.0",
-        Accept: "text/html,application/xhtml+xml,application/json,text/plain,*/*",
-      },
-      redirect: "follow",
-      signal: AbortSignal.timeout(15000),
-    });
-  } catch (err) {
-    throw new Error(`Failed to fetch URL '${url}': ${err.message}`);
+  let currentUrl = parsed.toString();
+
+  const fetchOnce = async (targetUrl) => {
+    try {
+      return await fetch(targetUrl, {
+        headers: {
+          "User-Agent": "memory-agent-rag/1.0",
+          Accept: "text/html,application/xhtml+xml,application/json,text/plain,*/*",
+        },
+        redirect: "manual",
+        signal: AbortSignal.timeout(15000),
+      });
+    } catch (err) {
+      throw new Error(`Failed to fetch URL '${url}': ${err.message}`);
+    }
+  };
+
+  // Follow up to 3 redirect hops manually, re-validating each target against SSRF rules.
+  let res = await fetchOnce(currentUrl);
+  for (let hop = 0; hop < 3 && res.status >= 300 && res.status < 400; hop++) {
+    const location = res.headers.get("location");
+    if (!location) break;
+    let redirectUrl;
+    try {
+      redirectUrl = new URL(location, currentUrl);
+    } catch {
+      throw new Error(`URL '${url}' redirected to an invalid location`);
+    }
+    validateUrlForSsrf(redirectUrl.toString());
+    currentUrl = redirectUrl.toString();
+    res = await fetchOnce(currentUrl);
   }
+
   if (!res.ok) {
     throw new Error(`Failed to fetch URL '${url}': HTTP ${res.status} ${res.statusText}`);
   }

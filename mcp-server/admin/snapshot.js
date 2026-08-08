@@ -1,9 +1,15 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { gzipSync, gunzipSync } from "node:zlib";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { getDatabase, BLOBS_DIR } from "../db/database.js";
 import { readBlob, saveBlob } from "../storage/blob_store.js";
 import { ensureExportsDir } from "../ingest/exporter.js";
+
+const ALLOWED_SNAPSHOT_DIRS = new Set();
+
+export function registerSnapshotDir(dir) {
+  ALLOWED_SNAPSHOT_DIRS.add(resolve(dir));
+}
 
 export function validateSnapshotPath(pathStr, isExport = false) {
   if (typeof pathStr !== "string" || !pathStr.trim()) {
@@ -15,6 +21,14 @@ export function validateSnapshotPath(pathStr, isExport = false) {
   }
   if (!isExport && !existsSync(resolved)) {
     throw new Error(`Snapshot file not found: ${pathStr}`);
+  }
+  if (ALLOWED_SNAPSHOT_DIRS.size > 0) {
+    const allowed = [...ALLOWED_SNAPSHOT_DIRS].some(
+      (dir) => resolved.startsWith(dir + sep) || resolved === dir
+    );
+    if (!allowed) {
+      throw new Error(`Snapshot path '${pathStr}' is outside the allowed directories.`);
+    }
   }
   return resolved;
 }

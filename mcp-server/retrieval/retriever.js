@@ -45,16 +45,26 @@ export async function vectorSearch(db, queryVector, limit = 30, minSim = 0.25) {
   const tempView = new Uint8Array(tempBuf);
   const tempVec = new Float32Array(tempBuf);
 
-  const stmt = db.prepare(`
-    SELECT m.id, m.section_id, m.doc_id, m.content, m.vector, s.breadcrumbs
-    FROM micro_chunks m
-    JOIN sections s ON m.section_id = s.id;
-  `);
+  const scanLimit = Number(getConfig().vectorScanLimit) || 0;
+  const scanSql = scanLimit > 0
+    ? `
+      SELECT m.id, m.section_id, m.doc_id, m.content, m.vector, s.breadcrumbs
+      FROM micro_chunks m
+      JOIN sections s ON m.section_id = s.id
+      LIMIT ?;
+    `
+    : `
+      SELECT m.id, m.section_id, m.doc_id, m.content, m.vector, s.breadcrumbs
+      FROM micro_chunks m
+      JOIN sections s ON m.section_id = s.id;
+    `;
 
+  const stmt = db.prepare(scanSql);
+  const rows = scanLimit > 0 ? await stmt.all(scanLimit) : await stmt.all();
   const scored = [];
-  const rows = await stmt.all();
   for (const r of rows) {
     let vecSub = r.vector;
+    if (vecSub === null || vecSub === undefined) continue;
     if (typeof vecSub === "string") {
       vecSub = Buffer.from(vecSub, "base64");
     } else if (vecSub.type === "Buffer" && Array.isArray(vecSub.data)) {
@@ -62,6 +72,8 @@ export async function vectorSearch(db, queryVector, limit = 30, minSim = 0.25) {
     } else if (Array.isArray(vecSub)) {
       vecSub = Buffer.from(vecSub);
     }
+    if (!Buffer.isBuffer(vecSub) || vecSub.byteLength < vectorDim * 4) continue;
+    if (vecSub.byteLength !== vectorDim * 4) continue;
     tempView.set(vecSub.subarray(0, vectorDim * 4));
 
     const sim = cosineSimilarity(queryVector, tempVec);

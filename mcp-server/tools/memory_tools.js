@@ -120,7 +120,7 @@ export function registerMemoryTools(server) {
       if (docId) {
         const { linkFactToDocument } = await import("../graph/knowledge_linker.js");
         try {
-          const linkRes = linkFactToDocument({
+          const linkRes = await linkFactToDocument({
             factKey: key,
             factText: finalFact,
             docId,

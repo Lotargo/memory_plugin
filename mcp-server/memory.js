@@ -93,10 +93,6 @@ export function parseMeta(content) {
   return { key: m ? m[1].trim() : null };
 }
 
-function isSimpleKey(key) {
-  return /^[a-zA-Z0-9_-]+$/.test(key);
-}
-
 export async function readMemory(key) {
   if (!key) return [];
   const { getConfig } = await import("./config/config_manager.js");

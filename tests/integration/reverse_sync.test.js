@@ -2,6 +2,7 @@ import assert from "node:assert";
 import { rmSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { createClient } from "@libsql/client";
 
 export async function runReverseSyncTests() {
   console.log("--- Running Integration Tests: reverse_sync ---");
@@ -22,18 +23,20 @@ export async function runReverseSyncTests() {
     updateConfig({ mode: "only-local", tursoUrl: CLOUD_DB_PATH });
 
     // Clean cloud database
-    const dbRemoteInit = await getDatabase(CLOUD_DB_PATH.replace("file:", ""), "only-local");
-    await dbRemoteInit.exec("PRAGMA foreign_keys = OFF;");
-    await dbRemoteInit.exec("DROP TABLE IF EXISTS notebooks;");
-    await dbRemoteInit.exec("DROP TABLE IF EXISTS documents;");
-    await dbRemoteInit.exec("DROP TABLE IF EXISTS sections;");
-    await dbRemoteInit.exec("DROP TABLE IF EXISTS medium_chunks;");
-    await dbRemoteInit.exec("DROP TABLE IF EXISTS micro_chunks;");
-    await dbRemoteInit.exec("DROP TABLE IF EXISTS micro_chunks_fts;");
-    await dbRemoteInit.exec("DROP TABLE IF EXISTS graph_edges;");
-    await dbRemoteInit.exec("DROP TABLE IF EXISTS knowledge_links;");
-    await dbRemoteInit.exec("DROP TABLE IF EXISTS schema_migrations;");
-    await dbRemoteInit.exec("PRAGMA foreign_keys = ON;");
+    const dbRemoteInit = createClient({ url: CLOUD_DB_PATH });
+    await dbRemoteInit.executeMultiple(`
+      PRAGMA foreign_keys = OFF;
+      DROP TABLE IF EXISTS notebooks;
+      DROP TABLE IF EXISTS documents;
+      DROP TABLE IF EXISTS sections;
+      DROP TABLE IF EXISTS medium_chunks;
+      DROP TABLE IF EXISTS micro_chunks;
+      DROP TABLE IF EXISTS micro_chunks_fts;
+      DROP TABLE IF EXISTS graph_edges;
+      DROP TABLE IF EXISTS knowledge_links;
+      DROP TABLE IF EXISTS schema_migrations;
+      PRAGMA foreign_keys = ON;
+    `);
     dbRemoteInit.close();
     closeDatabase();
 
@@ -65,8 +68,12 @@ export async function runReverseSyncTests() {
     await writeMemory("local_only_key", ["- [2026-08-02 11:00] Local only fact <!-- id:l1 -->"]);
     await triggerBackgroundSync();
     await sleep(100);
-    const dbRemote = await getDatabase(CLOUD_DB_PATH.replace("file:", ""), "only-local");
-    const pushedRow = await dbRemote.prepare("SELECT content FROM notebooks WHERE key = 'local_only_key';").get();
+    const dbRemote = createClient({ url: CLOUD_DB_PATH });
+    const pushedRowRes = await dbRemote.execute({
+      sql: "SELECT content FROM notebooks WHERE key = ?;",
+      args: ["local_only_key"]
+    });
+    const pushedRow = pushedRowRes.rows[0];
     assert(pushedRow, "Local-only store should be pushed to cloud");
     assert(pushedRow.content.includes("Local only fact"), "Pushed content should match");
     dbRemote.close();
@@ -93,8 +100,12 @@ export async function runReverseSyncTests() {
     assert(mergedLocalFacts.some((f) => f.includes("Local fact A")), "Merged should keep local fact A");
     assert(mergedLocalFacts.some((f) => f.includes("Cloud fact B")), "Merged should keep cloud fact B");
 
-    const dbRemote2 = await getDatabase(CLOUD_DB_PATH.replace("file:", ""), "only-local");
-    const mergedCloudRow = await dbRemote2.prepare("SELECT content FROM notebooks WHERE key = 'conflict_key';").get();
+    const dbRemote2 = createClient({ url: CLOUD_DB_PATH });
+    const mergedCloudRowRes = await dbRemote2.execute({
+      sql: "SELECT content FROM notebooks WHERE key = ?;",
+      args: ["conflict_key"]
+    });
+    const mergedCloudRow = mergedCloudRowRes.rows[0];
     assert(mergedCloudRow.content.includes("Local fact A"), "Merged cloud should also contain local fact A");
     assert(mergedCloudRow.content.includes("Cloud fact B"), "Merged cloud should also contain cloud fact B");
     dbRemote2.close();
@@ -132,8 +143,12 @@ export async function runReverseSyncTests() {
 
     const lwSummary = await syncFromCloud();
     assert.strictEqual(lwSummary.localWins, 1, "Should resolve via local-wins");
-    const dbRemote3 = await getDatabase(CLOUD_DB_PATH.replace("file:", ""), "only-local");
-    const lwCloudRow = await dbRemote3.prepare("SELECT content FROM notebooks WHERE key = 'lw_key';").get();
+    const dbRemote3 = createClient({ url: CLOUD_DB_PATH });
+    const lwCloudRowRes = await dbRemote3.execute({
+      sql: "SELECT content FROM notebooks WHERE key = ?;",
+      args: ["lw_key"]
+    });
+    const lwCloudRow = lwCloudRowRes.rows[0];
     assert(lwCloudRow.content.includes("Local fact wins"), "Local content should overwrite cloud");
     dbRemote3.close();
     closeDatabase();
