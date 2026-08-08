@@ -125,6 +125,14 @@ async function showCategorySubmenu(category, config, stats, initialIndex = 0) {
           info: `Model: ${config.embeddingModel}. ONNX Feature Extraction via @huggingface/transformers`,
         },
         {
+          label: "Vector Dimension",
+          badge: config.vectorDimension > 0 ? `${config.vectorDimension}D FIXED` : "AUTO",
+          value: "vector_dim",
+          info: config.vectorDimension > 0
+            ? `Override embedding dimension to ${config.vectorDimension} (pads/truncates model output for consistency)`
+            : "Auto-detect vector dimension from embedding model output",
+        },
+        {
           label: "Reranker Model",
           badge: config.rerankerEnabled ? config.rerankerModel.split("/").pop() : "DISABLED",
           value: "reranker",

@@ -115,6 +115,47 @@ export async function handleEngineAction(value, config) {
       }
       break;
     }
+    case "vector_dim": {
+      const dimItems = [
+        { label: "0 - Auto (Detect from Model)", value: 0, info: "Use the vector dimension produced by the embedding model (Recommended)" },
+        { label: "384", value: 384, info: "MiniLM-L6 / multilingual-e5-small" },
+        { label: "512", value: 512, info: "Compact embedding models" },
+        { label: "768", value: 768, info: "e5-large / bge-base / MiniLM-L12" },
+        { label: "1024", value: 1024, info: "bge-m3 / modern multilingual models" },
+        { label: "1536", value: 1536, info: "OpenAI text-embedding-3-small (for compatible local models)" },
+        { label: "3072", value: 3072, info: "OpenAI text-embedding-3-large (for compatible local models)" },
+        { label: "Custom Dimension...", value: "custom", info: "Specify any dimension not listed here" },
+      ];
+      const currentDim = config.vectorDimension || 0;
+      const initialDimIdx = Math.max(0, dimItems.findIndex((i) => i.value === currentDim));
+
+      const subRes = await selectSimpleMenu({
+        title: "SELECT VECTOR DIMENSION",
+        subtitle: "Force a fixed embedding size (pads/truncates model output for consistent matching)",
+        items: dimItems,
+        initialIndex: initialDimIdx,
+      });
+
+      if (subRes.action === "select") {
+        let chosenDim = subRes.value;
+        if (subRes.value === "custom") {
+          const inputRes = await readTextInput("Enter Vector Dimension (positive integer)", "768");
+          if (inputRes.action === "submit" && inputRes.value) {
+            const parsed = Number.parseInt(inputRes.value, 10);
+            if (!Number.isInteger(parsed) || parsed <= 0) {
+              console.log(`\x1b[31mInvalid dimension: "${inputRes.value}". Expected a positive integer.\x1b[0m`);
+              await waitForEnter();
+              break;
+            }
+            chosenDim = parsed;
+          } else {
+            break;
+          }
+        }
+        updateConfig({ vectorDimension: chosenDim });
+      }
+      break;
+    }
     case "batch_size": {
       const batchItems = [
         { label: "Batch Size 1 (Single Item)", value: 1, info: "Process micro-chunks strictly 1 by 1" },

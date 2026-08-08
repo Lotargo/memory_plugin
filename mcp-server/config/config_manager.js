@@ -8,6 +8,7 @@ export const DEFAULT_CONFIG = {
   fusionAlgorithm: "rsf", // "rsf" | "rrf" | "semantic_only" | "lexical_only"
   alpha: 0.5,             // Weight for vector similarity in RSF [0.0 - 1.0] (50/50 balance)
   embeddingModel: "Xenova/multilingual-e5-small",
+  vectorDimension: 0,     // Fixed embedding dimension (0 = auto-detect from model output)
   rerankerModel: "none",   // "none" | "Xenova/bge-reranker-base" | custom HF model
   rerankerEnabled: false,
   batchSize: 12,           // Ingestion vector batch size [1 - 256] (default 12)

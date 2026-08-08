@@ -270,7 +270,7 @@ export async function embedText(text, isQuery = false, modelName = null, progres
     max_length: maxLen,
   });
 
-  const result = output.data.slice();
+  const result = applyFixedDimension(output.data.slice());
   if (typeof output.dispose === 'function') {
     output.dispose();
   }
@@ -356,7 +356,7 @@ export async function embedBatch(texts, isQuery = false, modelName = null, progr
 
       for (let i = 0; i < batchSize; i++) {
         const byteOffset = i * vectorDim;
-        allResults.push(rawData.slice(byteOffset, byteOffset + vectorDim));
+        allResults.push(applyFixedDimension(rawData.slice(byteOffset, byteOffset + vectorDim)));
       }
 
       if (typeof output.dispose === 'function') {
@@ -472,6 +472,18 @@ export async function rerankHits(query, hits, rerankerModelName = "Xenova/bge-re
 
 export function vectorToBuffer(float32Array) {
   return Buffer.from(float32Array.buffer, float32Array.byteOffset, float32Array.byteLength);
+}
+
+export function resizeVector(float32Array, targetDim) {
+  const dim = Number(targetDim);
+  if (!dim || dim <= 0 || !float32Array || float32Array.length === dim) return float32Array;
+  const out = new Float32Array(dim);
+  out.set(float32Array.subarray(0, Math.min(float32Array.length, dim)));
+  return out;
+}
+
+function applyFixedDimension(float32Array) {
+  return resizeVector(float32Array, getConfig().vectorDimension || 0);
 }
 
 export function bufferToVector(buffer) {

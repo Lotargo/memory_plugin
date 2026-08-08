@@ -8,6 +8,7 @@ import { extractTitle, validateUrlForSsrf } from "../../mcp-server/ingest/normal
 import { exportDocumentToJsonString } from "../../mcp-server/ingest/exporter.js";
 import { sanitizeFtsQuery as retrieverSanitizeFts } from "../../mcp-server/retrieval/retriever.js";
 import { updateConfig, getConfig, resetConfig } from "../../mcp-server/config/config_manager.js";
+import { resizeVector } from "../../mcp-server/ml/model_manager.js";
 import { validateSnapshotPath } from "../../mcp-server/admin/snapshot.js";
 import { getDatabase } from "../../mcp-server/db/database.js";
 import { ingestDocument } from "../../mcp-server/ingest/pipeline.js";
@@ -95,6 +96,34 @@ export async function runAuditUnitTests() {
   const validExportPath = validateSnapshotPath(join(TEST_DIR, "snapshot.json.gz"), true);
   assert(validExportPath.endsWith("snapshot.json.gz"), "Valid export path accepted");
   console.log("   [PASS] validateSnapshotPath OK");
+
+  // 8. Test resizeVector dimension override
+  console.log("8. Testing resizeVector dimension override...");
+  const origVector = new Float32Array([0.1, 0.2, 0.3, 0.4]);
+  const approx = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-6, `expected ${expected}, got ${actual}`);
+  const padded = resizeVector(origVector, 768);
+  assert.strictEqual(padded.length, 768, "Vector padded up to target dimension");
+  approx(padded[0], 0.1, "Padding preserves leading values");
+  approx(padded[3], 0.4, "Padding preserves trailing values");
+  assert.strictEqual(padded[4], 0, "Padding fills missing values with zero");
+  const truncated = resizeVector(origVector, 2);
+  assert.strictEqual(truncated.length, 2, "Vector truncated down to target dimension");
+  approx(truncated[0], 0.1, "Truncation preserves first values");
+  const unchanged = resizeVector(origVector, 4);
+  assert.strictEqual(unchanged, origVector, "Same-dimension vector returned as-is (no copy)");
+  const disabled = resizeVector(origVector, 0);
+  assert.strictEqual(disabled, origVector, "0 target returns vector untouched (auto mode)");
+  console.log("   [PASS] resizeVector OK");
+
+  // 9. Test vectorDimension config round-trip
+  console.log("9. Testing vectorDimension config round-trip...");
+  const origDim = getConfig().vectorDimension;
+  const updatedDim = updateConfig({ vectorDimension: 768 });
+  assert.strictEqual(updatedDim.vectorDimension, 768, "Config vectorDimension should update to 768");
+  assert.strictEqual(getConfig().vectorDimension, 768, "getConfig() reflects vectorDimension update");
+  resetConfig();
+  assert.strictEqual(getConfig().vectorDimension, origDim, "Config reset restores default vectorDimension");
+  console.log("   [PASS] vectorDimension config round-trip OK");
 
   // Cleanup test directory
   try {
