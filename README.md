@@ -225,8 +225,8 @@ memory-cli
 
 Use **Up / Down** arrows to navigate, **ENTER** to select, and **BACKSPACE** to go back.
 
-- **Engine & Hybrid Search Settings**: Switch fusion algorithms (`rsf`, `rrf`, `semantic_only`, `lexical_only`), adjust RSF $\alpha$ balance, select ONNX embedding models, toggle Cross-Encoder rerankers, configure GPU attention budget, and set WASM threads.
-- **Knowledge Base & Storage Management**: Browse Layer 1 facts, manage Layer 2 RAG docs, export/import JSON snapshots, purge model cache, or perform a hard reset.
+- **Engine & Hybrid Search Settings**: Switch fusion algorithms (`rsf`, `rrf`, `semantic_only`, `lexical_only`), adjust RSF $\alpha$ balance, select ONNX embedding models, set a fixed embedding vector dimension, toggle Cross-Encoder rerankers, configure GPU attention budget, and set WASM threads.
+- **Knowledge Base & Storage Management**: Browse Layer 1 facts, manage Layer 2 RAG docs, re-embed all vectors after switching model/dimension (`[REINDEX]`), export/import JSON snapshots, purge model cache, or perform a hard reset.
 - **Global Prompt & Integration**: Toggle memory instruction sync across client configurations (`~/.gemini/config/AGENTS.md`, `~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`).
 - **Diagnostics & System Actions**: Run in-process search quality benchmarks, execute verification queries, clear corpus cache, and reset config to factory defaults.
 
@@ -302,6 +302,7 @@ The engine is configured through `<memory-dir>/config.json` (created with defaul
 | `fusionAlgorithm` | `rsf` | `rsf`, `rrf`, `semantic_only`, or `lexical_only` |
 | `alpha` | `0.5` | Vector vs BM25 weight in RSF `[0.0 - 1.0]` |
 | `embeddingModel` | `Xenova/multilingual-e5-small` | ONNX dense embedding model (E5 / BGE families supported) |
+| `vectorDimension` | `0` | Fixed embedding vector dimension; `0` = auto-detect from the model |
 | `rerankerModel` | `none` | Cross-encoder reranker model (e.g. `Xenova/bge-reranker-base`) |
 | `rerankerEnabled` | `false` | Enable cross-encoder re-ranking |
 | `batchSize` | `12` | Ingestion vector batch size `[1 - 256]` |
