@@ -9,6 +9,7 @@ import { exportDocumentToJsonString } from "../../mcp-server/ingest/exporter.js"
 import { sanitizeFtsQuery as retrieverSanitizeFts } from "../../mcp-server/retrieval/retriever.js";
 import { updateConfig, getConfig, resetConfig } from "../../mcp-server/config/config_manager.js";
 import { resizeVector } from "../../mcp-server/ml/model_manager.js";
+import { formatInputText } from "../../mcp-server/ml/model_manager.js";
 import { validateSnapshotPath } from "../../mcp-server/admin/snapshot.js";
 import { getDatabase } from "../../mcp-server/db/database.js";
 import { ingestDocument } from "../../mcp-server/ingest/pipeline.js";
@@ -124,6 +125,49 @@ export async function runAuditUnitTests() {
   resetConfig();
   assert.strictEqual(getConfig().vectorDimension, origDim, "Config reset restores default vectorDimension");
   console.log("   [PASS] vectorDimension config round-trip OK");
+
+  // 10. Test formatInputText model-profile auto-detection
+  console.log("10. Testing formatInputText model-profile auto-detection...");
+  const E5 = "Xenova/multilingual-e5-small";
+  const BGE = "Xenova/bge-base-en-v1.5";
+  const BGE_M3 = "Xenova/bge-m3";
+  const MINILM = "Xenova/all-MiniLM-L6-v2";
+  const MPNET = "Xenova/all-mpnet-base-v2";
+  const PARAPHRASE = "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
+  const GTE = "Xenova/gte-small";
+
+  assert.strictEqual(formatInputText("hello", true, E5), "query: hello", "e5 query gets query: prefix");
+  assert.strictEqual(formatInputText("hello", false, E5), "passage: hello", "e5 passage gets passage: prefix");
+  assert.strictEqual(
+    formatInputText("hello", true, "Xenova/multilingual-e5-small-instruct", "Find docs"),
+    "Instruct: Find docs\nQuery: hello",
+    "e5-instruct query embeds instruction"
+  );
+  assert.strictEqual(
+    formatInputText("query: hello", true, E5),
+    "query: hello",
+    "e5 strips existing query: prefix (idempotent)"
+  );
+
+  assert.strictEqual(
+    formatInputText("hello", true, BGE),
+    "Represent this sentence for searching relevant passages: hello",
+    "bge query gets retrieval instruction prefix"
+  );
+  assert.strictEqual(formatInputText("hello", false, BGE), "hello", "bge passage keeps plain text");
+  assert.strictEqual(formatInputText("hello", true, BGE_M3), formatInputText("hello", true, BGE), "bge-m3 shares bge query profile");
+  assert.strictEqual(
+    formatInputText("hello", true, BGE, "Search docs"),
+    "Represent this sentence for searching relevant passages: Search docs hello",
+    "bge query prepends instruction to prompt"
+  );
+
+  for (const plainModel of [MINILM, MPNET, PARAPHRASE, GTE]) {
+    assert.strictEqual(formatInputText("hello", true, plainModel), "hello", `${plainModel} query has no prefix`);
+    assert.strictEqual(formatInputText("hello", false, plainModel), "hello", `${plainModel} passage has no prefix`);
+  }
+  assert.strictEqual(formatInputText("", true, E5), "", "Empty text returns empty string");
+  console.log("   [PASS] formatInputText model-profile auto-detection OK");
 
   // Cleanup test directory
   try {
