@@ -1,6 +1,6 @@
 ---
 name: using-memory
-description: Comprehensive guide for using the Memory, Hybrid RAG Knowledge Engine & MCP Helper tools (remember, recall, get_fact, forget, update_fact, memory_info, link_knowledge, link_project_memory, unlink_project_memory, relink_project_memory, ingest_document, query_knowledge_base, manage_knowledge_base, list-mcp-tools, mcp-reminder). Trigger proactively whenever user preferences, project conventions, technology stack choices, or architecture decisions are introduced, or when querying ingested documentation, indexing files/repos, managing persistent knowledge, or looking up available MCP tool integrations.
+description: Comprehensive guide for using the Memory, Hybrid RAG Knowledge Engine & MCP Helper tools (remember, recall, get_fact, forget, update_fact, memory_info, link_knowledge, link_project_memory, unlink_project_memory, relink_project_memory, ingest_document, query_knowledge_base, manage_knowledge_base, reindex_knowledge_base, list-mcp-tools, mcp-reminder). Trigger proactively whenever user preferences, project conventions, technology stack choices, or architecture decisions are introduced, or when querying ingested documentation, indexing files/repos, managing persistent knowledge, or looking up available MCP tool integrations.
 ---
 
 # Using Memory, Hybrid RAG Knowledge Engine & MCP Helper Tools
@@ -34,6 +34,7 @@ You have access to a persistent dual-layer memory engine supercharged with an **
 | User asks a complex question about indexed docs or code | `query_knowledge_base` | `query`, `limit`, `instruction`, `generateEmbeddings` |
 | Read full raw content of an ambiguous/abstract document | `manage_knowledge_base` | `action: "read_document"`, `docId` |
 | View DB stats, list indexed docs, read/delete docs, export/import snapshots | `manage_knowledge_base` | `action` ("stats", "list", "read_document", "delete", "export_snapshot", "import_snapshot"), `docId`, `snapshotPath` |
+| Re-embed all documents after switching embedding model / dimension | `reindex_knowledge_base` | `model`, `dimension` (optional; defaults to active config) |
 | Discover available MCP servers and their specific purposes | `list-mcp-tools` | — |
 | Ask which MCP tool / server is suitable for a specific task | `mcp-reminder` | `task` (string, e.g., "db migration") |
 
@@ -114,7 +115,7 @@ Project stores are bound to Git-based project identities (`git:remote` or `git:l
 
 ---
 
-## 3. Layer 2: RAG Knowledge Base (`ingest_document`, `query_knowledge_base`, `manage_knowledge_base`)
+## 3. Layer 2: RAG Knowledge Base (`ingest_document`, `query_knowledge_base`, `manage_knowledge_base`, `reindex_knowledge_base`)
 
 ### Document Ingestion (`ingest_document`)
 Use this tool when adding technical documentation, API specs, architectural documents, or code repos into the searchable knowledge base.
@@ -176,6 +177,10 @@ In such cases, use the **Full Raw Document Reading** mechanism:
 - Use `action: "delete"` with `docId` to remove an outdated document and purge its CAS blob.
 - Use `action: "export_snapshot"` with `snapshotPath` to export a JSON backup of the RAG base.
 - Use `action: "import_snapshot"` with `snapshotPath` to import and merge a JSON backup into the current database.
+
+### Re-Indexing Embeddings (`reindex_knowledge_base`)
+Use this tool AFTER changing the embedding model or vector dimension so previously ingested documents remain vector-searchable.
+- Both `model` and `dimension` are optional and default to the active configuration; vectors are recomputed in batches while documents, sections, FTS index, graph edges, and fact links are preserved.
 
 ---
 

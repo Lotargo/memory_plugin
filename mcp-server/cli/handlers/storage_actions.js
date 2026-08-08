@@ -34,6 +34,7 @@ import {
   readTextInput,
   promptText,
   waitForEnter,
+  downloadModelWithProgress,
 } from "../ui.js";
 
 export async function handleStorageAction(value, config, stats) {
@@ -554,6 +555,63 @@ export async function handleStorageAction(value, config, stats) {
           await waitForEnter();
         }
       }
+      break;
+    }
+    case "reindex_embeddings": {
+      const db = await getDatabase();
+      const chunkCountRow = await db.prepare("SELECT COUNT(*) as cnt FROM micro_chunks").get();
+      const chunkCount = chunkCountRow ? chunkCountRow.cnt : 0;
+      const docCountRow = await db.prepare("SELECT COUNT(*) as cnt FROM documents").get();
+      const docCount = docCountRow ? docCountRow.cnt : 0;
+
+      if (chunkCount === 0) {
+        console.clear();
+        console.log("\n  [*] No micro-chunks to re-index. Ingest documents first.\n");
+        await waitForEnter();
+        break;
+      }
+
+      const dimLabel = config.vectorDimension > 0 ? `${config.vectorDimension}` : "AUTO";
+      console.clear();
+      console.log(`\n  \x1b[1m\x1b[37mRE-EMBED KNOWLEDGE BASE\x1b[0m\n`);
+      console.log(`  Model:     ${config.embeddingModel}`);
+      console.log(`  Dimension: ${dimLabel}`);
+      console.log(`  Documents: ${docCount}`);
+      console.log(`  Chunks:    ${chunkCount}`);
+      console.log("\n  Re-embeds ALL stored vectors with the active model & dimension.");
+      console.log("  Facts, fact-doc links, FTS index & graph edges are preserved.\n");
+
+      const confirmRes = await selectSimpleMenu({
+        title: "CONFIRM RE-INDEX",
+        items: [
+          {
+            label: "[CONFIRM] Re-Embed All Documents",
+            value: "confirm",
+            info: "Loads/downloads the model if needed, then re-embeds every chunk with the active configuration",
+          },
+          { label: "< Cancel / Back", value: "cancel" },
+        ],
+      });
+      if (!(confirmRes.action === "select" && confirmRes.value === "confirm")) break;
+
+      try {
+        const { reindexEmbeddings } = await import("../../ingest/pipeline.js");
+        await downloadModelWithProgress(config.embeddingModel, "embedding");
+        console.log(`\n  [REINDEX] Re-embedding ${chunkCount} chunks...\n`);
+        const res = await reindexEmbeddings({
+          progressCallback: (p) => {
+            process.stdout.write(`\r  Progress: ${p.done}/${p.total} chunks`);
+          },
+        });
+        process.stdout.write("\n");
+        console.log(`\n  \x1b[32m[OK] Re-index complete!\x1b[0m`);
+        console.log(`  Chunks re-embedded: ${res.reindexed}`);
+        console.log(`  Documents affected: ${res.documentsAffected}`);
+        console.log(`  Model: ${res.model} | Dimension: ${res.dimension || "AUTO"}\n`);
+      } catch (err) {
+        console.error(`  \x1b[31m[ERROR] Re-index failed: ${err.message}\x1b[0m\n`);
+      }
+      await waitForEnter();
       break;
     }
     case "export_snapshot": {

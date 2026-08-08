@@ -12,7 +12,7 @@ import { resizeVector } from "../../mcp-server/ml/model_manager.js";
 import { formatInputText } from "../../mcp-server/ml/model_manager.js";
 import { validateSnapshotPath } from "../../mcp-server/admin/snapshot.js";
 import { getDatabase } from "../../mcp-server/db/database.js";
-import { ingestDocument } from "../../mcp-server/ingest/pipeline.js";
+import { ingestDocument, reindexEmbeddings } from "../../mcp-server/ingest/pipeline.js";
 
 const TEST_DIR = join(tmpdir(), `memory_test_audit_${Date.now()}`);
 const TEST_DB_PATH = join(TEST_DIR, "test_memory.sqlite");
@@ -168,6 +168,50 @@ export async function runAuditUnitTests() {
   }
   assert.strictEqual(formatInputText("", true, E5), "", "Empty text returns empty string");
   console.log("   [PASS] formatInputText model-profile auto-detection OK");
+
+  // 11. Test reindexEmbeddings re-embedding (model/dimension switch)
+  console.log("11. Testing reindexEmbeddings re-embedding...");
+  const reindexDbPath = join(TEST_DIR, "reindex.sqlite");
+  const reindexDb = await getDatabase(reindexDbPath);
+  const reIng = await ingestDocument({
+    content: "# Reindex Doc\n\nAlpha content for re-embedding verification.",
+    type: "text",
+    title: "Reindex Doc",
+    path: "virtual://reindex_test.md",
+    generateEmbeddings: false,
+    customDb: reindexDb,
+  });
+
+  const beforeRow = await reindexDb.prepare("SELECT COUNT(*) as cnt, COALESCE(SUM(LENGTH(vector)),0) as bytes FROM micro_chunks WHERE doc_id = ?").get(reIng.docId);
+  assert.ok(beforeRow.cnt > 0, "Reindex test doc has chunks");
+  assert.strictEqual(beforeRow.bytes, 0, "generateEmbeddings:false stores empty vectors");
+
+  const fakeEmbed = async (texts) => texts.map(() => new Float32Array(8).fill(0.01));
+  const res1 = await reindexEmbeddings({
+    model: "Fake/model",
+    dimension: 8,
+    embedFn: fakeEmbed,
+    customDb: reindexDb,
+  });
+  assert.strictEqual(res1.reindexed, beforeRow.cnt, "Re-index processes every stored chunk");
+  assert.strictEqual(res1.dimension, 8, "Re-index reports target dimension");
+
+  const afterRow1 = await reindexDb.prepare("SELECT COUNT(*) as cnt, COALESCE(SUM(LENGTH(vector)),0) as bytes FROM micro_chunks WHERE doc_id = ?").get(reIng.docId);
+  assert.strictEqual(afterRow1.bytes, beforeRow.cnt * 32, "Vectors updated to 8-dim (32 bytes each)");
+
+  const docStill = await reindexDb.prepare("SELECT id, title FROM documents WHERE id = ?").get(reIng.docId);
+  assert.ok(docStill && docStill.title === "Reindex Doc", "Document preserved after re-index");
+
+  const res2 = await reindexEmbeddings({
+    model: "Fake/model",
+    dimension: 16,
+    embedFn: async (texts) => texts.map(() => new Float32Array(16).fill(0.02)),
+    customDb: reindexDb,
+  });
+  assert.strictEqual(res2.reindexed, beforeRow.cnt, "Second re-index re-embeds the same chunks");
+  const afterRow2 = await reindexDb.prepare("SELECT COALESCE(SUM(LENGTH(vector)),0) as bytes FROM micro_chunks WHERE doc_id = ?").get(reIng.docId);
+  assert.strictEqual(afterRow2.bytes, beforeRow.cnt * 64, "Vectors updated to 16-dim (64 bytes each)");
+  console.log("   [PASS] reindexEmbeddings re-embedding OK");
 
   // Cleanup test directory
   try {

@@ -107,7 +107,7 @@ memory_plugin setup --mode only-cloud
    - **Project Identity**: Project stores are bound to a **Git-based project identity** — the normalized remote URL (`git:github.com/owner/repo`) or `git:local:<repo basename>` — never to a directory path. Memories follow the repository across machines, OSes, and subdirectories. Legacy path/basename stores can be linked and merged via `link_project_memory`.
 
 2. **Layer 2: RAG Knowledge Base (Technical Documents & Codebases)**
-   - **Tools**: `ingest_document`, `query_knowledge_base`, `manage_knowledge_base`
+   - **Tools**: `ingest_document`, `query_knowledge_base`, `manage_knowledge_base`, `reindex_knowledge_base`
    - **Capabilities**: Ingests raw text files, Markdown, HTML, Web URLs, office documents (PDF, DOCX, XLSX, CSV), and codebases.
    - **Engine Components**: 3-tier hierarchy chunking (Big / Medium / Small), SQLite FTS5 BM25 search, ONNX dense vector embeddings (`multilingual-e5-small`), Reciprocal Rank Fusion (RRF / RSF), cross-encoder reranking (optional), and GraphRAG Lite code symbol extraction.
 
@@ -172,6 +172,7 @@ The plugin registers **15 MCP tools** accessible across all connected AI environ
 | `ingest_document` | `content`, `type`, `title`, `path`, `generateEmbeddings` | Ingest local files, URLs, or raw text into the 3-tier index (Big/Medium/Small) with ONNX vector embeddings and GraphRAG symbol extraction. |
 | `query_knowledge_base` | `query`, `limit`, `instruction`, `generateEmbeddings` | Perform hybrid search (RSF/RRF BM25 + dense vector similarity) to retrieve candidate document sections with defined code symbols. |
 | `manage_knowledge_base` | `action`, `docId`, `snapshotPath` | Inspect DB stats (`stats`), list documents (`list`), read full raw document (`read_document`), delete document (`delete`), or export/import snapshots (`export_snapshot` / `import_snapshot`). |
+| `reindex_knowledge_base` | `model`, `dimension` | Re-embed all stored vectors with the active (or specified) embedding model and vector dimension. Use after switching the embedding model or vector dimension so previously indexed documents remain retrievable. Preserves documents, FTS index, graph edges, and fact links. |
 | `link_knowledge` | `action`, `factText`, `docId`, `scope`, `startLine`, `endLine`, `relationType` | Create, list, or retrieve semantic graph links connecting Notebook facts to Knowledge Base documents, sections, or line ranges. Actions: `link`, `list_links`, `get_doc_links`. |
 
 ### 4. Agent & OpenCode Helpers

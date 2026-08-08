@@ -1,5 +1,5 @@
 import * as z from "zod/v4";
-import { optStr, defBool, defNum } from "./helpers.js";
+import { optStr, defBool, defNum, optNum } from "./helpers.js";
 import { MEMORY_DIR } from "../memory.js";
 import { registerSnapshotDir } from "../admin/snapshot.js";
 import { ensureExportsDir } from "../ingest/exporter.js";
@@ -122,6 +122,47 @@ export function registerRagTools(server) {
         .join("\n\n---\n\n");
 
       return { content: [{ type: "text", text: headerNote + formatted }] };
+    }
+  );
+
+  server.registerTool(
+    "reindex_knowledge_base",
+    {
+      description:
+        "Re-embed all existing documents in the RAG knowledge base with the active (or specified) embedding model and vector dimension. " +
+        "Use after switching the embedding model or vector dimension so previously stored vectors match the new configuration. " +
+        "Preserves documents, sections, FTS index, graph edges, and fact links.",
+      inputSchema: z.object({
+        model: optStr().describe("Embedding model to use (defaults to active config.embeddingModel)"),
+        dimension: optNum().describe(
+          "Fixed vector dimension (defaults to active config.vectorDimension; auto-detect if unset)"
+        ),
+      }),
+    },
+    async ({ model, dimension }) => {
+      const { reindexEmbeddings } = await import("../ingest/pipeline.js");
+      const result = await reindexEmbeddings({
+        model: model || null,
+        dimension: dimension !== undefined && dimension !== null ? dimension : null,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                status: "success",
+                reindexed: result.reindexed,
+                documentsAffected: result.documentsAffected,
+                model: result.model,
+                dimension: result.dimension || "auto",
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
     }
   );
 

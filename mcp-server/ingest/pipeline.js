@@ -232,3 +232,88 @@ export async function deleteDocument(docIdOrPath, customDb = null, customBlobDir
 
   return { deleted: true, docId: doc.id, title: doc.title, linksCleaned: true };
 }
+
+export async function reindexEmbeddings({
+  model = null,
+  dimension = null,
+  customDb = null,
+  embedFn = null,
+  progressCallback = null,
+} = {}) {
+  const db = customDb || await getDatabase();
+  const config = getConfig();
+  const targetModel = model || config.embeddingModel || "Xenova/multilingual-e5-small";
+  const targetDim = dimension !== null && dimension !== undefined ? Number(dimension) : (config.vectorDimension || 0);
+
+  const countRow = await db.prepare("SELECT COUNT(*) as cnt FROM micro_chunks").get();
+  const total = countRow ? countRow.cnt : 0;
+  if (total === 0) return { reindexed: 0, documentsAffected: 0, model: targetModel, dimension: targetDim };
+
+  const rows = await db.prepare(`
+    SELECT m.id, m.doc_id, m.content, s.breadcrumbs, d.title as doc_title
+    FROM micro_chunks m
+    LEFT JOIN sections s ON m.section_id = s.id
+    LEFT JOIN documents d ON m.doc_id = d.id
+    ORDER BY m.doc_id, m.id
+  `).all();
+
+  const items = rows.map((r) => ({
+    id: r.id,
+    doc_id: r.doc_id,
+    text: r.breadcrumbs
+      ? `${r.content}\n\nContext: ${r.doc_title || ""} > ${r.breadcrumbs}`
+      : `${r.content}\n\nContext: ${r.doc_title || ""}`,
+  }));
+
+  const defaultEmbed = async (texts) =>
+    embedBatch(texts, false, targetModel, progressCallback, null, {}, targetDim || null);
+  const embed = embedFn || defaultEmbed;
+
+  const BATCH_SIZE = config.batchSize || 12;
+  const vectors = [];
+  for (let i = 0; i < items.length; i += BATCH_SIZE) {
+    const batch = items.slice(i, i + BATCH_SIZE);
+    const batchVecs = await embed(batch.map((b) => b.text));
+    if (!batchVecs || batchVecs.length !== batch.length) {
+      throw new Error(`Embedding batch returned ${batchVecs ? batchVecs.length : 0} vectors, expected ${batch.length}`);
+    }
+    for (let j = 0; j < batch.length; j++) {
+      vectors.push({ id: batch[j].id, doc_id: batch[j].doc_id, vector: vectorToBuffer(batchVecs[j]) });
+    }
+    if (progressCallback) progressCallback({ done: vectors.length, total });
+  }
+
+  await db.exec("BEGIN IMMEDIATE;");
+  try {
+    const stmt = db.prepare("UPDATE micro_chunks SET vector = ? WHERE id = ?;");
+    for (const v of vectors) {
+      await stmt.run(v.vector, v.id);
+    }
+    await db.exec("COMMIT;");
+  } catch (err) {
+    await db.exec("ROLLBACK;");
+    throw new Error(`Re-index transaction failed: ${err.message}`);
+  }
+
+  const affectedDocIds = [...new Set(items.map((i) => i.doc_id).filter(Boolean))];
+
+  if (config.mode === "hybrid-sync") {
+    try {
+      const { enqueueSyncTask } = await import("../db/sync_queue.js");
+      const { exportDocumentData } = await import("./exporter.js");
+      for (const docId of affectedDocIds) {
+        const exportedData = await exportDocumentData(docId, db);
+        await enqueueSyncTask("ingest_document", docId, exportedData);
+      }
+    } catch (err) {
+      console.error("Failed to queue document re-index sync tasks:", err.message);
+    }
+  }
+
+  return {
+    reindexed: vectors.length,
+    documentsAffected: affectedDocIds.length,
+    model: targetModel,
+    dimension: targetDim,
+  };
+}

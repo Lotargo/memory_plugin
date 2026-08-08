@@ -192,6 +192,12 @@ async function showCategorySubmenu(category, config, stats, initialIndex = 0) {
           info: "Inspect ingested Markdown/code docs & delete chunks from SQLite",
         },
         {
+          label: "[REINDEX] Re-Embed Documents with Current Model",
+          badge: `${stats.docCount} Docs`,
+          value: "reindex_embeddings",
+          info: "Recompute all stored vectors with the active embedding model & vector dimension (use after switching model/dimension). Preserves facts, links, FTS & graph edges",
+        },
+        {
           label: "[SNAPSHOT EXPORT] Export RAG Base Snapshot",
           value: "export_snapshot",
           info: "Export full RAG database, vectors & blobs into a snapshot file (.json or .json.gz)",

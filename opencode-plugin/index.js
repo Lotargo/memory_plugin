@@ -966,6 +966,34 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           throw new Error(`Unknown action: ${action}`);
         },
       },
+      "reindex_knowledge_base": {
+        description:
+          "Re-embed all existing documents in the RAG knowledge base with the active (or specified) embedding model and vector dimension. " +
+          "Use after switching the embedding model or vector dimension so previously stored vectors match the new configuration. " +
+          "Preserves documents, sections, FTS index, graph edges, and fact links.",
+        args: {
+          model: { type: "string", description: "Embedding model to use (defaults to active config.embeddingModel)" },
+          dimension: { type: "number", description: "Fixed vector dimension (defaults to active config.vectorDimension; auto-detect if unset)" },
+        },
+        async execute({ model, dimension }) {
+          const { reindexEmbeddings } = await import("../mcp-server/ingest/pipeline.js");
+          const result = await reindexEmbeddings({
+            model: model || null,
+            dimension: dimension !== undefined && dimension !== null ? dimension : null,
+          });
+          return JSON.stringify(
+            {
+              status: "success",
+              reindexed: result.reindexed,
+              documentsAffected: result.documentsAffected,
+              model: result.model,
+              dimension: result.dimension || "auto",
+            },
+            null,
+            2
+          );
+        },
+      },
       "link_project_memory": {
         description: "Link the current directory to a Git-based project identity, register aliases, and optionally migrate legacy/path stores.",
         args: {

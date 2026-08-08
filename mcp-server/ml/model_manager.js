@@ -255,7 +255,7 @@ export function formatInputText(text, isQuery = false, modelName = null, instruc
   return cleanText;
 }
 
-export async function embedText(text, isQuery = false, modelName = null, progressCallback = null, instruction = null) {
+export async function embedText(text, isQuery = false, modelName = null, progressCallback = null, instruction = null, vectorDimension = null) {
   const targetModel = modelName || getConfig().embeddingModel || "Xenova/multilingual-e5-small";
   const extractor = await getExtractor(targetModel, progressCallback);
   const formattedText = formatInputText(text, isQuery, targetModel, instruction);
@@ -270,14 +270,14 @@ export async function embedText(text, isQuery = false, modelName = null, progres
     max_length: maxLen,
   });
 
-  const result = applyFixedDimension(output.data.slice());
+  const result = applyFixedDimension(output.data.slice(), vectorDimension);
   if (typeof output.dispose === 'function') {
     output.dispose();
   }
   return result;
 }
 
-export async function embedBatch(texts, isQuery = false, modelName = null, progressCallback = null, instruction = null, traceOptions = {}) {
+export async function embedBatch(texts, isQuery = false, modelName = null, progressCallback = null, instruction = null, traceOptions = {}, vectorDimension = null) {
   if (!texts || texts.length === 0) return [];
   const targetModel = modelName || getConfig().embeddingModel || "Xenova/multilingual-e5-small";
   
@@ -356,7 +356,7 @@ export async function embedBatch(texts, isQuery = false, modelName = null, progr
 
       for (let i = 0; i < batchSize; i++) {
         const byteOffset = i * vectorDim;
-        allResults.push(applyFixedDimension(rawData.slice(byteOffset, byteOffset + vectorDim)));
+        allResults.push(applyFixedDimension(rawData.slice(byteOffset, byteOffset + vectorDim), vectorDimension));
       }
 
       if (typeof output.dispose === 'function') {
@@ -482,8 +482,9 @@ export function resizeVector(float32Array, targetDim) {
   return out;
 }
 
-function applyFixedDimension(float32Array) {
-  return resizeVector(float32Array, getConfig().vectorDimension || 0);
+function applyFixedDimension(float32Array, overrideDim = null) {
+  const dim = overrideDim !== null && overrideDim !== undefined ? overrideDim : (getConfig().vectorDimension || 0);
+  return resizeVector(float32Array, dim);
 }
 
 export function bufferToVector(buffer) {
