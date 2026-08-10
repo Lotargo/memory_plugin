@@ -53,8 +53,8 @@
 
 ### Качество кода
 
-- [ ] **H3. Дублирование 880+ строк логики MCP-инструментов** — `opencode-plugin/index.js:49-58, 121-129, 281-1166`. Плагин перереализует все 14 инструментов + `resolveFactIndex` + `requireProjectKey`, дублируя `mcp-server/tools/*`. Багфиксы в `mcp-server/tools/` не попадают в плагин. Вынести единые обработчики и импортировать.
-- [ ] **H4. Top-Level Await + побочные эффекты при импорте** — `opencode-plugin/index.js:1-46`. Динамические `await import(...)` на верхнем уровне блокируют загрузку модуля; `process.on("exit", ...)` при импорте → дублирование слушателей/утечки. Перевести на статический ESM-импорт, подписку перенести в `MemoryPlugin`.
+- [x] **H3. Дублирование 880+ строк логики MCP-инструментов** — `opencode-plugin/index.js:49-58, 121-129, 281-1166`. Плагин перереализует все 14 инструментов + `resolveFactIndex` + `requireProjectKey`, дублируя `mcp-server/tools/*`. Багфиксы в `mcp-server/tools/` не попадают в плагин. Вынести единые обработчики и импортировать.
+- [x] **H4. Top-Level Await + побочные эффекты при импорте** — `opencode-plugin/index.js:1-46`. Динамические `await import(...)` на верхнем уровне блокируют загрузку модуля; `process.on("exit", ...)` при импорте → дублирование слушателей/утечки. Перевести на статический ESM-импорт, подписку перенести в `MemoryPlugin`.
 
 ---
 
@@ -75,10 +75,10 @@
 
 ### Публикация
 
-- [ ] **M5. `npm audit`: 4 high + 1 moderate**
-  - [ ] `npm audit fix` → закроет `fast-uri` (host confusion) и `hono` (4 адвизории) через обновление MCP SDK
-  - [ ] `xlsx *` (high, Prototype Pollution + ReDoS, фикса нет) — задокументировать в RELEASE-NOTES; рассмотреть замену на `exceljs`
-  - [ ] `sharp <0.35.0` (high, 4 CVE, «No fix available», транзитивно через `@huggingface/transformers`) — задокументировать; рассмотреть опцию отключения image-моделей
+- [x] **M5. `npm audit`: 4 high + 1 moderate**
+  - [x] `npm audit fix` → закроет `fast-uri` (host confusion) и `hono` (4 адвизории) через обновление MCP SDK
+  - [x] `xlsx *` (high, Prototype Pollution + ReDoS, фикса нет) — задокументировать в RELEASE-NOTES; рассмотреть замену на `exceljs`
+  - [x] `sharp <0.35.0` (high, 4 CVE, «No fix available», транзитивно через `@huggingface/transformers`) — задокументировать; рассмотреть опцию отключения image-моделей
 - [x] **M6. Версия MCP-сервера 1.5.2 vs package.json 1.5.3** — `mcp-server/index.js:50`. Читать версию из корневого `package.json` через `new URL(..., import.meta.url)` либо обновить хардкод.
 
 ### Тесты
@@ -108,21 +108,21 @@
 
 ### Качество кода
 
-- [ ] **L7. Неиспользуемые импорты (6 шт.)**
-  - [ ] `mcp-server/ml/model_manager.js:14` — `GpuMonitor`, `ExecutionTracer`
-  - [ ] `mcp-server/cli/ui.js:6` — `getModelStorageInfo`
-  - [ ] `mcp-server/db/sync_queue.js:2,7` — `basename`, `storeFilePath`
-  - [ ] `mcp-server/ingest/pipeline.js:3` — `embedText`
-  - [ ] `mcp-server/retrieval/retriever.js:3` — `getRelatedSymbols`
-  - [ ] `mcp-server/storage/blob_store.js:1` — `access`
+- [x] **L7. Неиспользуемые импорты (6 шт.)**
+  - [x] `mcp-server/ml/model_manager.js:14` — `GpuMonitor`, `ExecutionTracer`
+  - [x] `mcp-server/cli/ui.js:6` — `getModelStorageInfo`
+  - [x] `mcp-server/db/sync_queue.js:2,7` — `basename`, `storeFilePath`
+  - [x] `mcp-server/ingest/pipeline.js:3` — `embedText`
+  - [x] `mcp-server/retrieval/retriever.js:3` — `getRelatedSymbols`
+  - [x] `mcp-server/storage/blob_store.js:1` — `access`
 - [x] **L8. `dbLastFailAt` блокирует локальную БД на 5 с** — `db/database.js:219-221`. Применять cooldown только к сбоям облачной Turso, не блокируя переоткрытие локального SQLite-файла.
 - [x] **L9. Порядок `parseInt` / regex в `resolveFactIndex`** — `tools/helpers.js:33-34`, `opencode-plugin/index.js:52-53`. Сначала `/^\d+$/.test()`, затем `parseInt`.
-- [ ] **L10. `console.error` вместо единого логгера** — `mcp-server/memory.js:109,120,170,182,213`, `ingest/pipeline.js:158,229,309`. Централизовать через настраиваемый логгер (stdio MCP не ломается — идёт в stderr).
+- [x] **L10. `console.error` вместо единого логгера** — `mcp-server/memory.js:109,120,170,182,213`, `ingest/pipeline.js:158,229,309`. Централизовать через настраиваемый логгер (stdio MCP не ломается — идёт в stderr).
 
 ### CLI / инфраструктура
 
 - [x] **L11. `--help` / `--version` не обрабатываются** — `mcp-server/index.js`, `mcp-server/cli.js`: exit 0, но usage не выводится; `index.js` просто стартует сервер, `cli.js` открывает TUI.
-- [ ] **L12. Устаревший вложенный `mcp-server/package.json`** — `memory-mcp-server@1.5.2`, неполные зависимости (нет `@libsql/client`, `mammoth`, `pdf-parse`, `xlsx`), источник дрейфа версий. Удалить вместе с `mcp-server/package-lock.json` (в тарболл не входят).
+- [x] **L12. Устаревший вложенный `mcp-server/package.json`** — `memory-mcp-server@1.5.2`, неполные зависимости (нет `@libsql/client`, `mammoth`, `pdf-parse`, `xlsx`), источник дрейфа версий. Удалить вместе с `mcp-server/package-lock.json` (в тарболл не входят).
 - [x] **L13. Пустые каталоги `%TEMP%\mcp-tools-*` после тестов** — неполная очистка из-за lock SQLite на Windows.
 
 ### Документация — README
@@ -177,5 +177,5 @@
 - [x] **Этап 4 — тесты и герметичность:** M7, M8, L13
 - [x] **Этап 5 — документация:** M10, M11, M12, L14–L19
 - [x] **Этап 6 — бенчмарки:** L21 → L20 (перегенерация отчётов)
-- [ ] **Этап 7 — рефакторинг:** H3, H4, L7, L9, L10, L11, L12
-- [ ] **Этап 8 — зависимости:** M5 (`npm audit fix` + документирование xlsx/sharp)
+- [x] **Этап 7 — рефакторинг:** H3, H4, L7, L9, L10, L11, L12
+- [x] **Этап 8 — зависимости:** M5 (`npm audit fix` + документирование xlsx/sharp)

@@ -367,6 +367,15 @@ Evaluated across a 32-document technical corpus (21 queries) using Mean Reciproc
 - **Model Weights**: ONNX weights are downloaded on first use from `https://huggingface.co` and cached locally; later runs are fully offline.
 - **Zero Telemetry**: No third-party analytics or telemetry calls are made. The only outbound traffic is the one-off model download, plus Turso requests in the cloud sync modes.
 
+### Known Dependency Advisories
+
+`npm audit` reports three high-severity advisories with no upstream fix available. Both affected packages are only reachable through explicit user action:
+
+| Package | Advisory | Reachability | Mitigation |
+| :--- | :--- | :--- | :--- |
+| `xlsx` (SheetJS) | Prototype Pollution ([GHSA-4r6h-8v6p-xvw6](https://github.com/advisories/GHSA-4r6h-8v6p-xvw6)), ReDoS ([GHSA-5pgg-2g8v-p4x9](https://github.com/advisories/GHSA-5pgg-2g8v-p4x9)) | Only when you ingest a `.xlsx` / `.xls` / `.csv` file | Do not ingest untrusted spreadsheets. A migration to `exceljs` is under consideration. |
+| `sharp` `<0.35.0` (via `@huggingface/transformers`) | libvips CVE-2026-33327 / 33328 / 35590 / 35591 ([GHSA-f88m-g3jw-g9cj](https://github.com/advisories/GHSA-f88m-g3jw-g9cj)) | Image decoding path only; this plugin runs text embedding models exclusively and never feeds images to `sharp` | Not reachable in normal use; will clear once `@huggingface/transformers` bumps `sharp`. |
+
 ---
 
 ## License
