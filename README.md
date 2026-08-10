@@ -334,17 +334,40 @@ The engine is configured through `<memory-dir>/config.json` (created with defaul
 
 ## Testing & Benchmarking
 
-To run the automated test suite and benchmarks locally:
+To run the automated test suite and benchmarks locally, from the repository root:
 
 ```bash
-cd mcp-server
-
-# Run unit and integration tests
+# Unit + integration + cloud suites (12 files) — fast and fully offline
 npm test
 
-# Run search quality & ingestion benchmarks
+# End-to-end smoke test with REAL ONNX embeddings — run before a release
+npm run smoke
+
+# Search quality & ingestion benchmarks
 npm run benchmark
 ```
+
+### Two testing modes, and why both exist
+
+`npm test` runs every suite with `generateEmbeddings: false`. That keeps it fast
+and offline (no model download, no network), but it means the **dense-vector half
+of the engine is never exercised** — retrieval falls back to BM25-only.
+
+`npm run smoke` covers exactly that blind spot: it ingests a document with real
+ONNX vectors and asserts that hybrid retrieval returns a non-zero cosine
+similarity, plus that a Russian query still reaches an English document
+(something BM25 cannot do). It also walks the full user journey — remember →
+recall → ingest → query → link → update → get → forget — and checks the ingest
+path guard.
+
+This split is not academic: a regression in `v1.5.3+` disabled vector search
+entirely (`node:sqlite` returns BLOBs as `Uint8Array`, and a `Buffer.isBuffer()`
+guard discarded every stored vector) while all offline suites stayed green. The
+smoke test exists so that class of failure cannot ship unnoticed again.
+
+The smoke test reuses the model weights already cached in your data directory, so
+it does not re-download them. Point `MEMORY_MODEL_CACHE` at a cache directory to
+override the lookup; without any cache the weights are fetched once.
 
 For complete methodology details and search quality evaluation metrics, see [`docs/BENCHMARKS.md`](./docs/BENCHMARKS.md).
 

@@ -7,6 +7,7 @@
   "scripts": {
     "preinstall": "node mcp-server/preinstall.js || true",
     "test": "node tests/run_all.js",
+    "smoke": "node tests/smoke/e2e_real_embeddings.test.js",
     "benchmark": "node mcp-server/benchmarks/run_benchmarks.js"
   },
   "bin": {
