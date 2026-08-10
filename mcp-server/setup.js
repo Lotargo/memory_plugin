@@ -28,10 +28,18 @@ export async function runSetup() {
   let configuredCount = 0;
 
   // 0. Headless cloud authentication (Google Jules / CI / VPS)
-  if (apiKeyArg) {
+  if (apiKeyArg || process.env.TURSO_API_TOKEN) {
     try {
+      const { resolveSecret } = await import("./cli/secret_input.js");
+      const apiKey = await resolveSecret({
+        argvValue: apiKeyArg,
+        envKeys: ["TURSO_API_TOKEN"],
+        promptLabel: "Turso API token",
+        interactive: false,
+      });
+      if (!apiKey) throw new Error("Missing API token. Set TURSO_API_TOKEN or pass --api-key <TOKEN>.");
       const { loginWithApiToken } = await import("./admin/auth.js");
-      const secrets = await loginWithApiToken({ token: apiKeyArg });
+      const secrets = await loginWithApiToken({ token: apiKey });
       if (modeArg && VALID_MODES.includes(modeArg)) {
         const { updateConfig } = await import("./config/config_manager.js");
         updateConfig({ mode: modeArg });

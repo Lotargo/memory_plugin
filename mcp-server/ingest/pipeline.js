@@ -8,6 +8,7 @@ import { buildTripleHierarchy } from "./chunker.js";
 import { embedText, embedBatch, vectorToBuffer } from "../ml/model_manager.js";
 import { buildGraphEdges, saveGraphEdges } from "../graph/graph_extractor.js";
 import { getConfig } from "../config/config_manager.js";
+import { assertIngestPathAllowed } from "../security/path_guard.js";
 
 export async function ingestDocument({
   content,
@@ -34,9 +35,10 @@ export async function ingestDocument({
     const filePath = effectivePath || content;
     const needsRead = !content || content === filePath;
     if (needsRead && filePath) {
-      const ext = extname(filePath).toLowerCase();
+      const safePath = assertIngestPathAllowed(filePath);
+      const ext = extname(safePath).toLowerCase();
       const isBinary = [".pdf", ".docx", ".xlsx", ".xls"].includes(ext);
-      content = await readFile(filePath, isBinary ? null : "utf-8");
+      content = await readFile(safePath, isBinary ? null : "utf-8");
       effectivePath = filePath;
     }
   }

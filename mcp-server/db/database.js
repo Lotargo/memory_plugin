@@ -34,19 +34,19 @@ class DatabaseWrapper {
 
     while (attempts < maxAttempts) {
       attempts++;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      // A plain timer is enough here; an AbortController per attempt leaked its
+      // "abort" listener because it was never removed.
+      let timeoutId = null;
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error(`Database operation timed out after ${timeoutMs / 1000} seconds`)),
+          timeoutMs
+        );
+      });
 
       try {
         const client = (this.usingFailover && this.failoverClient) ? this.failoverClient : this.cloudClient;
-        const result = await Promise.race([
-          fn(client),
-          new Promise((_, reject) => {
-            controller.signal.addEventListener("abort", () => {
-              reject(new Error("Database operation timed out after 10 seconds"));
-            });
-          })
-        ]);
+        const result = await Promise.race([fn(client), timeoutPromise]);
         clearTimeout(timeoutId);
         // Successful operation, reset consecutive failures
         this.consecutiveFailures = 0;
@@ -156,6 +156,9 @@ async function openDatabase(customPath, mode) {
     localDb = new DatabaseSync(dbPath);
     localDb.exec("PRAGMA foreign_keys = ON;");
     localDb.exec("PRAGMA journal_mode = WAL;");
+    // Default busy_timeout is 0 => an immediate SQLITE_BUSY ("database is
+    // locked") whenever background sync, ingestion and MCP calls overlap.
+    localDb.exec("PRAGMA busy_timeout = 5000;");
   }
 
   let cloudClient = null;
@@ -201,6 +204,13 @@ async function openDatabase(customPath, mode) {
   await runMigrations(wrappedDb);
 
   if (!customPath) {
+    // Closing the previous instance before replacing it: otherwise a mode switch
+    // leaked the old DatabaseSync handle and Turso client.
+    if (dbInstance && dbInstance !== wrappedDb) {
+      try {
+        dbInstance.close();
+      } catch {}
+    }
     dbInstance = wrappedDb;
   }
 
@@ -215,8 +225,11 @@ export async function getDatabase(customPath = null, forceMode = null) {
     if (dbInstance && dbInstance.mode === mode) {
       return dbInstance;
     }
-    // After a failed init, wait before retrying to avoid hammering cloud auth
-    if (!dbInitPromise && dbLastFailAt && (Date.now() - dbLastFailAt) < DB_FAIL_COOLDOWN_MS) {
+    // After a failed init, wait before retrying to avoid hammering cloud auth.
+    // Only cloud modes are throttled — reopening a local SQLite file is cheap
+    // and must never be blocked by an unrelated cloud failure.
+    const isCloudMode = mode === "only-cloud" || mode === "hybrid-sync";
+    if (isCloudMode && !dbInitPromise && dbLastFailAt && (Date.now() - dbLastFailAt) < DB_FAIL_COOLDOWN_MS) {
       throw new Error("Database initialization failed recently. Retrying in a few seconds...");
     }
     // Deduplicate concurrent default-DB initialization so migrations never run

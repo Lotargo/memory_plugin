@@ -22,19 +22,19 @@
 
 ## 1. BLOCKER — обязательно до публикации
 
-- [ ] **B1. `engines` + Node >= 22.5.0.** `node:sqlite` (`mcp-server/db/database.js:1`) появился только в Node 22.5.0; README заявляет >= 18.0.0, поля `engines` в `package.json` нет → `ERR_UNKNOWN_BUILTIN_MODULE` на Node 18/20/21/22.0–22.4.
-  - [ ] Добавить в `package.json`: `"engines": { "node": ">=22.5.0" }`
-  - [ ] `README.md:14` — обновить бейдж `node >=18.0.0` → `>=22.5.0`
-  - [ ] `README.md:52` — «Node.js: 18.0.0 or higher» → «22.5.0 or higher»
+- [x] **B1. `engines` + Node >= 22.5.0.** `node:sqlite` (`mcp-server/db/database.js:1`) появился только в Node 22.5.0; README заявляет >= 18.0.0, поля `engines` в `package.json` нет → `ERR_UNKNOWN_BUILTIN_MODULE` на Node 18/20/21/22.0–22.4.
+  - [x] Добавить в `package.json`: `"engines": { "node": ">=22.5.0" }`
+  - [x] `README.md:14` — обновить бейдж `node >=18.0.0` → `>=22.5.0`
+  - [x] `README.md:52` — «Node.js: 18.0.0 or higher» → «22.5.0 or higher»
   - [ ] (опц.) Graceful fallback на `better-sqlite3`/`@libsql/local` через динамический импорт в try/catch
 
 ---
 
 ## 2. CRITICAL
 
-- [ ] **C1. `PRAGMA busy_timeout` отсутствует** — `mcp-server/db/database.js:156-159`. По умолчанию `busy_timeout=0` → мгновенный `database is locked` при конкуренции (фон-синк, инжест, MCP-вызовы). Добавить `localDb.exec("PRAGMA busy_timeout = 5000;");`
-- [ ] **C2. Утечка соединений при смене режима** — `mcp-server/db/database.js:203-205, 214-216`. `getDatabase()` при смене `mode` перезаписывает `dbInstance` без `close()`; старый `DatabaseSync` + Turso-клиент остаются открытыми. Вызывать `dbInstance.close()` перед переприсваиванием.
-- [ ] **C3. Отсутствие `engines`** (дубль B2 из audit_publish) — покрывается B1. `npm` не предупредит о минимальной версии Node.
+- [x] **C1. `PRAGMA busy_timeout` отсутствует** — `mcp-server/db/database.js:156-159`. По умолчанию `busy_timeout=0` → мгновенный `database is locked` при конкуренции (фон-синк, инжест, MCP-вызовы). Добавить `localDb.exec("PRAGMA busy_timeout = 5000;");`
+- [x] **C2. Утечка соединений при смене режима** — `mcp-server/db/database.js:203-205, 214-216`. `getDatabase()` при смене `mode` перезаписывает `dbInstance` без `close()`; старый `DatabaseSync` + Turso-клиент остаются открытыми. Вызывать `dbInstance.close()` перед переприсваиванием.
+- [x] **C3. Отсутствие `engines`** (дубль B2 из audit_publish) — покрывается B1. `npm` не предупредит о минимальной версии Node.
 
 ---
 
@@ -42,14 +42,14 @@
 
 ### Безопасность
 
-- [ ] **H1. Произвольное чтение файлов через `ingest_document type="file"`** — `mcp-server/tools/rag_tools.js:12-46`, `mcp-server/ingest/pipeline.js:33-41`. Читается **любой** путь с диска (`~/.ssh/id_rsa`, `.env`, `/etc/passwd`) → в RAG-базу → в облако при `hybrid-sync`. Усугубляется prompt injection.
-  - [ ] Ограничить чтение каталогом проекта/рабочей директории (или allowlist `paths` в конфиге)
-  - [ ] Либо: полный путь только при явном флаге `allowAnyPath: true`
+- [x] **H1. Произвольное чтение файлов через `ingest_document type="file"`** — `mcp-server/tools/rag_tools.js:12-46`, `mcp-server/ingest/pipeline.js:33-41`. Читается **любой** путь с диска (`~/.ssh/id_rsa`, `.env`, `/etc/passwd`) → в RAG-базу → в облако при `hybrid-sync`. Усугубляется prompt injection.
+  - [x] Ограничить чтение каталогом проекта/рабочей директории (или allowlist `paths` в конфиге)
+  - [x] Либо: полный путь только при явном флаге `allowAnyPath: true`
   - [ ] Документировать риск в README
-- [ ] **H2. Ложное заявление README о «DPAPI / OS Secret Store»** — `README.md:141` vs `mcp-server/config/auth_store.js:62-104`. Фактически самописный AES-256-GCM + PBKDF2(10000, sha256), ключ выводится из fingerprint = machineId+hostname+username+platform+arch, где все компоненты **публично читаемы любым локальным процессом** (HKLM MachineGuid / world-readable `/etc/machine-id`). Grep `dpapi|keytar|safeStorage|Secret Store` = 0 совпадений.
+- [x] **H2. Ложное заявление README о «DPAPI / OS Secret Store»** — `README.md:141` vs `mcp-server/config/auth_store.js:62-104`. Фактически самописный AES-256-GCM + PBKDF2(10000, sha256), ключ выводится из fingerprint = machineId+hostname+username+platform+arch, где все компоненты **публично читаемы любым локальным процессом** (HKLM MachineGuid / world-readable `/etc/machine-id`). Grep `dpapi|keytar|safeStorage|Secret Store` = 0 совпадений.
   - [ ] Вариант A: перейти на ОС-хранилище (DPAPI/`safeStorage`, Keychain, Secret Service)
-  - [ ] Вариант B: честно переформулировать README → «AES-256-GCM + PBKDF2, ключ привязан к machine fingerprint»
-  - [ ] Поднять итерации PBKDF2 (OWASP ≥ 600k для PBKDF2-SHA256)
+  - [x] Вариант B: честно переформулировать README → «AES-256-GCM + PBKDF2, ключ привязан к machine fingerprint»
+  - [x] Поднять итерации PBKDF2 (OWASP ≥ 600k для PBKDF2-SHA256)
 
 ### Качество кода
 
@@ -62,16 +62,16 @@
 
 ### Безопасность
 
-- [ ] **M1. SSRF: обход loopback-блокировки через IPv6** — `mcp-server/ingest/normalizer.js:33-68`. Эмпирически подтверждено (Node 26.1.0):
+- [x] **M1. SSRF: обход loopback-блокировки через IPv6** — `mcp-server/ingest/normalizer.js:33-68`. Эмпирически подтверждено (Node 26.1.0):
   - `http://[::1]/` → hostname `"[::1]"` со скобками → `=== "::1"` не срабатывает
   - `http://[::ffff:127.0.0.1]/` → `"[::ffff:7f00:1]"` → обход
   - `http://[::ffff:169.254.169.254]/` → обход блокировки cloud-metadata
-  - [ ] Сравнивать hostname без скобок, использовать `node:net.isIP()` + `ipaddr.js`/`isPrivate` для IPv4/IPv6/mapped
-  - [ ] Пост-резолв-проверка фактического IP (`dns.lookup` + повторный `isPrivate`) — защита от DNS-rebinding
-  - [ ] Блокировать `fe80::/10`, `fc00::/7`, `::/8`, `::ffff:`-формы
-- [ ] **M2. Токены Turso через argv** — `mcp-server/setup.js:18-20,31-38`, `mcp-server/cli/direct_commands.js:228-258`. Токен виден в `ps`/Task Manager/shell history/CI-логах. Перевести на stdin (`promptText`, как уже сделано в `cloud_actions.js`) и env `TURSO_API_TOKEN`.
-- [ ] **M3. zod v4: `""` для опциональных чисел → «Expected number»** — `mcp-server/tools/helpers.js:7` (`optNum`). Затронуты `startLine`/`endLine` (identity_tools.js:58-59), `offset`/`limit` (memory_tools.js:160-161), `dimension`, `topK`. Заменить на `z.coerce.number().optional().nullable()`.
-- [ ] **M4. GPU-трассировка пишет в stdout** — `mcp-server/ml/gpu_monitor.js:138-161`, `model_manager.js:375-377`. В MCP-пути недостижимо (`embedBatch(..., false)`), но риск при будущем включении. Печатать в stderr либо явно передавать `traceOptions: false`.
+  - [x] Сравнивать hostname без скобок, использовать `node:net.isIP()` + `ipaddr.js`/`isPrivate` для IPv4/IPv6/mapped
+  - [x] Пост-резолв-проверка фактического IP (`dns.lookup` + повторный `isPrivate`) — защита от DNS-rebinding
+  - [x] Блокировать `fe80::/10`, `fc00::/7`, `::/8`, `::ffff:`-формы
+- [x] **M2. Токены Turso через argv** — `mcp-server/setup.js:18-20,31-38`, `mcp-server/cli/direct_commands.js:228-258`. Токен виден в `ps`/Task Manager/shell history/CI-логах. Перевести на stdin (`promptText`, как уже сделано в `cloud_actions.js`) и env `TURSO_API_TOKEN`.
+- [x] **M3. zod v4: `""` для опциональных чисел → «Expected number»** — `mcp-server/tools/helpers.js:7` (`optNum`). Затронуты `startLine`/`endLine` (identity_tools.js:58-59), `offset`/`limit` (memory_tools.js:160-161), `dimension`, `topK`. Заменить на `z.coerce.number().optional().nullable()`.
+- [x] **M4. GPU-трассировка пишет в stdout** — `mcp-server/ml/gpu_monitor.js:138-161`, `model_manager.js:375-377`. В MCP-пути недостижимо (`embedBatch(..., false)`), но риск при будущем включении. Печатать в stderr либо явно передавать `traceOptions: false`.
 
 ### Публикация
 
@@ -79,7 +79,7 @@
   - [ ] `npm audit fix` → закроет `fast-uri` (host confusion) и `hono` (4 адвизории) через обновление MCP SDK
   - [ ] `xlsx *` (high, Prototype Pollution + ReDoS, фикса нет) — задокументировать в RELEASE-NOTES; рассмотреть замену на `exceljs`
   - [ ] `sharp <0.35.0` (high, 4 CVE, «No fix available», транзитивно через `@huggingface/transformers`) — задокументировать; рассмотреть опцию отключения image-моделей
-- [ ] **M6. Версия MCP-сервера 1.5.2 vs package.json 1.5.3** — `mcp-server/index.js:50`. Читать версию из корневого `package.json` через `new URL(..., import.meta.url)` либо обновить хардкод.
+- [x] **M6. Версия MCP-сервера 1.5.2 vs package.json 1.5.3** — `mcp-server/index.js:50`. Читать версию из корневого `package.json` через `new URL(..., import.meta.url)` либо обновить хардкод.
 
 ### Тесты
 
@@ -88,7 +88,7 @@
 
 ### Документация
 
-- [ ] **M9. README:147 «15 MCP tools»** — не совпадает ни с чем: MCP-сервер = **14**, opencode-плагин = **16**, таблица README = 16 строк. Исправить на «14 MCP tools (+2 OpenCode-plugin helper tools)». Утверждение «accessible across all connected AI environments» неверно для `list-mcp-tools`/`mcp-reminder`.
+- [x] **M9. README:147 «15 MCP tools»** — не совпадает ни с чем: MCP-сервер = **14**, opencode-плагин = **16**, таблица README = 16 строк. Исправить на «14 MCP tools (+2 OpenCode-plugin helper tools)». Утверждение «accessible across all connected AI environments» неверно для `list-mcp-tools`/`mcp-reminder`.
 - [ ] **M10. README:136 Circuit Breaker «fail over to the local database cache»** — реально `database.js:58-59,162-198` переключается на `failoverClient` из `config.failoverUrl` (второй облачный эндпоинт), а не на локальный кэш; в `only-cloud` локальная SQLite вообще не открывается. `failoverUrl` по умолчанию `""` → failover выключен.
 - [ ] **M11. README:347 «GitHub Repository Mirror» для весов моделей** — реально `ml/model_manager.js:73,397` использует только `env.remoteHost = "https://huggingface.co"`. Убрать упоминание зеркала.
 - [ ] **M12. README:193-212 — 7 CLI-команд не работают через `memory_plugin`** — `link`/`unlink`/`relink`/`identity`/`migrate_titles`/`enable-prompt`/`disable-prompt` реализованы только в `cli/direct_commands.js:14-313` (bin `memory-cli`). `mcp-server/index.js:10-30` их не маршрутизирует → процесс стартует как MCP-сервер и виснет на stdin. Развести `memory_plugin` / `memory-cli` в таблице либо добавить маршрутизацию.
@@ -100,11 +100,11 @@
 ### Безопасность
 
 - [ ] **L1. `.env` открытым текстом** — `auth_store.js:123-174`. Документированный headless-фолбэк, но «секреты не хранятся в открытом виде» неверно. Пометить в README как исключение из шифрования.
-- [ ] **L2. Права файла секретов** — `auth_store.js:228` `writeFileSync(SECRETS_FILE, encrypted)` без `{ mode: 0o600 }` → на Linux 0644, другие локальные пользователи могут читать `auth_secrets.enc`. Добавить `mode: 0o600` + `chmod` для существующего.
-- [ ] **L3. Строковая проверка пути снапшотов** — `admin/snapshot.js` `validateSnapshotPath`: `startsWith(dir + sep)` без `realpath`. Symlink/junction выводят за `EXPORTS_DIR`. Добавить `fs.realpathSync`.
-- [ ] **L4. Распаковка без лимита размера (zip-bomb)** — `storage/blob_store.js:51` `gunzipSync` + `import_snapshot` без ограничения выходного размера. Лимитировать `unpacked.length`.
-- [ ] **L5. Утечка listener'а AbortController** — `db/database.js` `runWithRetry`: новый контроллер на попытку, listener не снимается. Добавить `removeEventListener`.
-- [ ] **L6. Смена hostname/username блокирует секреты навсегда** — `auth_store.js:66-67,199-207`. Исключить volatile-компоненты из fingerprint (оставить machineId).
+- [x] **L2. Права файла секретов** — `auth_store.js:228` `writeFileSync(SECRETS_FILE, encrypted)` без `{ mode: 0o600 }` → на Linux 0644, другие локальные пользователи могут читать `auth_secrets.enc`. Добавить `mode: 0o600` + `chmod` для существующего.
+- [x] **L3. Строковая проверка пути снапшотов** — `admin/snapshot.js` `validateSnapshotPath`: `startsWith(dir + sep)` без `realpath`. Symlink/junction выводят за `EXPORTS_DIR`. Добавить `fs.realpathSync`.
+- [x] **L4. Распаковка без лимита размера (zip-bomb)** — `storage/blob_store.js:51` `gunzipSync` + `import_snapshot` без ограничения выходного размера. Лимитировать `unpacked.length`.
+- [x] **L5. Утечка listener'а AbortController** — `db/database.js` `runWithRetry`: новый контроллер на попытку, listener не снимается. Добавить `removeEventListener`.
+- [x] **L6. Смена hostname/username блокирует секреты навсегда** — `auth_store.js:66-67,199-207`. Исключить volatile-компоненты из fingerprint (оставить machineId).
 
 ### Качество кода
 
@@ -115,8 +115,8 @@
   - [ ] `mcp-server/ingest/pipeline.js:3` — `embedText`
   - [ ] `mcp-server/retrieval/retriever.js:3` — `getRelatedSymbols`
   - [ ] `mcp-server/storage/blob_store.js:1` — `access`
-- [ ] **L8. `dbLastFailAt` блокирует локальную БД на 5 с** — `db/database.js:219-221`. Применять cooldown только к сбоям облачной Turso, не блокируя переоткрытие локального SQLite-файла.
-- [ ] **L9. Порядок `parseInt` / regex в `resolveFactIndex`** — `tools/helpers.js:33-34`, `opencode-plugin/index.js:52-53`. Сначала `/^\d+$/.test()`, затем `parseInt`.
+- [x] **L8. `dbLastFailAt` блокирует локальную БД на 5 с** — `db/database.js:219-221`. Применять cooldown только к сбоям облачной Turso, не блокируя переоткрытие локального SQLite-файла.
+- [x] **L9. Порядок `parseInt` / regex в `resolveFactIndex`** — `tools/helpers.js:33-34`, `opencode-plugin/index.js:52-53`. Сначала `/^\d+$/.test()`, затем `parseInt`.
 - [ ] **L10. `console.error` вместо единого логгера** — `mcp-server/memory.js:109,120,170,182,213`, `ingest/pipeline.js:158,229,309`. Централизовать через настраиваемый логгер (stdio MCP не ломается — идёт в stderr).
 
 ### CLI / инфраструктура
@@ -171,9 +171,9 @@
 
 ## 7. Рекомендуемый порядок выполнения
 
-- [ ] **Этап 1 — разблокировать публикацию:** B1 → C3, M6, M9
+- [x] **Этап 1 — разблокировать публикацию:** B1 → C3, M6, M9
 - [ ] **Этап 2 — безопасность:** H1, H2, M1, M2, M3, L1–L6
-- [ ] **Этап 3 — стабильность рантайма:** C1, C2, L8, L5
+- [x] **Этап 3 — стабильность рантайма:** C1, C2, L8, L5
 - [ ] **Этап 4 — тесты и герметичность:** M7, M8, L13
 - [ ] **Этап 5 — документация:** M10, M11, M12, L14–L19
 - [ ] **Этап 6 — бенчмарки:** L21 → L20 (перегенерация отчётов)

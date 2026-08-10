@@ -240,18 +240,39 @@ export async function handleDirectCommands(cliArgs) {
         const res = await loginFromEnv({ persist: false });
         if (!res.ok) throw new Error(res.reason);
         secrets = res.secrets;
-      } else if (loginArgs.includes("--db-url") && loginArgs.includes("--db-token")) {
+      } else if (loginArgs.includes("--db-url") || loginArgs.includes("--db-token") || process.env.TURSO_DB_TOKEN) {
+        const { resolveSecret } = await import("./secret_input.js");
+        const dbToken = await resolveSecret({
+          argvValue: flagValue("--db-token"),
+          envKeys: ["TURSO_DB_TOKEN", "TURSO_TOKEN"],
+          promptLabel: "Turso database token",
+        });
+        if (!dbToken) throw new Error("Missing database token. Set TURSO_DB_TOKEN or provide it at the prompt.");
         secrets = await loginWithDatabaseToken({
-          dbUrl: flagValue("--db-url"),
-          token: flagValue("--db-token"),
+          dbUrl: flagValue("--db-url") || process.env.TURSO_DB_URL || process.env.TURSO_URL,
+          token: dbToken,
           username: flagValue("--username") || "",
           org: flagValue("--org") || "",
           db: flagValue("--database") || "",
           validate: !loginArgs.includes("--no-validate"),
         });
-      } else if (loginArgs.includes("--token") || loginArgs.includes("--api-token") || loginArgs.includes("--api-key")) {
-        const token = flagValue("--token") || flagValue("--api-token") || flagValue("--api-key");
-        if (!token) throw new Error("Missing token value. Usage: memory_plugin login --api-token <TOKEN> [--org <ORG>] [--database <DB>]");
+      } else if (
+        loginArgs.includes("--token") ||
+        loginArgs.includes("--api-token") ||
+        loginArgs.includes("--api-key") ||
+        process.env.TURSO_API_TOKEN
+      ) {
+        const { resolveSecret } = await import("./secret_input.js");
+        const token = await resolveSecret({
+          argvValue: flagValue("--token") || flagValue("--api-token") || flagValue("--api-key"),
+          envKeys: ["TURSO_API_TOKEN"],
+          promptLabel: "Turso API token",
+        });
+        if (!token) {
+          throw new Error(
+            "Missing token value. Set TURSO_API_TOKEN, or run: memory-cli login --api-token (you will be prompted)"
+          );
+        }
         secrets = await loginWithApiToken({
           token,
           org: flagValue("--org") || null,

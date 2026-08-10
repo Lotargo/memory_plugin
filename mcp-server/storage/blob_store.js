@@ -1,9 +1,22 @@
 import { createHash } from "node:crypto";
 import { gzipSync, gunzipSync } from "node:zlib";
-import { readFile, writeFile, mkdir, unlink, access } from "node:fs/promises";
+import { readFile, writeFile, mkdir, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { BLOBS_DIR } from "../db/database.js";
+
+// Hard cap on gunzip output to prevent zip-bomb style memory exhaustion.
+export const MAX_UNPACKED_BYTES = 512 * 1024 * 1024;
+
+export function safeGunzip(compressed, maxBytes = MAX_UNPACKED_BYTES) {
+  const decompressed = gunzipSync(compressed, { maxOutputLength: maxBytes });
+  if (decompressed.length > maxBytes) {
+    throw new Error(
+      `Decompressed payload of ${decompressed.length} bytes exceeds the ${maxBytes} byte limit.`
+    );
+  }
+  return decompressed;
+}
 
 export function hashContent(data) {
   const hash = createHash("sha256");
@@ -48,7 +61,7 @@ export async function readBlob(hash, baseDir = BLOBS_DIR) {
   }
 
   const compressed = await readFile(blobPath);
-  const decompressed = gunzipSync(compressed);
+  const decompressed = safeGunzip(compressed);
   return decompressed.toString("utf-8");
 }
 

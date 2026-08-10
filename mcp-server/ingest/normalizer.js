@@ -1,4 +1,6 @@
 import { basename, extname } from "node:path";
+import { isIP } from "node:net";
+import { lookup } from "node:dns/promises";
 import { PDFParse } from "pdf-parse";
 import mammoth from "mammoth";
 import xlsx from "xlsx";
@@ -45,32 +47,97 @@ export function validateUrlForSsrf(urlStr) {
     throw new Error(`Unsupported URL scheme '${parsed.protocol}'. Only http/https are allowed.`);
   }
 
-  const hostname = parsed.hostname.toLowerCase();
+  const hostname = normalizeHostname(parsed.hostname);
 
-  const isBlocked =
-    hostname === "localhost" ||
-    hostname === "127.0.0.1" ||
-    hostname === "::1" ||
-    hostname === "169.254.169.254" ||
-    hostname === "metadata.google.internal" ||
-    /^127\./.test(hostname) ||
-    /^10\./.test(hostname) ||
-    /^192\.168\./.test(hostname) ||
-    /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname) ||
-    /^169\.254\./.test(hostname) ||
-    /^0\./.test(hostname);
-
-  if (isBlocked) {
+  if (isBlockedHost(hostname)) {
     throw new Error(`Ingestion blocked: URL '${urlStr}' targets a private/local IP address or metadata service.`);
   }
 
   return parsed;
 }
 
+// URL.hostname keeps the brackets for IPv6 literals ("[::1]"), which broke the
+// plain string comparisons and allowed http://[::1]/ and IPv4-mapped forms through.
+export function normalizeHostname(rawHostname) {
+  let host = String(rawHostname || "").toLowerCase();
+  if (host.startsWith("[") && host.endsWith("]")) host = host.slice(1, -1);
+  if (host.endsWith(".")) host = host.slice(0, -1);
+  return host;
+}
+
+function isPrivateIPv4(host) {
+  if (isIP(host) !== 4) return false;
+  const [a, b] = host.split(".").map(Number);
+  if (a === 127 || a === 0 || a === 10) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT 100.64.0.0/10
+  if (a >= 224) return true; // multicast + reserved
+  return false;
+}
+
+function isPrivateIPv6(host) {
+  if (isIP(host) !== 6) return false;
+  // IPv4-mapped / IPv4-compatible forms: ::ffff:127.0.0.1 and ::ffff:7f00:1
+  const mapped = extractMappedIPv4(host);
+  if (mapped) return isPrivateIPv4(mapped);
+
+  if (host === "::" || host === "::1") return true;
+  if (/^fe[89ab]/.test(host)) return true; // fe80::/10 link-local
+  if (/^f[cd]/.test(host)) return true;    // fc00::/7 unique-local
+  if (/^ff/.test(host)) return true;       // ff00::/8 multicast
+  if (/^0{0,4}:/.test(host) && !host.startsWith("::ffff:")) return true; // ::/8
+  return false;
+}
+
+function extractMappedIPv4(host) {
+  const dotted = host.match(/::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (dotted) return dotted[1];
+  const hex = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (hex) {
+    const hi = parseInt(hex[1], 16);
+    const lo = parseInt(hex[2], 16);
+    return `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+  }
+  return null;
+}
+
+export function isBlockedHost(hostname) {
+  const host = normalizeHostname(hostname);
+  if (!host) return true;
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  if (host === "metadata.google.internal" || host === "metadata") return true;
+  if (isPrivateIPv4(host)) return true;
+  if (isPrivateIPv6(host)) return true;
+  return false;
+}
+
+// Defence against DNS rebinding: resolve the hostname and re-check the actual
+// address before the request is issued.
+export async function assertResolvedHostAllowed(hostname) {
+  const host = normalizeHostname(hostname);
+  if (isIP(host)) return;
+  let addresses;
+  try {
+    addresses = await lookup(host, { all: true, verbatim: true });
+  } catch {
+    return; // fetch() will surface the resolution error itself
+  }
+  for (const { address } of addresses) {
+    if (isBlockedHost(address)) {
+      throw new Error(
+        `Ingestion blocked: host '${host}' resolves to a private/local address (${address}).`
+      );
+    }
+  }
+}
+
 // Fetch a web page and convert it to Markdown/text. Used by the 'url' ingestion type
 // so the RAG store gets the page CONTENT, not just the URL string.
 export async function fetchUrlContent(url) {
   const parsed = validateUrlForSsrf(url);
+  await assertResolvedHostAllowed(parsed.hostname);
   let currentUrl = parsed.toString();
 
   const fetchOnce = async (targetUrl) => {
@@ -100,6 +167,7 @@ export async function fetchUrlContent(url) {
       throw new Error(`URL '${url}' redirected to an invalid location`);
     }
     validateUrlForSsrf(redirectUrl.toString());
+    await assertResolvedHostAllowed(redirectUrl.hostname);
     currentUrl = redirectUrl.toString();
     res = await fetchOnce(currentUrl);
   }

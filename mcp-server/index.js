@@ -4,6 +4,16 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { ensureDir, MEMORY_DIR } from "./memory.js";
 import { registerAllTools } from "./tools/index.js";
 import { closeDatabase } from "./db/database.js";
+import { readFileSync } from "node:fs";
+
+function readPackageVersion() {
+  try {
+    const pkgUrl = new URL("../package.json", import.meta.url);
+    return JSON.parse(readFileSync(pkgUrl, "utf8")).version || "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+}
 
 const cliArgs = process.argv.slice(2);
 
@@ -47,7 +57,7 @@ for (const sig of ["SIGINT", "SIGTERM"]) {
 
 const server = new McpServer({
   name: "memory-agent",
-  version: "1.5.2",
+  version: readPackageVersion(),
 });
 
 registerAllTools(server);

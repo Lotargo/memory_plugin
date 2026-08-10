@@ -11,7 +11,7 @@
 [![npm version](https://img.shields.io/npm/v/@lotargo/memory_plugin)](https://www.npmjs.com/package/@lotargo/memory_plugin)
 [![npm downloads](https://img.shields.io/npm/dt/@lotargo/memory_plugin)](https://www.npmjs.com/package/@lotargo/memory_plugin)
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
-[![node version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](https://nodejs.org)
+[![node version](https://img.shields.io/badge/node-%3E%3D22.5.0-brightgreen)](https://nodejs.org)
 [![mcp](https://img.shields.io/badge/MCP-Supported-8A2BE2)](https://modelcontextprotocol.io)
 [![storage](https://img.shields.io/badge/Storage-Local%20%2B%20Cloud%20Sync-success)](#storage--privacy)
 
@@ -49,7 +49,7 @@ Standard AI coding assistants lose context as soon as a chat session closes or a
 
 ### Minimum System Requirements
 
-- **Node.js**: `18.0.0` or higher
+- **Node.js**: `22.5.0` or higher (required by the built-in `node:sqlite` module)
 - **Package Manager**: `npm` / `npx` (included with Node.js)
 - **Supported Environment**: OpenCode, Antigravity / Gemini CLI, Claude Code, Codex, or Google Jules
 
@@ -133,18 +133,23 @@ The plugin provides local-first SQLite persistence with optional cloud database 
 ### Cloud Failover & Circuit Breaker
 
 When operating in cloud modes (`only-cloud` or `hybrid-sync`), the database engine incorporates a built-in **Circuit Breaker**:
-- If the primary cloud database endpoint is unreachable or encounters network failure, queries seamlessly fail over to the local database cache.
+- If the primary cloud database endpoint is unreachable or encounters network failure, queries fail over to the secondary cloud endpoint configured in `failoverUrl`. Failover is disabled when `failoverUrl` is empty (the default).
+- In `hybrid-sync` the local SQLite copy keeps serving reads regardless; in `only-cloud` no local database is opened, so an outage with no `failoverUrl` surfaces as an error.
 - Prevents agent blocking or crash loops during internet outages or cloud service degradation.
 
 ### Secure Credential Storage
 
-Cloud authentication tokens and secrets are stored securely using platform-native hardware-bound encryption (Windows DPAPI / OS Secret Store), preventing token exposure in plain-text configuration files.
+Cloud authentication tokens are never written to `config.json`. They are stored in `auth_secrets.enc`, encrypted with **AES-256-GCM** using a key derived via **PBKDF2-HMAC-SHA256 (600,000 iterations)** from a stable machine fingerprint (OS machine ID + platform + architecture). The file is written with owner-only permissions (`0600`).
+
+> **Note:** this is not an OS keychain (DPAPI / Keychain / Secret Service). The fingerprint components are readable by other processes running as the same user, so the encryption protects against file exfiltration and casual inspection, not against a compromised local account. Secrets are bound to the machine — copying `auth_secrets.enc` to another computer will not decrypt.
+>
+> **Exception:** the headless fallback via `MEMORY_DIR/.env` (`TURSO_DB_URL`, `TURSO_DB_TOKEN`, `TURSO_API_TOKEN`) stores credentials in **plain text** by design, for Docker/CI deployments.
 
 ---
 
 ## Available MCP Tools
 
-The plugin registers **15 MCP tools** accessible across all connected AI environments:
+The MCP server registers **14 MCP tools** accessible across all connected AI environments, plus **2 OpenCode-plugin helper tools** available only inside OpenCode:
 
 ### 1. Memory Notebook Tools (Layer 1)
 
@@ -175,7 +180,7 @@ The plugin registers **15 MCP tools** accessible across all connected AI environ
 | `reindex_knowledge_base` | `model`, `dimension` | Re-embed all stored vectors with the active (or specified) embedding model and vector dimension. Use after switching the embedding model or vector dimension so previously indexed documents remain retrievable. Preserves documents, FTS index, graph edges, and fact links. |
 | `link_knowledge` | `action`, `factText`, `docId`, `scope`, `startLine`, `endLine`, `relationType` | Create, list, or retrieve semantic graph links connecting Notebook facts to Knowledge Base documents, sections, or line ranges. Actions: `link`, `list_links`, `get_doc_links`. |
 
-### 4. Agent & OpenCode Helpers
+### 4. Agent & OpenCode Helpers (OpenCode plugin only, not exposed by the MCP server)
 
 | Tool | Key Parameters | Description |
 | :--- | :------------- | :---------- |

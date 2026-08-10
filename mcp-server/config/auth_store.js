@@ -57,14 +57,17 @@ function getMachineId() {
   return _cachedMachineId;
 }
 
-// Generate a deterministic hardware + system fingerprint (stable across reboots,
-// network changes and user sessions on the same machine).
+// OWASP 2023 recommendation for PBKDF2-HMAC-SHA256.
+const PBKDF2_ITERATIONS = 600000;
+const LEGACY_PBKDF2_ITERATIONS = 10000;
+
+// Generate a deterministic hardware fingerprint. Only STABLE components are used:
+// hostname and username are volatile (renaming the machine or the account would
+// permanently lock the user out of their own secrets), so they are excluded.
 function getSystemFingerprint() {
   if (_cachedFingerprint !== null && _cachedFingerprint !== undefined) return _cachedFingerprint;
   const parts = [
     getMachineId() || "no-machine-id",
-    os.hostname() || "localhost",
-    os.userInfo()?.username || "default_user",
     os.platform() || "unknown",
     os.arch() || "unknown",
   ];
@@ -72,14 +75,36 @@ function getSystemFingerprint() {
   return _cachedFingerprint;
 }
 
+// Fingerprint used by <= 1.5.3 (included volatile hostname/username).
+function getLegacyFingerprint() {
+  return [
+    getMachineId() || "no-machine-id",
+    os.hostname() || "localhost",
+    os.userInfo()?.username || "default_user",
+    os.platform() || "unknown",
+    os.arch() || "unknown",
+  ].join("|");
+}
+
+function deriveKey(fingerprint, iterations) {
+  const salt = crypto.createHash("sha256").update(fingerprint).digest();
+  return crypto.pbkdf2Sync(fingerprint, salt, iterations, 32, "sha256");
+}
+
 // Derive a 256-bit (32 bytes) key using PBKDF2 with salt derived from fingerprint
 function deriveEncryptionKey() {
   if (_cachedEncryptionKey) return _cachedEncryptionKey;
-  const fingerprint = getSystemFingerprint();
-  const salt = crypto.createHash("sha256").update(fingerprint).digest();
-  // PBKDF2 with 10,000 iterations to derive a secure 32-byte key
-  _cachedEncryptionKey = crypto.pbkdf2Sync(fingerprint, salt, 10000, 32, "sha256");
+  _cachedEncryptionKey = deriveKey(getSystemFingerprint(), PBKDF2_ITERATIONS);
   return _cachedEncryptionKey;
+}
+
+// Keys accepted for DECRYPTION only, so secrets written by older versions keep
+// working; they are transparently re-encrypted with the current key on read.
+function legacyDecryptionKeys() {
+  return [
+    deriveKey(getLegacyFingerprint(), LEGACY_PBKDF2_ITERATIONS),
+    deriveKey(getSystemFingerprint(), LEGACY_PBKDF2_ITERATIONS),
+  ];
 }
 
 // Encrypt data using AES-256-GCM
@@ -105,18 +130,34 @@ export function decryptData(encryptedStr) {
   }
 
   const [ivHex, authTagHex, encryptedHex] = parts;
-  const key = deriveEncryptionKey();
   const iv = Buffer.from(ivHex, "hex");
   const authTag = Buffer.from(authTagHex, "hex");
 
-  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
-  decipher.setAuthTag(authTag);
+  const tryKey = (key) => {
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAuthTag(authTag);
+    let decrypted = decipher.update(encryptedHex, "hex", "utf8");
+    decrypted += decipher.final("utf8");
+    return decrypted;
+  };
 
-  let decrypted = decipher.update(encryptedHex, "hex", "utf8");
-  decrypted += decipher.final("utf8");
-
-  return decrypted;
+  try {
+    return tryKey(deriveEncryptionKey());
+  } catch (err) {
+    for (const legacyKey of legacyDecryptionKeys()) {
+      try {
+        const plain = tryKey(legacyKey);
+        _needsReEncrypt = true;
+        return plain;
+      } catch {}
+    }
+    throw err;
+  }
 }
+
+// Set when a secret was decrypted with a legacy key so it can be rewritten
+// under the current derivation parameters.
+let _needsReEncrypt = false;
 
 // Load a KEY=VALUE .env file from MEMORY_DIR (global environment override for
 // headless / Docker / CI deployments). Values may optionally be quoted.
@@ -194,7 +235,15 @@ function readStoredSecrets() {
   try {
     const encrypted = fs.readFileSync(SECRETS_FILE, "utf-8").trim();
     if (!encrypted) { _cachedSecrets = null; return null; }
+    _needsReEncrypt = false;
     _cachedSecrets = JSON.parse(decryptData(encrypted));
+    if (_needsReEncrypt) {
+      _needsReEncrypt = false;
+      try {
+        writeSecretsFile(encryptData(JSON.stringify(_cachedSecrets)));
+        _cachedSecretsMtime = fs.statSync(SECRETS_FILE).mtimeMs;
+      } catch {}
+    }
     return _cachedSecrets;
   } catch (err) {
     console.error(
@@ -221,11 +270,20 @@ export function getSecretsSource() {
 }
 
 // Save secrets securely
+// Write the secrets file with owner-only permissions (0600). On Linux/macOS a
+// default 0644 would let any other local user read auth_secrets.enc.
+function writeSecretsFile(encrypted) {
+  fs.writeFileSync(SECRETS_FILE, encrypted, { encoding: "utf-8", mode: 0o600 });
+  try {
+    fs.chmodSync(SECRETS_FILE, 0o600);
+  } catch {}
+}
+
 export function saveSecrets(secrets) {
   ensureDirSync();
   const plainText = JSON.stringify(secrets);
   const encrypted = encryptData(plainText);
-  fs.writeFileSync(SECRETS_FILE, encrypted, "utf-8");
+  writeSecretsFile(encrypted);
   _cachedSecrets = undefined;  // invalidate so readStoredSecrets re-reads
   _cachedSecretsMtime = 0;
   if (typeof _onSecretsChanged === "function") _onSecretsChanged();

@@ -24,6 +24,7 @@
     "mcp-server/ingest",
     "mcp-server/ml",
     "mcp-server/retrieval",
+    "mcp-server/security",
     "mcp-server/storage",
     "mcp-server/tools",
     "mcp-server/cli.js",
@@ -64,6 +65,9 @@
   ],
   "author": "Lotargo",
   "license": "MIT",
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "publishConfig": {
     "access": "public"
   },

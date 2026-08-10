@@ -23,6 +23,8 @@ export const DEFAULT_CONFIG = {
   failoverUrl: "",        // Failover connection endpoint URL (Fly.io + LiteFS)
   authorized: false,      // True once the user completed cloud login (token stored encrypted)
   username: "",           // Account username from the Turso OAuth profile
+  ingestAllowedPaths: [], // Extra directories ingest_document(type:"file") may read from
+  ingestAllowAnyPath: false, // Escape hatch: allow reading ANY path from disk (unsafe)
 };
 
 let cachedConfig = null;

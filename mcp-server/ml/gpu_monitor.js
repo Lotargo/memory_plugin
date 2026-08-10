@@ -138,27 +138,30 @@ export class ExecutionTracer {
   printTraceReport(gpuStats = null, minGpuThreshold = 0) {
     const summary = this.getSummary(gpuStats);
     const line = "─".repeat(65);
+    // stderr, never stdout: stdout is the MCP JSON-RPC channel and any stray
+    // write there corrupts the protocol stream.
+    const out = (msg) => console.error(msg);
 
-    console.log(`\n┌${line}┐`);
-    console.log(`│ CPU/GPU OPERATION TRACE & BOTTLENECK PROFILE: ${summary.name.padEnd(16)} │`);
-    console.log(`├${line}┤`);
+    out(`\n┌${line}┐`);
+    out(`│ CPU/GPU OPERATION TRACE & BOTTLENECK PROFILE: ${summary.name.padEnd(16)} │`);
+    out(`├${line}┤`);
 
     for (const b of summary.breakdown) {
       const icon = b.category === "GPU" ? "⚡ [GPU]" : "💻 [CPU]";
       const label = `${icon} ${b.name}`.padEnd(42);
       const timeStr = `${b.durationMs.toFixed(1)}ms (${b.pct.toFixed(1)}%)`.padStart(18);
-      console.log(`│ ${label}${timeStr} │`);
+      out(`│ ${label}${timeStr} │`);
     }
 
-    console.log(`├${line}┤`);
-    console.log(`│ Total Batch Time: ${summary.totalMs.toFixed(1)}ms | CPU Time: ${summary.cpuMs.toFixed(1)}ms (${summary.cpuPct}%) | GPU Engine Time: ${summary.gpuMs.toFixed(1)}ms (${summary.gpuPct}%) │`);
+    out(`├${line}┤`);
+    out(`│ Total Batch Time: ${summary.totalMs.toFixed(1)}ms | CPU Time: ${summary.cpuMs.toFixed(1)}ms (${summary.cpuPct}%) | GPU Engine Time: ${summary.gpuMs.toFixed(1)}ms (${summary.gpuPct}%) │`);
 
     if (gpuStats && gpuStats.peak !== null) {
       const statsBadge = `Peak: ${gpuStats.peak}%, Avg: ${gpuStats.avg}%`;
-      console.log(`│ GPU Hardware Load: ${statsBadge.padEnd(44)} │`);
-      console.log(`└${line}┘\n`);
+      out(`│ GPU Hardware Load: ${statsBadge.padEnd(44)} │`);
+      out(`└${line}┘\n`);
     } else {
-      console.log(`└${line}┘\n`);
+      out(`└${line}┘\n`);
     }
 
     return summary;
