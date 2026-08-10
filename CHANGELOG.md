@@ -5,6 +5,35 @@ All notable changes to `@lotargo/memory_plugin` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] - 2026-08-10
+
+### Fixed
+
+- **Cryptic crash on Node.js < 22.5.0** (`No such built-in module: node:sqlite`).
+  ESM static imports are hoisted, so the `node:sqlite` import in `database.js`
+  crashed before any user code could run.  Three layers of protection are now in
+  place:
+  1. **Boot guard** (`boot.js` / `cli_boot.js`): new lightweight entry points
+     that check `process.versions.node` *before* loading the ESM module graph.
+     On incompatible versions they print a clear boxed error with upgrade
+     instructions (`nvm install 22` / `brew install node@22`) and exit.
+  2. **`engine-strict`** (`.npmrc`): `npm install` now **fails** instead of
+     merely warning when `engines.node >= 22.5.0` is not satisfied.
+  3. **Preinstall warning** (`preinstall.js`): a prominent `stderr` message is
+     printed during installation on unsupported Node versions, explaining that
+     the server will not start.
+- Process-kill patterns in `preinstall.js` now match the new `boot.js` entry
+  point in addition to `index.js`, so global updates correctly terminate running
+  server instances.
+
+### Changed
+
+- All `bin` entry points (`memory_plugin`, `memory-agent`, `memory-cli`) now
+  route through `boot.js` / `cli_boot.js` instead of directly to `index.js` /
+  `cli.js`.
+- `.npmrc` is no longer git-ignored; it contains only the project-level
+  `engine-strict=true` setting (npm never publishes `.npmrc` to the tarball).
+
 ## [1.6.0] - 2026-08-10
 
 This release is the outcome of a full five-part audit (publishing, security, code
@@ -105,4 +134,5 @@ a critical retrieval regression introduced after `v1.5.3`.
 - `BENCHMARKS.md` tables were re-derived from the stored JSON artifacts; the
   bge-m3 section had carried e5-small numbers shifted by a column.
 
+[1.6.1]: https://github.com/Lotargo/memory_pugin/releases/tag/v1.6.1
 [1.6.0]: https://github.com/Lotargo/memory_pugin/releases/tag/v1.6.0

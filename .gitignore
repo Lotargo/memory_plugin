@@ -10,7 +10,6 @@ memory/
 .DS_Store
 .env
 .env.*
-.npmrc
 dev_docs*
 exports/
 doc_export_*.json
