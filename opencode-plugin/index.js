@@ -1,60 +1,56 @@
-const { mkdir, cp, readdir } = await import("fs/promises");
-const { existsSync } = await import("fs");
-const { join, dirname } = await import("path");
-const { homedir } = await import("os");
-const { fileURLToPath } = await import("url");
-const {
+// Static ESM imports: top-level `await import(...)` blocked module evaluation
+// and made this file an async module for every consumer.
+import { mkdir, cp, readdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
+import {
   parseFactEntry,
   factText,
   factMeta,
-  withMeta,
-  nextFactId,
-  isKeepFact,
   isSuperseded,
   displayFact,
-  formatFactEntry,
-  matchesQuery,
-  matchesTags,
-  inDateRange,
   factTitle,
   factBody,
-  autoGenerateTitle,
   metaBadges,
-  isExpiredLine,
-} = await import("../mcp-server/fact_format.js");
+} from "../mcp-server/fact_format.js";
 
-const {
+import {
   MEMORY_DIR,
   GLOBAL_KEY,
   canonicalPath,
-  projectName,
   projectKey,
   scopeKey,
   readMemory,
   writeMemory,
-  listProjectStores,
   storeFilePath,
-  today,
-} = await import("../mcp-server/memory.js");
+} from "../mcp-server/memory.js";
 
-process.on("exit", () => {
-  import("../mcp-server/db/database.js").then(({ closeDatabase }) => {
+import { closeDatabase } from "../mcp-server/db/database.js";
+import { requireProjectKey } from "../mcp-server/tools/helpers.js";
+// Shared Notebook tool implementations — the same code the MCP server runs, so
+// a fix in one surface can no longer miss the other.
+import {
+  rememberFact,
+  recallFacts,
+  getFactById,
+  forgetFacts,
+  updateFactText,
+  memoryInfo,
+} from "../mcp-server/tools/core/memory_core.js";
+
+// Registered once when the plugin is instantiated, never at import time:
+// importing this module repeatedly used to stack duplicate "exit" listeners.
+let exitHookInstalled = false;
+function installExitHook() {
+  if (exitHookInstalled) return;
+  exitHookInstalled = true;
+  process.on("exit", () => {
     try {
       closeDatabase();
     } catch {}
-  }).catch(() => {});
-});
-
-// Resolve a fact reference (1-based number, metadata id, or text) to an index.
-function resolveFactIndex(entries, ref) {
-  const trimmed = String(ref || "").trim();
-  if (!trimmed) return -1;
-  const num = parseInt(trimmed, 10);
-  if (/^\d+$/.test(trimmed) && num >= 1 && num <= entries.length) return num - 1;
-  const idIdx = entries.findIndex((e) => factMeta(e).id === trimmed);
-  if (idIdx !== -1) return idIdx;
-  const textIdx = entries.findIndex((e) => factText(e).toLowerCase().includes(trimmed.toLowerCase()));
-  return textIdx;
+  });
 }
 
 const CONFIG_DIR = process.env.OPENCODE_CONFIG_DIR || join(homedir(), ".config", "opencode");
@@ -117,16 +113,6 @@ const MEMORY_INSTRUCTION =
   "DO NOT save: transient details, one-off statements, full conversation turns, or anything unlikely to be useful in future sessions.\n" +
   "When saving, translate the fact into clear, concise English.\n" +
   "Use `scope: \"global\"` for personal facts, `scope: \"project\"` for project-specific facts.";
-
-function requireProjectKey(key) {
-  if (!key) {
-    throw new Error(
-      "No project memory available: this directory is not inside a git repository. " +
-      "Project memory is tied to a git repo; use scope: 'global' or open a git repository."
-    );
-  }
-  return key;
-}
 
 function sortNewestFirst(entries) {
   return [...entries].sort((a, b) => {
@@ -214,6 +200,7 @@ const MCP_SERVERS = [
 ];
 
 export const MemoryPlugin = async ({ directory, worktree, client }) => {
+  installExitHook();
   await ensureDir();
   let activeProjectKey = await scopeKey("project", worktree, directory);
   let identityResolveAt = 0;
@@ -311,79 +298,13 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           tags: { type: "string", description: "Optional comma-separated tags, e.g. \x27pref,arch\x27" },
           supersedes: { type: "string", description: "Optional number, id, or text of the fact this one replaces" },
         },
-        async execute({ fact, title, scope, docId, startLine, endLine, relationType, ttl, keep, tags, supersedes }, { worktree, directory }) {
-          const key = requireProjectKey(await scopeKey(scope || "project", worktree, directory));
-          const entries = await readMemory(key);
-
-          const explicitTitle = title ? title.trim() : null;
-          let finalTitle = explicitTitle;
-          let finalFact = fact.trim();
-
-          // If fact already contains a title pattern, extract it
-          const titleMatch = /^\\*\\*([^\x2a]+)\\*\\*\\s*(?:—|--|-|:)?\\s*(.*)$/.exec(finalFact);
-          if (titleMatch) {
-            if (!finalTitle) {
-              finalTitle = titleMatch[1].trim();
-            }
-            finalFact = titleMatch[2].trim();
-          }
-
-          if (!finalTitle) {
-            finalTitle = autoGenerateTitle(finalFact);
-          }
-
-          const text = `**${finalTitle}** — ${finalFact}`;
-          const factBodyNormalized = finalFact.toLowerCase();
-          const duplicate = entries.some((e) => factBody(e).toLowerCase().trim() === factBodyNormalized);
-
-          let supersededInfo = "";
-          if (!duplicate) {
-            const [date, time] = today().split(" ");
-            const meta = { ttl, tags };
-            if (keep) meta.keep = "1";
-            if (supersedes) {
-              const targetIdx = resolveFactIndex(entries, supersedes);
-              if (targetIdx !== -1) {
-                const newId = nextFactId(entries);
-                const targetMeta = factMeta(entries[targetIdx]);
-                const targetId = targetMeta.id || nextFactId(entries);
-                entries[targetIdx] = withMeta(entries[targetIdx], { id: targetId, supersededBy: newId });
-                meta.id = newId;
-                meta.supersedes = targetId;
-                supersededInfo = ` [superseded: "${factText(entries[targetIdx]).slice(0, 60)}"]`;
-              } else {
-                supersededInfo = " (note: supersedes target not found)";
-              }
-            }
-            if (!meta.id) meta.id = nextFactId(entries);
-            entries.push(formatFactEntry({ date, time, text, meta }));
-            await writeMemory(key, entries);
-          }
-
-          let linkInfo = "";
-          if (docId) {
-            try {
-              const { linkFactToDocument } = await import("../mcp-server/graph/knowledge_linker.js");
-              const linkRes = await linkFactToDocument({
-                factKey: key,
-                factText: finalFact,
-                docId,
-                startLine,
-                endLine,
-                relationType: relationType || "LINKS_TO",
-              });
-              const linesStr = startLine ? `:L${startLine}${endLine ? `-${endLine}` : ""}` : "";
-              linkInfo = ` [Linked to Doc: "${linkRes.docTitle}"${linesStr}]`;
-            } catch (err) {
-              linkInfo = ` (Note: Fact saved, but document link failed: ${err.message})`;
-            }
-          }
-
-          const result = "Memory updated" + supersededInfo + linkInfo;
+        async execute(args, { worktree, directory }) {
+          const result = await rememberFact(args, { worktree, directory });
           await notify(client, result);
           return result;
         },
       },
+
 "recall": {
         description:
           "Show saved facts with any Agent-linked Knowledge Base documents/lines. " +
@@ -406,164 +327,19 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           offset: { type: "number", description: "Pagination offset (optional)" },
           limit: { type: "number", description: "Pagination limit (optional)" },
         },
-        async execute({ scope, project, query, tags, since, until, mode, offset, limit }, { worktree, directory }) {
-          const results = [];
-          const now = Date.now();
-          const targetMode = mode || "full";
-          const targetOffset = offset !== undefined ? offset : 0;
-
-          let getLinksForFact;
-          try {
-            const linker = await import("../mcp-server/graph/knowledge_linker.js");
-            getLinksForFact = linker.getLinksForFact;
-          } catch (e) {}
-
-          const formatFactWithLinks = async (factLine, index, key) => {
-            const p = parseFactEntry(factLine);
-            if (!p) return factLine;
-
-            const title = factTitle(factLine);
-            const body = factBody(factLine);
-            const meta = p.meta;
-
-            const badges = [];
-            if (isExpiredLine(factLine, now)) badges.push("EXPIRED");
-            if (isKeepFact(factLine)) badges.push("KEEP");
-            if (isSuperseded(factLine)) badges.push("SUPERSEDED");
-            if (meta.inject === "1") badges.push("INJECT");
-            if (meta.id) badges.push(`id:${meta.id}`);
-            if (meta.tags) badges.push(`tags:${meta.tags}`);
-            badges.push(`${p.date} ${p.time}`);
-
-            const badgesStr = badges.length ? ` [${badges.join("] [")}]` : "";
-
-            let lineText;
-            if (targetMode === "headers") {
-              lineText = `**${title}**${badgesStr}`;
-            } else {
-              lineText = p.text;
-            }
-
-            if (getLinksForFact) {
-              try {
-                const links = await getLinksForFact(key, p.text);
-                if (links && links.length > 0) {
-                  const docStr = links
-                    .map((l) => {
-                      const range = l.start_line ? `:L${l.start_line}${l.end_line ? `-${l.end_line}` : ""}` : "";
-                      return `${l.doc_title || l.doc_path}${range}`;
-                    })
-                    .join(", ");
-                  lineText += ` 🔗 [Linked Docs: ${docStr}]`;
-                }
-              } catch (e) {}
-            }
-            return `${index}. ${lineText}`;
-          };
-
-          const resolveTargetKey = async (projectPath) => {
-            if (!projectPath) return null;
-            try {
-              const { resolveProjectIdentity } = await import("../mcp-server/identity.js");
-              const identity = await resolveProjectIdentity(projectPath);
-              if (identity) return identity.key;
-            } catch (e) {}
-            return canonicalPath(projectPath);
-          };
-
-          const target = await resolveTargetKey(project) ?? await projectKey(worktree, directory);
-          const label = project ? target : await projectName(worktree, directory);
-
-          const collect = async (entries, key) => {
-            const matched = entries.filter(
-              (e) => matchesQuery(e, query) && matchesTags(e, tags) && inDateRange(e, since, until)
-            );
-            if (!matched.length) return;
-            if (results.length) results.push("");
-            results.push(`--- ${key === GLOBAL_KEY ? "Global" : `Project: ${key === target ? label : key}`} ---`);
-
-            const targetLimit = limit !== undefined ? limit : matched.length;
-
-            const paginated = matched.slice(targetOffset, targetOffset + targetLimit);
-            for (let i = 0; i < paginated.length; i++) {
-              results.push(await formatFactWithLinks(paginated[i], targetOffset + i + 1, key));
-            }
-
-            if (limit !== undefined && matched.length > targetLimit) {
-              results.push(`Showing entries ${targetOffset + 1}-${Math.min(targetOffset + targetLimit, matched.length)} of ${matched.length}`);
-            }
-            results.push(`Store file: ${storeFilePath(key)}`);
-          };
-
-          if (scope === "list_projects") {
-            return listProjectStores().then((stores) => {
-              if (!stores.length) return "No project memory stores found.";
-              const lines = stores.map(
-                (s, i) => `${i + 1}. ${s.basename} — ${s.count} fact(s) [${s.file}]${s.path ? ` (bound to ${s.path})` : " (unbound legacy store)"}`
-              );
-              return `Project Memory Stores:\n${lines.join("\n")}\n\nUse recall(scope: "project", project: "<path>") to read a specific store.\n\nMemory dir: ${MEMORY_DIR}`;
-            });
-          }
-
-          if (scope !== "project") {
-            const global = await readMemory(GLOBAL_KEY);
-            await collect(global, GLOBAL_KEY);
-          }
-          if (scope !== "global") {
-            const local = await readMemory(target);
-            await collect(local, target);
-          }
-          const filtered = Boolean(query || tags || since || until);
-          if (!results.length) return filtered ? "No facts match the search." : "Memory is empty.";
-          return results.join("\n") + `\n\nMemory dir: ${MEMORY_DIR}`;
+        async execute(args, { worktree, directory }) {
+          return await recallFacts(args, { worktree, directory });
         },
       },
+
 "get_fact": {
         description: "Get the full text and metadata of a single fact by its metadata id.",
         args: {
           id: { type: "string", description: "The unique metadata id of the fact (e.g. \x278f3a2c\x27)" },
           scope: { type: "string", description: "\x27project\x27, \x27global\x27, or \x27all\x27 (default)", default: "all" },
         },
-        async execute({ id, scope }, { worktree, directory }) {
-          const results = [];
-          const targetId = String(id || "").trim();
-          if (!targetId) throw new Error("ID parameter is required.");
-
-          const check = async (key) => {
-            const entries = await readMemory(key);
-            const match = entries.find((e) => factMeta(e).id === targetId);
-            if (match) {
-              const title = factTitle(match);
-              const body = factBody(match);
-              const meta = factMeta(match);
-              results.push({
-                key,
-                title,
-                body,
-                meta,
-                line: match
-              });
-            }
-          };
-
-          if (scope !== "project") {
-            await check(GLOBAL_KEY);
-          }
-          if (scope !== "global") {
-            const target = await projectKey(worktree, directory);
-            await check(target);
-          }
-
-          if (!results.length) {
-            return `Fact with ID "${targetId}" not found.`;
-          }
-
-          const lines = results.map((r) => {
-            const metaStr = Object.entries(r.meta).map(([k, v]) => `${k}:${v}`).join(", ");
-            return `[Store: ${r.key === GLOBAL_KEY ? "Global" : "Project"}]\nTitle: ${r.title}\nBody: ${r.body}\nMetadata: ${metaStr ? `<!-- ${metaStr} -->` : "none"}`;
-          });
-
-          return lines.join("\n\n");
+        async execute(args, { worktree, directory }) {
+          return await getFactById(args, { worktree, directory });
         },
       },
       "forget": {
@@ -577,37 +353,9 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           },
           force: { type: "boolean", description: "Удалить также защищённые (keep) факты" },
         },
-        async execute({ query, scope, force }, { worktree, directory }) {
-          const key = requireProjectKey(await scopeKey(scope || "project", worktree, directory));
-          const entries = await readMemory(key);
-          const rangeMatch = /^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(query);
-          const num = parseInt(query, 10);
-          let indices = [];
-          if (rangeMatch) {
-            const from = parseInt(rangeMatch[1], 10);
-            const to = parseInt(rangeMatch[2], 10);
-            if (from > 0 && to >= from && to <= entries.length) {
-              for (let i = from - 1; i < to; i++) indices.push(i);
-            }
-          }
-          if (!indices.length && !isNaN(num) && num > 0 && num <= entries.length) {
-            indices.push(num - 1);
-          }
-          if (!indices.length) {
-            const q = query.toLowerCase();
-            indices = entries.reduce((acc, e, i) => (e.toLowerCase().includes(q) ? acc.concat(i) : acc), []);
-          }
-          if (!indices.length) return "Not found.";
-
-          const removable = indices.filter((i) => force || !isKeepFact(entries[i]));
-          const protectedCount = indices.length - removable.length;
-          if (removable.length) {
-            for (const i of removable.sort((a, b) => b - a)) entries.splice(i, 1);
-            await writeMemory(key, entries);
-          }
-          let result = removable.length ? "Memory updated" : "Nothing removed.";
-          if (protectedCount) result += ` (${protectedCount} protected fact(s) skipped; use force=true to override)`;
-          if (removable.length) await notify(client, result);
+        async execute(args, { worktree, directory }) {
+          const result = await forgetFacts(args, { worktree, directory });
+          if (result.startsWith("Memory updated")) await notify(client, result);
           return result;
         },
       },
@@ -621,114 +369,18 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           title: { type: "string", description: "Optional new title for the fact" },
           scope: { type: "string", description: "\x27project\x27 (default) or \x27global\x27", default: "project" },
         },
-        async execute({ id, newText, title, scope }, { worktree, directory }) {
-          const key = requireProjectKey(await scopeKey(scope || "project", worktree, directory));
-          const entries = await readMemory(key);
-          const idx = resolveFactIndex(entries, id);
-          if (idx === -1) throw new Error(`Fact not found: ${id}`);
-          const p = parseFactEntry(entries[idx]);
-          const oldText = p ? p.text : entries[idx];
-          const oldBody = factBody(entries[idx]) || oldText;
-
-          const explicitTitle = title ? title.trim() : null;
-          let finalTitle = explicitTitle;
-          let finalFact = newText.trim();
-
-          // Check if newText has a title
-          const titleMatch = /^\\*\\*([^\x2a]+)\\*\\*\\s*(?:—|--|-|:)?\\s*(.*)$/.exec(finalFact);
-          if (titleMatch) {
-            if (!finalTitle) {
-              finalTitle = titleMatch[1].trim();
-            }
-            finalFact = titleMatch[2].trim();
-          }
-
-          // If no new title is specified, preserve the old title
-          if (!finalTitle) {
-            finalTitle = factTitle(entries[idx]) || autoGenerateTitle(finalFact);
-          }
-
-          const newTextFormatted = `**${finalTitle}** — ${finalFact}`;
-          const newLine = formatFactEntry({ date: p.date, time: p.time, text: newTextFormatted, meta: p.meta });
-          entries[idx] = newLine;
-          await writeMemory(key, entries);
-
-          let linksUpdated = 0;
-          try {
-            const { getDatabase } = await import("../mcp-server/db/database.js");
-            const db = await getDatabase();
-            const res = await db
-              .prepare("UPDATE knowledge_links SET fact_text = ? WHERE fact_key = ? AND fact_text = ?")
-              .run(finalFact, key, oldBody);
-            linksUpdated = res.changes;
-          } catch (e) {}
-
-          const result = `Fact updated${linksUpdated ? `, ${linksUpdated} doc link(s) updated` : ""}`;
+        async execute(args, { worktree, directory }) {
+          const result = await updateFactText(args, { worktree, directory });
           await notify(client, result);
           return result;
         },
       },
+
 "memory_info": {
         description: "Show memory storage paths (store files, MEMORY_DIR, SQLite DB), fact counts, and Knowledge Base stats.",
         args: {},
-        async execute() {
-          const dbPath = join(MEMORY_DIR, "storage", "memory.sqlite");
-          let version = "unknown";
-          try {
-            const { readFile } = await import("fs/promises");
-            version = JSON.parse(
-              await readFile(new URL("../package.json", import.meta.url), "utf-8")
-            ).version;
-          } catch (e) {}
-
-          let rag = {};
-          try {
-            const { getDatabase } = await import("../mcp-server/db/database.js");
-            const db = await getDatabase();
-            const docRow = await db.prepare("SELECT COUNT(*) AS c FROM documents").get();
-            rag.documents = docRow ? docRow.c : 0;
-            const secRow = await db.prepare("SELECT COUNT(*) AS c FROM sections").get();
-            rag.sections = secRow ? secRow.c : 0;
-            const chunkRow = await db.prepare("SELECT COUNT(*) AS c FROM micro_chunks").get();
-            rag.chunks = chunkRow ? chunkRow.c : 0;
-            const edgeRow = await db.prepare("SELECT COUNT(*) AS c FROM graph_edges").get();
-            rag.edges = edgeRow ? edgeRow.c : 0;
-            const linkRow = await db.prepare("SELECT COUNT(*) AS c FROM knowledge_links").get();
-            rag.links = linkRow ? linkRow.c : 0;
-          } catch (e) {
-            rag.error = e.message;
-          }
-
-          let identityLines = [];
-          try {
-            const { getDatabase } = await import("../mcp-server/db/database.js");
-            const { resolveProjectIdentity, listIdentities } = await import("../mcp-server/identity.js");
-            const db = await getDatabase();
-            const identity = await resolveProjectIdentity(directory || process.cwd());
-            const all = await listIdentities(db);
-            identityLines.push(
-              `Identity: ${identity ? "git" : "no-git"}` +
-                (identity ? ` | key: ${identity.key} | name: ${identity.name}${identity.primaryRemote ? ` | remote: ${identity.primaryRemote}` : ""}` : ""),
-              `Known identities: ${all.length}`
-            );
-          } catch (e) {
-            identityLines.push(`Identity: unavailable (${e.message})`);
-          }
-
-          const lines = [
-            `Version: ${version}`,
-            `MEMORY_DIR: ${MEMORY_DIR}`,
-            `SQLite DB: ${dbPath}`,
-            `Global store: ${storeFilePath(GLOBAL_KEY)}`,
-            `Project store: ${storeFilePath(activeProjectKey)}`,
-            ...identityLines,
-          ];
-          if (rag.error) lines.push(`RAG: unavailable (${rag.error})`);
-          else
-            lines.push(
-              `RAG: ${rag.documents} doc(s), ${rag.sections} section(s), ${rag.chunks} chunk(s), ${rag.edges} edge(s), ${rag.links} memory link(s)`
-            );
-          return lines.join("\n");
+        async execute(_args, ctx = {}) {
+          return await memoryInfo({}, { worktree: ctx.worktree ?? worktree, directory: ctx.directory ?? directory });
         },
       },
       "link_knowledge": {

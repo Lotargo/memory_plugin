@@ -1,5 +1,4 @@
 import readline from "readline";
-import { getModelStorageInfo } from "../ml/model_manager.js";
 
 export const EMBEDDING_PRESETS = [
   "Xenova/multilingual-e5-small",

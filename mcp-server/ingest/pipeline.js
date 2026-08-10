@@ -5,10 +5,11 @@ import { getDatabase, BLOBS_DIR } from "../db/database.js";
 import { saveBlob, deleteBlob } from "../storage/blob_store.js";
 import { normalizeContent, fetchUrlContent } from "./normalizer.js";
 import { buildTripleHierarchy } from "./chunker.js";
-import { embedText, embedBatch, vectorToBuffer } from "../ml/model_manager.js";
+import { embedBatch, vectorToBuffer } from "../ml/model_manager.js";
 import { buildGraphEdges, saveGraphEdges } from "../graph/graph_extractor.js";
 import { getConfig } from "../config/config_manager.js";
 import { assertIngestPathAllowed } from "../security/path_guard.js";
+import { logger } from "../logger.js";
 
 export async function ingestDocument({
   content,
@@ -157,7 +158,7 @@ export async function ingestDocument({
       const exportedData = await exportDocumentData(docId, db);
       await enqueueSyncTask("ingest_document", docId, exportedData);
     } catch (err) {
-      console.error("Failed to queue document ingest sync task:", err.message);
+      logger.error("Failed to queue document ingest sync task:", err.message);
     }
   }
 
@@ -228,7 +229,7 @@ export async function deleteDocument(docIdOrPath, customDb = null, customBlobDir
       const { enqueueSyncTask } = await import("../db/sync_queue.js");
       await enqueueSyncTask("delete_document", docIdOrPath);
     } catch (err) {
-      console.error("Failed to queue document delete sync task:", err.message);
+      logger.error("Failed to queue document delete sync task:", err.message);
     }
   }
 
@@ -308,7 +309,7 @@ export async function reindexEmbeddings({
         await enqueueSyncTask("ingest_document", docId, exportedData);
       }
     } catch (err) {
-      console.error("Failed to queue document re-index sync tasks:", err.message);
+      logger.error("Failed to queue document re-index sync tasks:", err.message);
     }
   }
 

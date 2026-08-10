@@ -1,6 +1,5 @@
 import { getDatabase } from "../db/database.js";
 import { embedText, cosineSimilarity, rerankHits } from "../ml/model_manager.js";
-import { getRelatedSymbols } from "../graph/graph_extractor.js";
 import { getConfig } from "../config/config_manager.js";
 
 export function sanitizeFtsQuery(query) {

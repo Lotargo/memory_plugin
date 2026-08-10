@@ -1,6 +1,6 @@
 import { readFile, readdir } from "fs/promises";
-import { join, basename } from "path";
-import { MEMORY_DIR, GLOBAL_KEY, buildMemoryContent, extractFacts, writeMemoryFile, storeFilePath } from "../memory.js";
+import { join } from "path";
+import { MEMORY_DIR, GLOBAL_KEY, buildMemoryContent, extractFacts, writeMemoryFile } from "../memory.js";
 
 let isSyncing = false;
 

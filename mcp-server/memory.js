@@ -3,6 +3,7 @@ import { existsSync, mkdirSync } from "fs";
 import { join, basename, resolve } from "path";
 import { homedir } from "os";
 import { resolveProjectIdentity } from "./identity.js";
+import { logger } from "./logger.js";
 
 function resolveMemoryDir() {
   if (process.env.MEMORY_DIR) return process.env.MEMORY_DIR;
@@ -106,7 +107,7 @@ export async function readMemory(key) {
         return row.content.split("\n").filter((l) => l.startsWith("- ["));
       }
     } catch (err) {
-      console.error("Failed to read memory from cloud database:", err.message);
+      logger.error("Failed to read memory from cloud database:", err.message);
     }
     return [];
   }
@@ -117,7 +118,7 @@ export async function readMemory(key) {
       const { ensureReverseSync } = await import("./db/sync_queue.js");
       await ensureReverseSync();
     } catch (err) {
-      console.error("Failed to reverse-sync before read:", err.message);
+      logger.error("Failed to reverse-sync before read:", err.message);
     }
   }
   if (existsSync(fp)) {
@@ -167,7 +168,7 @@ export async function writeMemory(key, entries) {
         ON CONFLICT(key) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at;
       `).run(key, content, Date.now());
     } catch (err) {
-      console.error("Failed to write memory to cloud database:", err.message);
+      logger.error("Failed to write memory to cloud database:", err.message);
     }
     return;
   }
@@ -179,7 +180,7 @@ export async function writeMemory(key, entries) {
       const { enqueueSyncTask } = await import("./db/sync_queue.js");
       await enqueueSyncTask("write_memory", key, content);
     } catch (err) {
-      console.error("Failed to queue memory sync task:", err.message);
+      logger.error("Failed to queue memory sync task:", err.message);
     }
   }
 }
@@ -210,7 +211,7 @@ export async function listProjectStores() {
       stores.sort((a, b) => a.basename.localeCompare(b.basename));
       return stores;
     } catch (err) {
-      console.error("Failed to list memory stores from cloud database:", err.message);
+      logger.error("Failed to list memory stores from cloud database:", err.message);
     }
     return [];
   }
