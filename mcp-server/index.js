@@ -17,23 +17,68 @@ function readPackageVersion() {
 
 const cliArgs = process.argv.slice(2);
 
+// Every command handled by cli.js/direct_commands.js must be routed here too,
+// otherwise `memory_plugin link` etc. would fall through and start an MCP
+// server that silently blocks on stdin.
+const CLI_COMMANDS = new Set([
+  "cli",
+  "config",
+  "--cli",
+  "-c",
+  "login",
+  "logout",
+  "auth-status",
+  "auth_status",
+  "auth",
+  "link",
+  "unlink",
+  "relink",
+  "identity",
+  "migrate_titles",
+  "enable-prompt",
+  "disable-prompt",
+]);
+
+function printUsage() {
+  console.log(`memory_plugin v${readPackageVersion()} — hybrid RAG memory for AI coding agents
+
+Usage:
+  memory_plugin                      Start the MCP server on stdio (default)
+  memory_plugin setup [--opencode|--claude|--codex|--antigravity] [--mode <MODE>]
+  memory_plugin cli                  Interactive terminal UI
+  memory_plugin login [--from-env|--api-token|--db-url <URL>]
+  memory_plugin logout [--api-key]
+  memory_plugin auth-status
+  memory_plugin link|unlink|relink|identity [--dir <path>] [--remote <url>]
+  memory_plugin migrate_titles [--key <key>]
+  memory_plugin enable-prompt | disable-prompt
+
+Options:
+  -h, --help                         Show this help text
+  -v, --version                      Print the package version
+
+Secrets: prefer TURSO_API_TOKEN / TURSO_DB_URL / TURSO_DB_TOKEN environment
+variables over command-line flags — argv is visible to other local processes.
+Data directory: ${MEMORY_DIR}`);
+}
+
+if (cliArgs.includes("--help") || cliArgs.includes("-h") || cliArgs[0] === "help") {
+  printUsage();
+  process.exit(0);
+}
+
+if (cliArgs.includes("--version") || cliArgs.includes("-v")) {
+  console.log(readPackageVersion());
+  process.exit(0);
+}
+
 if (cliArgs.includes("setup") || cliArgs.includes("install") || cliArgs.includes("--setup") || cliArgs.includes("-s")) {
   const { runSetup } = await import("./setup.js");
   await runSetup();
   process.exit(0);
 }
 
-if (
-  cliArgs.includes("cli") ||
-  cliArgs.includes("config") ||
-  cliArgs.includes("--cli") ||
-  cliArgs.includes("-c") ||
-  cliArgs.includes("login") ||
-  cliArgs.includes("logout") ||
-  cliArgs.includes("auth-status") ||
-  cliArgs.includes("auth_status") ||
-  cliArgs.includes("auth")
-) {
+if (cliArgs.some((a) => CLI_COMMANDS.has(a))) {
   const { runCli } = await import("./cli.js");
   await runCli();
   process.exit(0);

@@ -13,13 +13,14 @@ export async function runExpandedFeaturesTests() {
   console.log("--- Running Integration Tests: expanded_features ---");
   const TEST_DIR = join(tmpdir(), `memory_test_expanded_${Date.now()}`);
   const TEST_DB_PATH = join(TEST_DIR, "test_memory_expanded.sqlite");
+  // Without customBlobDir the ingest pipeline would write blobs into the real
+  // storage/blobs directory of the developer's installation.
+  const TEST_BLOB_DIR = join(TEST_DIR, "blobs");
 
-  if (!existsSync(TEST_DIR)) {
-    try {
-      const fs = await import("node:fs");
-      fs.mkdirSync(TEST_DIR, { recursive: true });
-    } catch {}
-  }
+  try {
+    const fs = await import("node:fs");
+    fs.mkdirSync(TEST_BLOB_DIR, { recursive: true });
+  } catch {}
 
   try {
     // 1. Multilingual Symbol Extractor Tests
@@ -265,6 +266,7 @@ export async function runExpandedFeaturesTests() {
       path: "inventory.csv",
       title: "Inventory Log",
       customDb: db,
+      customBlobDir: TEST_BLOB_DIR,
       generateEmbeddings: false
     });
 

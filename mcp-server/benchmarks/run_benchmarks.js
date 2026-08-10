@@ -176,8 +176,8 @@ Evaluation over ${totalQueries} hard semantic, paraphrased, and cross-lingual Ru
 |---|---|---|---|
 | **BM25 Text Search Only** | ${qualityComp.bm25.mrr} | ${qualityComp.bm25.recall} (${(qualityComp.bm25.recall * 100).toFixed(1)}%) | ${qualityComp.bm25.ndcg} |
 | **Dense ONNX Vector Only** | ${qualityComp.vector.mrr} | ${qualityComp.vector.recall} (${(qualityComp.vector.recall * 100).toFixed(1)}%) | ${qualityComp.vector.ndcg} |
-| **Hybrid RRF (Reciprocal Rank), k=${qualityComp.bestRrfK?.k ?? 60}** | ${qualityComp.hybridRrf.mrr} | ${qualityComp.hybridRrf.recall} (${(qualityComp.hybridRrf.recall * 100).toFixed(1)}%) | ${qualityComp.hybridRrf.ndcg} |
-| **Hybrid RSF (Relative Score), α=${qualityComp.bestRsfAlpha?.alpha ?? 0.5}** | ${qualityComp.hybridRsf.mrr} | ${qualityComp.hybridRsf.recall} (${(qualityComp.hybridRsf.recall * 100).toFixed(1)}%) | ${qualityComp.hybridRsf.ndcg} |
+| **Hybrid RRF (Reciprocal Rank), k=${qualityComp.defaultRrfK ?? 60}** | ${qualityComp.hybridRrf.mrr} | ${qualityComp.hybridRrf.recall} (${(qualityComp.hybridRrf.recall * 100).toFixed(1)}%) | ${qualityComp.hybridRrf.ndcg} |
+| **Hybrid RSF (Relative Score), α=${qualityComp.defaultAlpha ?? 0.5}** | ${qualityComp.hybridRsf.mrr} | ${qualityComp.hybridRsf.recall} (${(qualityComp.hybridRsf.recall * 100).toFixed(1)}%) | ${qualityComp.hybridRsf.ndcg} |
 
 ### 3.1 Bootstrap 95% CIs (reciprocal-rank resampling, 1000 iterations)
 
@@ -259,7 +259,7 @@ ${rrfGridRows}
 
 5. **BM25 Cross-Lingual Limitation**: BM25 found ${totalQueries - bm25Missed}/${totalQueries} (${(qualityComp.bm25.recall * 100).toFixed(1)}%). BM25 fails on cross-lingual queries (Russian query → English docs) due to zero lexical overlap, while vector search bridges the semantic gap.
 
-6. **Configurable CLI Architecture**: Users can switch algorithms on the fly between RSF, RRF, Pure Lexical, and Pure Semantic via \`memory_plugin cli\`. Best-in-class tuned hyperparameters (α=${qualityComp.bestRsfAlpha?.alpha}, k=${qualityComp.bestRrfK?.k}) are reported above; consider bumping them in \`config_defaults\`.
+6. **Configurable CLI Architecture**: Users can switch algorithms on the fly between RSF, RRF, Pure Lexical, and Pure Semantic via \`memory_plugin cli\`. The headline table above uses the runtime defaults (α=${qualityComp.defaultAlpha}, k=${qualityComp.defaultRrfK}); the grid sweep in §6 picked α=${qualityComp.bestRsfAlpha?.alpha}, k=${qualityComp.bestRrfK?.k} as best-by-MRR — consider bumping them in \`config_defaults\`.
 
 ## 9. Reproducibility & Methodology Caveats
 

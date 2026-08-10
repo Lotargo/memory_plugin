@@ -1,24 +1,35 @@
 import assert from "node:assert";
-import { rmSync } from "node:fs";
+import { rmSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { extractSymbolsFromContent } from "../../mcp-server/graph/graph_extractor.js";
-import { extractTitle, validateUrlForSsrf } from "../../mcp-server/ingest/normalizer.js";
-import { exportDocumentToJsonString } from "../../mcp-server/ingest/exporter.js";
-import { sanitizeFtsQuery as retrieverSanitizeFts } from "../../mcp-server/retrieval/retriever.js";
-import { updateConfig, getConfig, resetConfig } from "../../mcp-server/config/config_manager.js";
-import { resizeVector } from "../../mcp-server/ml/model_manager.js";
-import { formatInputText } from "../../mcp-server/ml/model_manager.js";
-import { validateSnapshotPath } from "../../mcp-server/admin/snapshot.js";
-import { getDatabase } from "../../mcp-server/db/database.js";
-import { ingestDocument, reindexEmbeddings } from "../../mcp-server/ingest/pipeline.js";
-
 const TEST_DIR = join(tmpdir(), `memory_test_audit_${Date.now()}`);
 const TEST_DB_PATH = join(TEST_DIR, "test_memory.sqlite");
+const TEST_BLOB_DIR = join(TEST_DIR, "blobs");
+
+// MEMORY_DIR must be set BEFORE any module is imported: config_manager.js
+// resolves CONFIG_FILE at import time, so static imports here would make
+// updateConfig/resetConfig overwrite the developer's real config.json.
+mkdirSync(TEST_DIR, { recursive: true });
+mkdirSync(TEST_BLOB_DIR, { recursive: true });
+process.env.MEMORY_DIR = TEST_DIR;
+
+const { extractSymbolsFromContent } = await import("../../mcp-server/graph/graph_extractor.js");
+const { extractTitle, validateUrlForSsrf } = await import("../../mcp-server/ingest/normalizer.js");
+const { exportDocumentToJsonString } = await import("../../mcp-server/ingest/exporter.js");
+const { sanitizeFtsQuery: retrieverSanitizeFts } = await import("../../mcp-server/retrieval/retriever.js");
+const { updateConfig, getConfig, resetConfig } = await import("../../mcp-server/config/config_manager.js");
+const { resizeVector, formatInputText } = await import("../../mcp-server/ml/model_manager.js");
+const { validateSnapshotPath } = await import("../../mcp-server/admin/snapshot.js");
+const { getDatabase, closeDatabase } = await import("../../mcp-server/db/database.js");
+const { ingestDocument, reindexEmbeddings } = await import("../../mcp-server/ingest/pipeline.js");
 
 export async function runAuditUnitTests() {
   console.log("--- Running Unit Tests: unit_audit_fixes ---");
+  assert.ok(
+    process.env.MEMORY_DIR === TEST_DIR,
+    "hermetic guard: MEMORY_DIR must point at the temp dir before any import"
+  );
 
   // 1. Test extractSymbolsFromContent
   console.log("1. Testing extractSymbolsFromContent...");
@@ -71,6 +82,7 @@ export async function runAuditUnitTests() {
     path: "virtual://audit_test.md",
     generateEmbeddings: false,
     customDb: db,
+    customBlobDir: TEST_BLOB_DIR,
   });
 
   const jsonString = await exportDocumentToJsonString(ingRes.docId, db);
@@ -180,6 +192,7 @@ export async function runAuditUnitTests() {
     path: "virtual://reindex_test.md",
     generateEmbeddings: false,
     customDb: reindexDb,
+    customBlobDir: TEST_BLOB_DIR,
   });
 
   const beforeRow = await reindexDb.prepare("SELECT COUNT(*) as cnt, COALESCE(SUM(LENGTH(vector)),0) as bytes FROM micro_chunks WHERE doc_id = ?").get(reIng.docId);
@@ -213,7 +226,11 @@ export async function runAuditUnitTests() {
   assert.strictEqual(afterRow2.bytes, beforeRow.cnt * 64, "Vectors updated to 16-dim (64 bytes each)");
   console.log("   [PASS] reindexEmbeddings re-embedding OK");
 
-  // Cleanup test directory
+  // Cleanup: close every SQLite handle first, otherwise Windows keeps the files
+  // locked and leaves an empty %TEMP% directory behind.
+  try { db.close(); } catch {}
+  try { reindexDb.close(); } catch {}
+  try { closeDatabase(); } catch {}
   try {
     rmSync(TEST_DIR, { recursive: true, force: true });
   } catch {}

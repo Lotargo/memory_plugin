@@ -12,6 +12,24 @@ import { handleDiagnosticsAction } from "./cli/handlers/diagnostics_actions.js";
 
 export async function runCli() {
   const cliArgs = process.argv.slice(2);
+
+  if (cliArgs.includes("--help") || cliArgs.includes("-h") || cliArgs[0] === "help") {
+    console.log(`memory-cli — interactive control panel for @lotargo/memory_plugin
+
+Usage:
+  memory-cli                         Launch the interactive TUI
+  memory-cli login [--from-env|--api-token|--db-url <URL>]
+  memory-cli logout [--api-key]
+  memory-cli auth-status
+  memory-cli link|unlink|relink|identity [--dir <path>] [--remote <url>]
+  memory-cli migrate_titles [--key <key>]
+  memory-cli enable-prompt | disable-prompt
+
+Options:
+  -h, --help                         Show this help text`);
+    return;
+  }
+
   const handled = await handleDirectCommands(cliArgs);
   if (handled) return;
 
@@ -53,7 +71,7 @@ export async function runCli() {
       {
         label: "DIAGNOSTICS & SYSTEM ACTIONS",
         value: "diagnostics",
-        info: "Benchmarks, search verification, cache, and config reset",
+        info: "Search verification, graph/notebook linking checks, and config reset",
       },
       {
         label: "EXIT",

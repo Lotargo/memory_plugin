@@ -45,7 +45,7 @@
 - [x] **H1. Произвольное чтение файлов через `ingest_document type="file"`** — `mcp-server/tools/rag_tools.js:12-46`, `mcp-server/ingest/pipeline.js:33-41`. Читается **любой** путь с диска (`~/.ssh/id_rsa`, `.env`, `/etc/passwd`) → в RAG-базу → в облако при `hybrid-sync`. Усугубляется prompt injection.
   - [x] Ограничить чтение каталогом проекта/рабочей директории (или allowlist `paths` в конфиге)
   - [x] Либо: полный путь только при явном флаге `allowAnyPath: true`
-  - [ ] Документировать риск в README
+  - [x] Документировать риск в README
 - [x] **H2. Ложное заявление README о «DPAPI / OS Secret Store»** — `README.md:141` vs `mcp-server/config/auth_store.js:62-104`. Фактически самописный AES-256-GCM + PBKDF2(10000, sha256), ключ выводится из fingerprint = machineId+hostname+username+platform+arch, где все компоненты **публично читаемы любым локальным процессом** (HKLM MachineGuid / world-readable `/etc/machine-id`). Grep `dpapi|keytar|safeStorage|Secret Store` = 0 совпадений.
   - [ ] Вариант A: перейти на ОС-хранилище (DPAPI/`safeStorage`, Keychain, Secret Service)
   - [x] Вариант B: честно переформулировать README → «AES-256-GCM + PBKDF2, ключ привязан к machine fingerprint»
@@ -83,15 +83,15 @@
 
 ### Тесты
 
-- [ ] **M7. `tests/unit/unit_audit_fixes.test.js` пишет в РЕАЛЬНЫЙ конфиг** — статические импорты `config_manager.js` до установки `process.env.MEMORY_DIR`; `updateConfig`/`resetConfig` перезаписали `C:\Users\etotm\.config\opencode\memory\config.json` (подтверждено mtime 11:32:31). Задать `MEMORY_DIR = <tmp>` до импортов.
-- [ ] **M8. Латентный риск записи blob в реальный `storage/blobs`** — `unit_audit_fixes.test.js` и `tests/integration/expanded_features.test.js`: `customDb` задан, `customBlobDir` — нет. Передавать `customBlobDir`.
+- [x] **M7. `tests/unit/unit_audit_fixes.test.js` пишет в РЕАЛЬНЫЙ конфиг** — статические импорты `config_manager.js` до установки `process.env.MEMORY_DIR`; `updateConfig`/`resetConfig` перезаписали `C:\Users\etotm\.config\opencode\memory\config.json` (подтверждено mtime 11:32:31). Задать `MEMORY_DIR = <tmp>` до импортов.
+- [x] **M8. Латентный риск записи blob в реальный `storage/blobs`** — `unit_audit_fixes.test.js` и `tests/integration/expanded_features.test.js`: `customDb` задан, `customBlobDir` — нет. Передавать `customBlobDir`.
 
 ### Документация
 
 - [x] **M9. README:147 «15 MCP tools»** — не совпадает ни с чем: MCP-сервер = **14**, opencode-плагин = **16**, таблица README = 16 строк. Исправить на «14 MCP tools (+2 OpenCode-plugin helper tools)». Утверждение «accessible across all connected AI environments» неверно для `list-mcp-tools`/`mcp-reminder`.
-- [ ] **M10. README:136 Circuit Breaker «fail over to the local database cache»** — реально `database.js:58-59,162-198` переключается на `failoverClient` из `config.failoverUrl` (второй облачный эндпоинт), а не на локальный кэш; в `only-cloud` локальная SQLite вообще не открывается. `failoverUrl` по умолчанию `""` → failover выключен.
-- [ ] **M11. README:347 «GitHub Repository Mirror» для весов моделей** — реально `ml/model_manager.js:73,397` использует только `env.remoteHost = "https://huggingface.co"`. Убрать упоминание зеркала.
-- [ ] **M12. README:193-212 — 7 CLI-команд не работают через `memory_plugin`** — `link`/`unlink`/`relink`/`identity`/`migrate_titles`/`enable-prompt`/`disable-prompt` реализованы только в `cli/direct_commands.js:14-313` (bin `memory-cli`). `mcp-server/index.js:10-30` их не маршрутизирует → процесс стартует как MCP-сервер и виснет на stdin. Развести `memory_plugin` / `memory-cli` в таблице либо добавить маршрутизацию.
+- [x] **M10. README:136 Circuit Breaker «fail over to the local database cache»** — реально `database.js:58-59,162-198` переключается на `failoverClient` из `config.failoverUrl` (второй облачный эндпоинт), а не на локальный кэш; в `only-cloud` локальная SQLite вообще не открывается. `failoverUrl` по умолчанию `""` → failover выключен.
+- [x] **M11. README:347 «GitHub Repository Mirror» для весов моделей** — реально `ml/model_manager.js:73,397` использует только `env.remoteHost = "https://huggingface.co"`. Убрать упоминание зеркала.
+- [x] **M12. README:193-212 — 7 CLI-команд не работают через `memory_plugin`** — `link`/`unlink`/`relink`/`identity`/`migrate_titles`/`enable-prompt`/`disable-prompt` реализованы только в `cli/direct_commands.js:14-313` (bin `memory-cli`). `mcp-server/index.js:10-30` их не маршрутизирует → процесс стартует как MCP-сервер и виснет на stdin. Развести `memory_plugin` / `memory-cli` в таблице либо добавить маршрутизацию.
 
 ---
 
@@ -99,7 +99,7 @@
 
 ### Безопасность
 
-- [ ] **L1. `.env` открытым текстом** — `auth_store.js:123-174`. Документированный headless-фолбэк, но «секреты не хранятся в открытом виде» неверно. Пометить в README как исключение из шифрования.
+- [x] **L1. `.env` открытым текстом** — `auth_store.js:123-174`. Документированный headless-фолбэк, но «секреты не хранятся в открытом виде» неверно. Пометить в README как исключение из шифрования.
 - [x] **L2. Права файла секретов** — `auth_store.js:228` `writeFileSync(SECRETS_FILE, encrypted)` без `{ mode: 0o600 }` → на Linux 0644, другие локальные пользователи могут читать `auth_secrets.enc`. Добавить `mode: 0o600` + `chmod` для существующего.
 - [x] **L3. Строковая проверка пути снапшотов** — `admin/snapshot.js` `validateSnapshotPath`: `startsWith(dir + sep)` без `realpath`. Symlink/junction выводят за `EXPORTS_DIR`. Добавить `fs.realpathSync`.
 - [x] **L4. Распаковка без лимита размера (zip-bomb)** — `storage/blob_store.js:51` `gunzipSync` + `import_snapshot` без ограничения выходного размера. Лимитировать `unpacked.length`.
@@ -121,28 +121,28 @@
 
 ### CLI / инфраструктура
 
-- [ ] **L11. `--help` / `--version` не обрабатываются** — `mcp-server/index.js`, `mcp-server/cli.js`: exit 0, но usage не выводится; `index.js` просто стартует сервер, `cli.js` открывает TUI.
+- [x] **L11. `--help` / `--version` не обрабатываются** — `mcp-server/index.js`, `mcp-server/cli.js`: exit 0, но usage не выводится; `index.js` просто стартует сервер, `cli.js` открывает TUI.
 - [ ] **L12. Устаревший вложенный `mcp-server/package.json`** — `memory-mcp-server@1.5.2`, неполные зависимости (нет `@libsql/client`, `mammoth`, `pdf-parse`, `xlsx`), источник дрейфа версий. Удалить вместе с `mcp-server/package-lock.json` (в тарболл не входят).
-- [ ] **L13. Пустые каталоги `%TEMP%\mcp-tools-*` после тестов** — неполная очистка из-за lock SQLite на Windows.
+- [x] **L13. Пустые каталоги `%TEMP%\mcp-tools-*` после тестов** — неполная очистка из-за lock SQLite на Windows.
 
 ### Документация — README
 
-- [ ] **L14. README:346 — путь хранения памяти** — не упомянуты `OPENCODE_CONFIG_DIR` и legacy-фолбэк `~/.config/opencode/memory`, который на win32 **выигрывает** у `%LOCALAPPDATA%` (`memory.js:7-23`).
-- [ ] **L15. README:231 — TUI Diagnostics** — «benchmarks» и «clear corpus cache» не существуют; реально только `test`, `graph_test`, `reset` (`cli.js:275-293`, `diagnostics_actions.js:9-107`). Правка и hint `cli.js:56`.
-- [ ] **L16. README:156 — `update_fact`** — не задокументирован параметр `title` (`memory_tools.js:391`).
-- [ ] **L17. README:299-311 — конфиг** — не упомянуты `vectorScanLimit` (50000), `injectLimit` (10), `conflictStrategy` ("merge"), `tursoUrl`, `failoverUrl`, `authorized`, `username` (`config_manager.js:7-26`).
-- [ ] **L18. README:261,269 — GraphRAG** — «across 10 programming languages» при 9 пунктах списка / 11 языках; «C#: methods and properties» завышено — свойства без `(...)` не захватываются (`graph_extractor.js:8,18-30`).
-- [ ] **L19. README:348 «Zero Telemetry»** — верно, но не оговорено, что при первом запуске модель качается с huggingface.co.
+- [x] **L14. README:346 — путь хранения памяти** — не упомянуты `OPENCODE_CONFIG_DIR` и legacy-фолбэк `~/.config/opencode/memory`, который на win32 **выигрывает** у `%LOCALAPPDATA%` (`memory.js:7-23`).
+- [x] **L15. README:231 — TUI Diagnostics** — «benchmarks» и «clear corpus cache» не существуют; реально только `test`, `graph_test`, `reset` (`cli.js:275-293`, `diagnostics_actions.js:9-107`). Правка и hint `cli.js:56`.
+- [x] **L16. README:156 — `update_fact`** — не задокументирован параметр `title` (`memory_tools.js:391`).
+- [x] **L17. README:299-311 — конфиг** — не упомянуты `vectorScanLimit` (50000), `injectLimit` (10), `conflictStrategy` ("merge"), `tursoUrl`, `failoverUrl`, `authorized`, `username` (`config_manager.js:7-26`).
+- [x] **L18. README:261,269 — GraphRAG** — «across 10 programming languages» при 9 пунктах списка / 11 языках; «C#: methods and properties» завышено — свойства без `(...)` не захватываются (`graph_extractor.js:8,18-30`).
+- [x] **L19. README:348 «Zero Telemetry»** — верно, но не оговорено, что при первом запуске модель качается с huggingface.co.
 
 ### Документация — BENCHMARKS.md
 
-- [ ] **L20. Нерепроизводимые таблицы**
-  - [ ] §5.1 Baseline (строки 79-82) — значения 0.4325/0.6183/0.6325/0.4553/0.6526/0.6642 не встречаются ни в одном сохранённом JSON
-  - [ ] §5.3 bge-m3 (строки 103-108) — файл эпохи bge-m3 (`benchmark_2026-08-07T01-27-31-630Z.json`) — провальный прогон (все метрики 0, 21/21 MISSED); BM25 0.6706 заимствован из e5-прогона
-  - [ ] §4 корпус (строка 61) — «27 repositories, 353 sections, 558 micro-chunks» не совпадает ни с одним JSON (07-29: 27/321/520; 07-30: 30/353/3036; финал: 32/281/1202)
-  - [ ] §5.4 (строка 122) — 1203 → **1202** vectors
-  - [ ] §7 (строки 153-154) — 0.8333/0.9206 из прогона 07-30 смешаны с 0.8135/0.9286 из финального 08-07
-- [ ] **L21. Баг генератора отчёта: RRF подписан `k=10` при цифрах `k=60`** — `benchmarks/run_benchmarks.js:179`. Runtime RRF = k=60 (`retriever.js:101,263`, `quality_evaluator.js:300`). Баг тиражирован в `benchmark_results.md:54`, `BENCHMARKS.md:94,133`, `README.md:339`. Исправить подпись и перегенерировать отчёты.
+- [x] **L20. Нерепроизводимые таблицы**
+  - [x] §5.1 Baseline (строки 79-82) — значения 0.4325/0.6183/0.6325/0.4553/0.6526/0.6642 не встречаются ни в одном сохранённом JSON
+  - [x] §5.3 bge-m3 (строки 103-108) — файл эпохи bge-m3 (`benchmark_2026-08-07T01-27-31-630Z.json`) — провальный прогон (все метрики 0, 21/21 MISSED); BM25 0.6706 заимствован из e5-прогона
+  - [x] §4 корпус (строка 61) — «27 repositories, 353 sections, 558 micro-chunks» не совпадает ни с одним JSON (07-29: 27/321/520; 07-30: 30/353/3036; финал: 32/281/1202)
+  - [x] §5.4 (строка 122) — 1203 → **1202** vectors
+  - [x] §7 (строки 153-154) — 0.8333/0.9206 из прогона 07-30 смешаны с 0.8135/0.9286 из финального 08-07
+- [x] **L21. Баг генератора отчёта: RRF подписан `k=10` при цифрах `k=60`** — `benchmarks/run_benchmarks.js:179`. Runtime RRF = k=60 (`retriever.js:101,263`, `quality_evaluator.js:300`). Баг тиражирован в `benchmark_results.md:54`, `BENCHMARKS.md:94,133`, `README.md:339`. Исправить подпись и перегенерировать отчёты.
 
 ---
 
@@ -172,10 +172,10 @@
 ## 7. Рекомендуемый порядок выполнения
 
 - [x] **Этап 1 — разблокировать публикацию:** B1 → C3, M6, M9
-- [ ] **Этап 2 — безопасность:** H1, H2, M1, M2, M3, L1–L6
+- [x] **Этап 2 — безопасность:** H1, H2, M1, M2, M3, L1–L6
 - [x] **Этап 3 — стабильность рантайма:** C1, C2, L8, L5
-- [ ] **Этап 4 — тесты и герметичность:** M7, M8, L13
-- [ ] **Этап 5 — документация:** M10, M11, M12, L14–L19
-- [ ] **Этап 6 — бенчмарки:** L21 → L20 (перегенерация отчётов)
+- [x] **Этап 4 — тесты и герметичность:** M7, M8, L13
+- [x] **Этап 5 — документация:** M10, M11, M12, L14–L19
+- [x] **Этап 6 — бенчмарки:** L21 → L20 (перегенерация отчётов)
 - [ ] **Этап 7 — рефакторинг:** H3, H4, L7, L9, L10, L11, L12
 - [ ] **Этап 8 — зависимости:** M5 (`npm audit fix` + документирование xlsx/sharp)

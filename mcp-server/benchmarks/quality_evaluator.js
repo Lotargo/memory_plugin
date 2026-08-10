@@ -570,6 +570,11 @@ export async function evaluateSearchQualityComparison(db, {
 
   return {
     mode: isSmoke ? "smoke" : "full",
+    // Parameters the headline hybridRrf/hybridRsf rows were actually computed
+    // with. Reports must label the rows with these, NOT with bestRrfK/
+    // bestRsfAlpha (which come from the separate grid sweep).
+    defaultAlpha,
+    defaultRrfK,
     bm25: bm25Res,
     vector: vectorRes,
     hybridRrf: rrfRes,

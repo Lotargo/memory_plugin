@@ -158,7 +158,7 @@ The MCP server registers **14 MCP tools** accessible across all connected AI env
 | `remember` | `project` / `global` | `fact`, `title`, `scope`, `docId`, `startLine`, `endLine`, `relationType`, `ttl`, `keep`, `tags`, `supersedes` | Save a durable fact or preference. Supports optional title, document linking, TTL, keep protection, tags, and version superseding. |
 | `recall` | `all`, `project`, `global`, `list_projects` | `scope`, `project`, `query`, `tags`, `since`, `until`, `mode`, `offset`, `limit` | Display saved facts with metadata badges and linked docs. Supports cross-project lookup via `project: '<path>'` and header-only mode (`mode: "headers"`). |
 | `get_fact` | `all`, `project`, `global` | `id`, `scope` | Retrieve full text, raw line, and metadata of a single fact by its metadata ID (e.g. `"8f3a2c"`). |
-| `update_fact` | `project` / `global` | `id`, `newText`, `scope` | Rewrite a fact while preserving its original creation date, metadata, and knowledge links. |
+| `update_fact` | `project` / `global` | `id`, `newText`, `title`, `scope` | Rewrite a fact (and optionally its `**Title**`) while preserving its original creation date, metadata, and knowledge links. |
 | `forget` | `project` / `global` | `id` / `range` / `query`, `scope`, `force` | Remove a fact by index number, ID, range (e.g. `"3-30"`), or query. Requires `force: true` for protected (`[KEEP]`) facts. |
 | `memory_info` | - | - | Show storage paths, fact counts, RAG statistics, git identity bindings, and package version. |
 
@@ -200,6 +200,10 @@ memory_plugin <command> [options]
 memory-cli <command> [options]
 ```
 
+Both binaries accept the same commands. `memory_plugin` with **no** command starts the MCP server on stdio; `memory-cli` with no command opens the interactive TUI. Use `--help` on either for the full usage text.
+
+> **Secrets:** prefer the environment variables `TURSO_API_TOKEN`, `TURSO_DB_URL` and `TURSO_DB_TOKEN` over `--api-key` / `--db-token` flags — arguments passed on the command line are visible in the process list and shell history. Without a flag or env var, `login` prompts for the token on stdin with echo disabled.
+
 ### Direct Non-Interactive Commands
 
 | Command | Options / Flags | Description |
@@ -212,7 +216,7 @@ memory-cli <command> [options]
 | **`migrate_titles`** | `--key <key>` | Auto-generates `**Title**` prefixes for legacy facts without titles. |
 | **`enable-prompt`** | - | Injects memory agent instructions into client agent files (`AGENTS.md`, `CLAUDE.md`). |
 | **`disable-prompt`** | - | Removes memory agent instructions from client agent files. |
-| **`login`** | `--api-key <TOKEN>`, `--from-env`, `--db-url <URL> --db-token <TOKEN>` | Authenticates with Turso Cloud via API key, direct DB token, or environment variables. |
+| **`login`** | `--api-token`, `--from-env`, `--db-url <URL> --db-token`, `$TURSO_API_TOKEN`, `$TURSO_DB_TOKEN` | Authenticates with Turso Cloud via API token, direct DB token, or environment variables. Token values are read from the environment or a hidden stdin prompt. |
 | **`logout`** | `--api-key` | Signs out of Turso Cloud or removes stored API key while retaining DB session. |
 | **`auth-status`** | - | Displays authentication source, endpoint URL, username, organization, database, and sync mode. |
 
@@ -233,7 +237,7 @@ Use **Up / Down** arrows to navigate, **ENTER** to select, and **BACKSPACE** to 
 - **Engine & Hybrid Search Settings**: Switch fusion algorithms (`rsf`, `rrf`, `semantic_only`, `lexical_only`), adjust RSF $\alpha$ balance, select ONNX embedding models, set a fixed embedding vector dimension, toggle Cross-Encoder rerankers, configure GPU attention budget, and set WASM threads.
 - **Knowledge Base & Storage Management**: Browse Layer 1 facts, manage Layer 2 RAG docs, re-embed all vectors after switching model/dimension (`[REINDEX]`), export/import JSON snapshots, purge model cache, or perform a hard reset.
 - **Global Prompt & Integration**: Toggle memory instruction sync across client configurations (`~/.gemini/config/AGENTS.md`, `~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`).
-- **Diagnostics & System Actions**: Run in-process search quality benchmarks, execute verification queries, clear corpus cache, and reset config to factory defaults.
+- **Diagnostics & System Actions**: Execute a hybrid search verification query, run the graph & notebook linking check, and reset config to factory defaults.
 
 ---
 
@@ -263,7 +267,7 @@ The RAG engine includes a lightweight graph layer built on SQLite. It combines c
 
 ### Multilingual Code Symbol Parsing
 
-During `ingest_document`, code symbols are extracted from code blocks using fast regex heuristics across 10 programming languages:
+During `ingest_document`, code symbols are extracted from code blocks using fast regex heuristics across the following language families:
 
 - **JavaScript / TypeScript**: `function`, `class`, `interface`, `type`, `enum`, `const`, `let`, `var`
 - **Python**: `def`, `class`
@@ -271,7 +275,7 @@ During `ingest_document`, code symbols are extracted from code blocks using fast
 - **Rust**: `struct`, `enum`, `trait`, `fn` (including async/pub)
 - **C++**: `class`, `struct`, `namespace`, functions and methods
 - **Java & Kotlin**: `class`, `interface`, `record`, `enum`, `fun`, synchronized methods
-- **C#**: `class`, `interface`, `struct`, `record`, methods and properties
+- **C#**: `class`, `interface`, `struct`, `record`, methods (properties without a parameter list are not captured)
 - **PHP**: `class`, `interface`, `trait`, functions
 - **Ruby**: `module`, `class`, methods
 
@@ -314,6 +318,17 @@ The engine is configured through `<memory-dir>/config.json` (created with defaul
 | `gpuAttentionBudget` | `2000000` | GPU micro-batch attention budget `[1M - 16M]` |
 | `onnxThreads` | `0` | ONNX WASM threads: `0` auto-detect, or `1-16` |
 | `executionDevice` | `cpu` | `cpu` or `webgpu` (experimental) |
+| `vectorScanLimit` | `50000` | Max micro-chunks scanned per vector query (`0` = unlimited) |
+| `injectLimit` | `10` | Max facts injected into the agent's system prompt |
+| `conflictStrategy` | `merge` | Hybrid-sync conflict resolution: `merge`, `cloud-wins`, or `local-wins` |
+| `tursoUrl` | `""` | Primary Turso endpoint URL (set by `login`) |
+| `failoverUrl` | `""` | Secondary cloud endpoint for the circuit breaker; empty = failover disabled |
+| `authorized` | `false` | Set to `true` once a cloud login completed |
+| `username` | `""` | Account username from the Turso profile |
+| `ingestAllowedPaths` | `[]` | Extra directories `ingest_document(type: "file")` may read from |
+| `ingestAllowAnyPath` | `false` | Escape hatch: allow reading **any** path from disk (unsafe) |
+
+> `ingest_document(type: "file")` reads only from the current working directory and the plugin data directory by default. This prevents a prompt-injected agent from pulling `~/.ssh/id_rsa` or `.env` into the knowledge base (and, in `hybrid-sync`, into the cloud). Widen it deliberately via `ingestAllowedPaths`.
 
 ---
 
@@ -341,16 +356,16 @@ Evaluated across a 32-document technical corpus (21 queries) using Mean Reciproc
 | :---------------------------- | :--------: | :---------: | :--------: |
 | BM25 Lexical Search Only      |   0.6706   |   76.19%    |   0.6934   |
 | Dense ONNX Vector Only        |   0.8135   |   100.00%   |   0.8612   |
-| Hybrid RRF ($k=10$)           |   0.8810   |   95.24%    |   0.8997   |
+| Hybrid RRF ($k=60$)           |   0.8810   |   95.24%    |   0.8997   |
 | **Hybrid RSF ($\alpha=0.5$)** | **0.9286** | **100.00%** | **0.9473** |
 
 ---
 
 ## Storage & Privacy
 
-- **Local-First Storage**: All SQLite indexes, ONNX models, CAS blobs, and Markdown notebooks are stored locally in the memory directory (`$MEMORY_DIR` or `%LOCALAPPDATA%\opencode\memory`).
-- **Dual-Source Failover Model Fetching**: Primary model weights are fetched from HuggingFace CDN with automatic failover to GitHub Repository Mirror.
-- **Zero Telemetry**: No third-party network telemetry calls are made.
+- **Local-First Storage**: All SQLite indexes, ONNX models, CAS blobs, and Markdown notebooks are stored locally in the memory directory. Resolution order: `$MEMORY_DIR` → `$OPENCODE_CONFIG_DIR/memory` → the legacy `~/.config/opencode/memory` directory when it already exists (this takes precedence on Windows too) → `%LOCALAPPDATA%\opencode\memory`.
+- **Model Weights**: ONNX weights are downloaded on first use from `https://huggingface.co` and cached locally; later runs are fully offline.
+- **Zero Telemetry**: No third-party analytics or telemetry calls are made. The only outbound traffic is the one-off model download, plus Turso requests in the cloud sync modes.
 
 ---
 

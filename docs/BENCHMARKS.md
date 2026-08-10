@@ -58,7 +58,9 @@ where $\alpha = 0.5$, $\epsilon = 10^{-6}$.
 
 ## 4. Benchmark Corpus & Query Dataset
 
-The evaluation suite utilizes 27 real-world open-source repositories and technical documentation packages (React, Vue, Fastify, Rust, SQLite, Axios, Next.js, Playwright, Transformers.js, Zod, etc.), chunked into 353 sections and 558 micro-chunks.
+The reference run (`benchmark_2026-08-07T01-36-45-352Z.json`) uses 32 real-world open-source repositories and technical documentation packages (React, Vue, Fastify, Rust, SQLite, Axios, Next.js, Playwright, Transformers.js, Zod, etc.), chunked into 281 sections and 1,202 micro-chunks, evaluated with 21 queries.
+
+The earlier baseline run in §5.1 used a smaller corpus (27 documents, 321 sections, 520 micro-chunks) — corpus sizes are stated per table because they are not comparable across runs.
 
 Query categories include:
 
@@ -72,55 +74,55 @@ Query categories include:
 
 ### Baseline Results (Prior to Model-Aware Prefixing Optimization)
 
-_Model: Xenova/multilingual-e5-small without asymmetric passage/query prefix enforcement._
+_Model: Xenova/multilingual-e5-small without asymmetric passage/query prefix enforcement. Corpus: 27 docs / 321 sections / 520 micro-chunks, 21 queries. Source: `benchmark_2026-07-29T20-37-39-433Z.json`._
 
 | Retrieval Strategy        | MRR@5  | Recall@5 | NDCG@5 |
 | ------------------------- | :----: | :------: | :----: |
-| BM25 Lexical Search Only  | 0.4325 |  52.38%  | 0.4553 |
+| BM25 Lexical Search Only  | 0.4802 |  57.14%  | 0.5029 |
 | Dense Vector Only         | 0.6048 |  71.43%  | 0.6309 |
-| Hybrid RRF ($k=60$)       | 0.6183 |  76.19%  | 0.6526 |
-| Hybrid RSF ($\alpha=0.5$) | 0.6325 |  76.19%  | 0.6642 |
+| Hybrid RRF ($k=60$)       | 0.6206 |  76.19%  | 0.6547 |
+| Hybrid RSF ($\alpha=0.5$) | 0.6087 |  76.19%  | 0.6466 |
 
 ---
 
 ### Optimized Results (Model-Aware Prefixing & Exact Asymmetric E5 Protocol)
 
-_Model: Xenova/multilingual-e5-small over full 32-document technical corpus (21 queries)._
+_Model: Xenova/multilingual-e5-small over the full 32-document technical corpus (281 sections, 1,202 micro-chunks, 21 queries). Source: `benchmark_2026-08-07T01-36-45-352Z.json`._
 
 | Retrieval Strategy            |   MRR@5    |  Recall@5   |   NDCG@5   | Performance Gain vs Baseline |
 | ----------------------------- | :--------: | :---------: | :--------: | :--------------------------: |
 | BM25 Lexical Search Only      |   0.6706   |   76.19%    |   0.6934   |           Baseline           |
 | Dense ONNX Vector Only        |   0.8135   |   100.00%   |   0.8612   |      +21.3% Vector MRR       |
-| Hybrid RRF ($k=10$)           |   0.8810   |   95.24%    |   0.8997   |        +31.4% RRF MRR        |
+| Hybrid RRF ($k=60$)           |   0.8810   |   95.24%    |   0.8997   |        +31.4% RRF MRR        |
 | **Hybrid RSF ($\alpha=0.5$)** | **0.9286** | **100.00%** | **0.9473** |      **+38.5% RSF MRR**      |
 
 ---
 
 ### 5.3 Heavy Multi-Feature Model Benchmark: Xenova/bge-m3
 
-_Model: Xenova/bge-m3 (1024-dim, 8192 context window, INT8/q8 ONNX), DirectML GPU & AVX2 execution, 30 real technical documents, 21 evaluation queries._
+_Model: Xenova/bge-m3 (1024-dim, 8192 context window, INT8/q8 ONNX), DirectML GPU & AVX2 execution, 30 real technical documents (353 sections, 1,503 micro-chunks), 21 evaluation queries. Source: `benchmark_2026-07-30T02-47-01-736Z.json`._
 
 | Retrieval Strategy            |   MRR@5    |  Recall@5  |   NDCG@5   | Note                            |
 | ----------------------------- | :--------: | :--------: | :--------: | ------------------------------- |
-| BM25 Lexical Search Only      |   0.6706   |   76.20%   |   0.6934   | Baseline FTS5                   |
-| Dense ONNX Vector (BGE-M3)    |   0.4476   |   57.10%   |   0.4779   | Single dense vector pass        |
-| Hybrid RRF ($k=60$)           |   0.7183   |   81.00%   |   0.7410   | Rank-based fusion               |
-| **Hybrid RSF ($\alpha=0.5$)** | **0.7540** | **81.00%** | **0.7681** | **Score-based fusion (Winner)** |
+| BM25 Lexical Search Only      |   0.4476   |   57.14%   |   0.4779   | Baseline FTS5                   |
+| Dense ONNX Vector (BGE-M3)    |   0.3667   |   52.38%   |   0.4052   | Single dense vector pass        |
+| Hybrid RRF ($k=60$)           |   0.4817   |   61.90%   |   0.5151   | Rank-based fusion               |
+| **Hybrid RSF ($\alpha=0.5$)** | **0.4817** | **61.90%** | **0.5151** | **Score-based fusion**          |
 
-_Winner by MRR: Hybrid RSF (Score)_
+> **Corrected 2026-08-10.** The figures previously printed here (BM25 0.6706, vector 0.4476, RRF 0.7183, RSF 0.7540) could not be reproduced from any stored benchmark artifact: the BM25 value was carried over from the e5-small run and the remaining columns were shifted by one. The table above reports the actual bge-m3 run. On this corpus bge-m3 (q8, single dense pass) **underperforms** e5-small, which is why `Xenova/multilingual-e5-small` remains the default.
 
 ---
 
 ### 5.4 Cloud Environment Execution: Google Jules Sandbox Run
 
 _Model: Xenova/multilingual-e5-small over 32 technical source documents (281 sections, 1202 micro-chunks, 21 evaluation queries)._  
-_Environment: Google Jules Cloud Workspace (KVM Virtualization, 4-core Intel Xeon @ 2.30GHz, 8.0 GB RAM, Node.js 18+ global environment installation: `npm install -g @lotargo/memory_plugin`)._
+_Environment: Google Jules Cloud Workspace (KVM Virtualization, 4-core Intel Xeon @ 2.30GHz, 8.0 GB RAM, Node.js 22.5+ global environment installation: `npm install -g @lotargo/memory_plugin`)._
 
 This benchmark evaluates how `@lotargo/memory_plugin` performs in constrained, isolated cloud container environments (Google Jules) without hardware GPU acceleration.
 
 #### Environment & Ingestion Metrics:
-- **Total Micro-Chunks Vectorized**: 1,203 vectors (384 dimensions)
-- **Ingestion Time**: 51.71 s (CPU vectorization speed: 23.26 vectors/sec)
+- **Total Micro-Chunks Vectorized**: 1,202 vectors (384 dimensions)
+- **Ingestion Time**: 50.99 s (CPU vectorization speed: 23.57 vectors/sec)
 - **SQLite Database Footprint**: 5.19 MB
 - **CAS Blob Footprint**: 0.1 MB
 
@@ -130,7 +132,7 @@ This benchmark evaluates how `@lotargo/memory_plugin` performs in constrained, i
 | ----------------------------- | :--------: | :---------: | :--------: | :--------: | :--------------------: |
 | BM25 Lexical Search Only      |   0.6706   |   76.19%    |   0.6934   |  13 / 21   |   [0.4802, 0.8492]     |
 | Dense ONNX Vector Only        |   0.8135   |   100.00%   |   0.8612   |  14 / 21   |   [0.7024, 0.9286]     |
-| Hybrid RRF ($k=10$)           |   0.8810   |   95.24%    |   0.8997   |  17 / 21   |   [0.7381, 0.9762]     |
+| Hybrid RRF ($k=60$)           |   0.8810   |   95.24%    |   0.8997   |  17 / 21   |   [0.7381, 0.9762]     |
 | **Hybrid RSF ($\alpha=0.5$)** | **0.9286** | **100.00%** | **0.9473** | **18 / 21**| **[0.8571, 1.0000]**   |
 
 _Key Insight_: In the Google Jules cloud sandbox, Relative Score Fusion (RSF) reached **100.00% Recall@5** and **0.9286 MRR@5**, demonstrating that global environment installation (`npm install -g @lotargo/memory_plugin`) and headless MCP server discovery function reliably without performance degradation under cloud hypervisor constraints.
@@ -150,6 +152,6 @@ _Key Insight_: In the Google Jules cloud sandbox, Relative Score Fusion (RSF) re
 ## 7. Conclusions
 
 1. **ONNX JS & DirectML Optimization**: Successfully eliminated ONNX VRAM memory leaks and DirectX 12 buffer overflows on Windows via Dynamic PyTorch-style Attention Budgeting ($O(\text{seq\_len}^2)$) and fixed tensor shape padding (`padding: "max_length"`).
-2. **Model-Aware Prefixing & Protocol Handling**: Enforcing precise asymmetric prefixing (`passage: ` for indexing, `query: ` for search in standard E5 models, prompt prefixes for BGE, and dynamic `Instruct: ` blocks specifically for `*-instruct` models) eliminates task drift, raising dense vector MRR@5 from 0.6048 to 0.8333.
-3. **Hybrid RSF Convergence**: Relative Score Fusion ($\alpha=0.5$) achieves **0.9206 MRR@5** (e5-small) and **0.7540 MRR@5** (bge-m3) with **81.0%–95.2% Recall@5** across full technical repository benchmarks.
+2. **Model-Aware Prefixing & Protocol Handling**: Enforcing precise asymmetric prefixing (`passage: ` for indexing, `query: ` for search in standard E5 models, prompt prefixes for BGE, and dynamic `Instruct: ` blocks specifically for `*-instruct` models) eliminates task drift, raising dense vector MRR@5 from 0.6048 to 0.8135 on the reference corpus.
+3. **Hybrid RSF Convergence**: Relative Score Fusion ($\alpha=0.5$) achieves **0.9286 MRR@5** at **100.00% Recall@5** with e5-small on the reference corpus, and **0.4817 MRR@5** at **61.90% Recall@5** with bge-m3 (q8) on the 30-document corpus.
 4. **Cloud Environment Validation (Google Jules)**: Verified that headless MCP server deployment in constrained cloud hypervisors (Google Jules KVM container) achieves **100.00% Recall@5** and **0.9286 MRR@5** under CPU-only vector execution.
