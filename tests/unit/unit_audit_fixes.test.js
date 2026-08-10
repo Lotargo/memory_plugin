@@ -17,7 +17,11 @@ process.env.MEMORY_DIR = TEST_DIR;
 const { extractSymbolsFromContent } = await import("../../mcp-server/graph/graph_extractor.js");
 const { extractTitle, validateUrlForSsrf } = await import("../../mcp-server/ingest/normalizer.js");
 const { exportDocumentToJsonString } = await import("../../mcp-server/ingest/exporter.js");
-const { sanitizeFtsQuery: retrieverSanitizeFts } = await import("../../mcp-server/retrieval/retriever.js");
+const {
+  sanitizeFtsQuery: retrieverSanitizeFts,
+  toVectorBytes,
+  vectorSearch,
+} = await import("../../mcp-server/retrieval/retriever.js");
 const { updateConfig, getConfig, resetConfig } = await import("../../mcp-server/config/config_manager.js");
 const { resizeVector, formatInputText } = await import("../../mcp-server/ml/model_manager.js");
 const { validateSnapshotPath } = await import("../../mcp-server/admin/snapshot.js");
@@ -225,6 +229,48 @@ export async function runAuditUnitTests() {
   const afterRow2 = await reindexDb.prepare("SELECT COALESCE(SUM(LENGTH(vector)),0) as bytes FROM micro_chunks WHERE doc_id = ?").get(reIng.docId);
   assert.strictEqual(afterRow2.bytes, beforeRow.cnt * 64, "Vectors updated to 16-dim (64 bytes each)");
   console.log("   [PASS] reindexEmbeddings re-embedding OK");
+
+  // 12. Regression: vector BLOBs must survive the driver round-trip.
+  // node:sqlite returns BLOBs as Uint8Array (NOT Buffer). A Buffer.isBuffer()
+  // gate in vectorSearch silently dropped every row and made vector search
+  // return zero hits while BM25 kept working.
+  console.log("12. Testing vector BLOB round-trip (Uint8Array from node:sqlite)...");
+  const storedVec = await reindexDb
+    .prepare("SELECT vector FROM micro_chunks WHERE doc_id = ? LIMIT 1")
+    .get(reIng.docId);
+  assert.ok(storedVec && storedVec.vector, "stored vector column is present");
+  assert.ok(
+    storedVec.vector instanceof Uint8Array,
+    "driver returns the BLOB as a Uint8Array — do not gate on Buffer.isBuffer()"
+  );
+
+  const normalized = toVectorBytes(storedVec.vector);
+  assert.ok(normalized instanceof Uint8Array, "toVectorBytes normalizes a Uint8Array");
+  assert.strictEqual(normalized.byteLength, 64, "16-dim float32 vector = 64 bytes");
+
+  // Every shape a driver may return must normalize to the same bytes.
+  const asBuffer = Buffer.from(normalized);
+  const asBase64 = asBuffer.toString("base64");
+  const asJson = { type: "Buffer", data: [...normalized] };
+  for (const [label, shape] of [
+    ["Buffer", asBuffer],
+    ["base64 string", asBase64],
+    ["{type:Buffer,data}", asJson],
+    ["plain array", [...normalized]],
+  ]) {
+    const out = toVectorBytes(shape);
+    assert.ok(out, `toVectorBytes handles ${label}`);
+    assert.strictEqual(out.byteLength, 64, `${label} round-trips to 64 bytes`);
+    assert.deepStrictEqual([...out], [...normalized], `${label} preserves the bytes`);
+  }
+  assert.strictEqual(toVectorBytes(null), null, "null stays null");
+  assert.strictEqual(toVectorBytes(undefined), null, "undefined stays null");
+
+  // End-to-end: a real query must actually retrieve the chunk by vector.
+  const probeVec = new Float32Array(16).fill(0.02);
+  const vecHits = await vectorSearch(reindexDb, probeVec, 5, 0.1);
+  assert.ok(vecHits.length > 0, "vectorSearch returns hits for a matching vector (regression)");
+  console.log("   [PASS] vector BLOB round-trip + vectorSearch OK");
 
   // Cleanup: close every SQLite handle first, otherwise Windows keeps the files
   // locked and leaves an empty %TEMP% directory behind.

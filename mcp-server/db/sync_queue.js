@@ -1,6 +1,7 @@
 import { readFile, readdir } from "fs/promises";
 import { join } from "path";
 import { MEMORY_DIR, GLOBAL_KEY, buildMemoryContent, extractFacts, writeMemoryFile } from "../memory.js";
+import { toVectorBytes } from "../retrieval/retriever.js";
 
 let isSyncing = false;
 
@@ -104,18 +105,12 @@ async function processSyncTask(db, task) {
     // 5. Insert micro_chunks & FTS
     if (Array.isArray(data.micro_chunks)) {
       for (const mc of data.micro_chunks) {
-        let vecBuf = Buffer.alloc(0);
-        if (mc.vector) {
-          if (Buffer.isBuffer(mc.vector)) {
-            vecBuf = mc.vector;
-          } else if (typeof mc.vector === "string") {
-            vecBuf = Buffer.from(mc.vector, "base64");
-          } else if (mc.vector.type === "Buffer" && Array.isArray(mc.vector.data)) {
-            vecBuf = Buffer.from(mc.vector.data);
-          } else if (Array.isArray(mc.vector)) {
-            vecBuf = Buffer.from(mc.vector);
-          }
-        }
+        // node:sqlite hands back Uint8Array, which matched none of the old
+        // branches — hybrid-sync silently pushed EMPTY vectors to the cloud.
+        const vecBytes = toVectorBytes(mc.vector);
+        const vecBuf = vecBytes
+          ? Buffer.from(vecBytes.buffer, vecBytes.byteOffset, vecBytes.byteLength)
+          : Buffer.alloc(0);
         await db.cloudClient.execute({
           sql: "INSERT INTO micro_chunks (id, section_id, doc_id, content, vector, token_count, medium_id) VALUES (?, ?, ?, ?, ?, ?, ?);",
           args: [mc.id, mc.section_id, doc.id, mc.content, vecBuf, mc.token_count, mc.medium_id || null],

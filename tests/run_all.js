@@ -10,6 +10,7 @@ const testSuites = [
   { category: "Unit", name: "identity", file: "tests/unit/identity.test.js" },
   { category: "Unit", name: "project_identity", file: "tests/unit/project_identity.test.js" },
   { category: "Unit", name: "unit_audit_fixes", file: "tests/unit/unit_audit_fixes.test.js" },
+  { category: "Unit", name: "benchmark_report", file: "tests/unit/benchmark_report.test.js" },
   { category: "Unit", name: "chunker", file: "tests/unit/chunker.test.js" },
 
   // --- 2. INTEGRATION TESTS ---

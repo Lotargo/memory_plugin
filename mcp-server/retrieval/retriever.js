@@ -36,6 +36,20 @@ export async function bm25Search(db, query, limit = 30) {
   }
 }
 
+// Normalize whatever the active driver hands back for a BLOB column into a
+// Uint8Array view. node:sqlite -> Uint8Array, Turso/libsql -> base64 string or
+// a serialized {type:"Buffer",data:[...]} object, better-sqlite3 -> Buffer.
+export function toVectorBytes(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string") return new Uint8Array(Buffer.from(value, "base64"));
+  if (value instanceof Uint8Array) return value; // covers Buffer too
+  if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (value.type === "Buffer" && Array.isArray(value.data)) return new Uint8Array(value.data);
+  if (Array.isArray(value)) return new Uint8Array(value);
+  return null;
+}
+
 export async function vectorSearch(db, queryVector, limit = 30, minSim = 0.25) {
   if (!queryVector || queryVector.length === 0) return [];
 
@@ -62,17 +76,12 @@ export async function vectorSearch(db, queryVector, limit = 30, minSim = 0.25) {
   const rows = scanLimit > 0 ? await stmt.all(scanLimit) : await stmt.all();
   const scored = [];
   for (const r of rows) {
-    let vecSub = r.vector;
-    if (vecSub === null || vecSub === undefined) continue;
-    if (typeof vecSub === "string") {
-      vecSub = Buffer.from(vecSub, "base64");
-    } else if (vecSub.type === "Buffer" && Array.isArray(vecSub.data)) {
-      vecSub = Buffer.from(vecSub.data);
-    } else if (Array.isArray(vecSub)) {
-      vecSub = Buffer.from(vecSub);
-    }
-    if (!Buffer.isBuffer(vecSub) || vecSub.byteLength < vectorDim * 4) continue;
-    if (vecSub.byteLength !== vectorDim * 4) continue;
+    // node:sqlite returns BLOBs as plain Uint8Array (NOT Buffer), the Turso
+    // client may return base64 strings or {type:"Buffer",data:[...]}.
+    // A Buffer.isBuffer() gate here silently dropped every local row and made
+    // vector search return zero hits.
+    const vecSub = toVectorBytes(r.vector);
+    if (!vecSub || vecSub.byteLength !== vectorDim * 4) continue;
     tempView.set(vecSub.subarray(0, vectorDim * 4));
 
     const sim = cosineSimilarity(queryVector, tempVec);

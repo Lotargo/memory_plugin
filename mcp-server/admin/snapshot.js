@@ -5,6 +5,7 @@ import { getDatabase, BLOBS_DIR } from "../db/database.js";
 import { readBlob, saveBlob } from "../storage/blob_store.js";
 import { ensureExportsDir } from "../ingest/exporter.js";
 import { realResolve, isWithin } from "../security/path_guard.js";
+import { toVectorBytes } from "../retrieval/retriever.js";
 import { safeGunzip } from "../storage/blob_store.js";
 
 const ALLOWED_SNAPSHOT_DIRS = new Set();
@@ -76,9 +77,9 @@ export async function exportSnapshot({ customDb = null, customBlobDir = BLOBS_DI
 
   const microChunks = rawMicroChunks.map((mc) => {
     let vecBase64 = "";
-    if (mc.vector) {
-      const buf = Buffer.isBuffer(mc.vector) ? mc.vector : Buffer.from(mc.vector);
-      vecBase64 = buf.toString("base64");
+    const vecBytes = toVectorBytes(mc.vector);
+    if (vecBytes && vecBytes.byteLength) {
+      vecBase64 = Buffer.from(vecBytes.buffer, vecBytes.byteOffset, vecBytes.byteLength).toString("base64");
     }
     return {
       ...mc,

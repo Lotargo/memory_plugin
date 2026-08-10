@@ -1,7 +1,7 @@
 import { writeFile, mkdir as mkdirAsync } from "node:fs/promises";
 import { rmSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { testDualLayerArchitecture } from "./test_dual_layer.js";
 import { runIngestionBenchmark } from "./stress_ingestion.js";
 import { evaluateSearchQualityComparison } from "./quality_evaluator.js";
@@ -26,37 +26,10 @@ function printRichPanel(title, subtitle = "") {
   console.log(`\x1b[36m╰${line}╯\x1b[0m`);
 }
 
-async function runFullBenchmarkSuite() {
-  const startTime = Date.now();
-
-  printRichPanel("LOCAL RAG BENCHMARK SUITE", "Real ONNX Embeddings & BM25 vs Vector vs RRF vs RSF");
-
-  // 1. Dual Layer Architectural Verification
-  console.log("\n --- Phase 1: Dual Layer Architectural Verification ---");
-  await testDualLayerArchitecture();
-
-  // 2. Ingestion & Storage Benchmark WITH REAL ONNX EMBEDDINGS
-  console.log("\n --- Phase 2: Real ONNX Ingestion & Embedding Benchmark ---");
-  const ingestMetrics = await runIngestionBenchmark({ generateEmbeddings: true });
-
-  // 3. Search Quality & Latency Benchmark with per-query breakdown
-  console.log("\n --- Phase 3: Granular Search Quality Comparison (BM25 vs Vector vs RRF vs RSF) ---");
-  const qualityComp = await evaluateSearchQualityComparison(ingestMetrics.dbInstance);
-
-  // Clean up test DB
-  if (ingestMetrics.dbInstance) {
-    try {
-      ingestMetrics.dbInstance.close();
-    } catch {}
-  }
-  if (existsSync(dirname(ingestMetrics.dbPath))) {
-    try {
-      rmSync(dirname(ingestMetrics.dbPath), { recursive: true, force: true });
-    } catch {}
-  }
-
-  const totalTimeSec = ((Date.now() - startTime) / 1000).toFixed(2);
-
+// Pure report renderer: takes the measurement results and returns the markdown.
+// Kept separate from the measurement run so it can be exercised against stored
+// benchmark_*.json artifacts without re-running ONNX ingestion.
+export function buildMarkdownReport({ ingestMetrics, qualityComp, totalTimeSec }) {
   // Build markdown table for breakdown
   const breakdownRows = qualityComp.breakdown
     .map(
@@ -269,6 +242,45 @@ ${rrfGridRows}
 - **Corpus drift**: Documents are fetched live from GitHub \`main\`/ \`master\` HEADs, so consecutive runs are NOT directly comparable across runs. Versioning the corpus (Git SHA snapshot) is the next step.
 `;
 
+  return markdownReport;
+}
+
+async function runFullBenchmarkSuite() {
+  const startTime = Date.now();
+
+  printRichPanel("LOCAL RAG BENCHMARK SUITE", "Real ONNX Embeddings & BM25 vs Vector vs RRF vs RSF");
+
+  // 1. Dual Layer Architectural Verification
+  console.log("\n --- Phase 1: Dual Layer Architectural Verification ---");
+  await testDualLayerArchitecture();
+
+  // 2. Ingestion & Storage Benchmark WITH REAL ONNX EMBEDDINGS
+  console.log("\n --- Phase 2: Real ONNX Ingestion & Embedding Benchmark ---");
+  const ingestMetrics = await runIngestionBenchmark({ generateEmbeddings: true });
+
+  // 3. Search Quality & Latency Benchmark with per-query breakdown
+  console.log("\n --- Phase 3: Granular Search Quality Comparison (BM25 vs Vector vs RRF vs RSF) ---");
+  const qualityComp = await evaluateSearchQualityComparison(ingestMetrics.dbInstance);
+
+  // Clean up test DB
+  if (ingestMetrics.dbInstance) {
+    try {
+      ingestMetrics.dbInstance.close();
+    } catch {}
+  }
+  if (existsSync(dirname(ingestMetrics.dbPath))) {
+    try {
+      rmSync(dirname(ingestMetrics.dbPath), { recursive: true, force: true });
+    } catch {}
+  }
+
+  const totalTimeSec = ((Date.now() - startTime) / 1000).toFixed(2);
+  const winner = qualityComp.winner;
+  const totalQueries = qualityComp.breakdown.length;
+
+  // 4. Generate Comprehensive Markdown Report
+  const markdownReport = buildMarkdownReport({ ingestMetrics, qualityComp, totalTimeSec });
+
   await writeFile(REPORT_PATH, markdownReport, "utf-8");
 
   // JSON sidecar (machine-readable, for CI / regression tooling) + history snapshot.
@@ -335,13 +347,20 @@ ${rrfGridRows}
 // Auto-respawn with --expose-gc if needed so the ingestion memory benchmark can
 // force GC after model warm-up, giving a clean baseline. Without it `global.gc`
 // is undefined and the baseline stays noisy.
-if (!process.argv.includes("--no-respawn") && !global.gc) {
-  const { spawn } = await import("node:child_process");
-  const child = spawn(process.execPath, ["--expose-gc", ...process.argv.slice(1)], { stdio: "inherit" });
-  child.on("exit", (code) => process.exit(code ?? 0));
-} else {
-  runFullBenchmarkSuite().catch((err) => {
-    console.error(" [ERROR] Benchmark Suite Executed with Errors:", err);
-    process.exit(1);
-  });
+// Only run when this file is the entry point. Importing it (e.g. to reuse
+// buildMarkdownReport) must not kick off a full ONNX benchmark run.
+const isEntryPoint =
+  process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;
+
+if (isEntryPoint) {
+  if (!process.argv.includes("--no-respawn") && !global.gc) {
+    const { spawn } = await import("node:child_process");
+    const child = spawn(process.execPath, ["--expose-gc", ...process.argv.slice(1)], { stdio: "inherit" });
+    child.on("exit", (code) => process.exit(code ?? 0));
+  } else {
+    runFullBenchmarkSuite().catch((err) => {
+      console.error(" [ERROR] Benchmark Suite Executed with Errors:", err);
+      process.exit(1);
+    });
+  }
 }
