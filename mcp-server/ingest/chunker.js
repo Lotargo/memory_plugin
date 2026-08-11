@@ -5,6 +5,25 @@ export function estimateTokens(text) {
   return Math.ceil(text.length / 4);
 }
 
+export function generateTableSummary(tableContent, breadcrumbs = "") {
+  const lines = tableContent.split("\n").filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return null;
+
+  const headerLine = lines[0];
+  const columns = headerLine
+    .split("|")
+    .map((c) => c.trim())
+    .filter((c) => c.length > 0);
+
+  const separatorLine = lines[1] || "";
+  const hasSeparator = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(separatorLine);
+  const dataLines = hasSeparator ? lines.slice(2) : lines.slice(1);
+  const rowCount = dataLines.length;
+
+  const contextPart = breadcrumbs ? ` Context: ${breadcrumbs}.` : "";
+  return `Table with columns [${columns.join(", ")}] containing ${rowCount} row${rowCount !== 1 ? "s" : ""}.${contextPart}`;
+}
+
 // 1. BIG LEVEL: Heading & Section Hierarchy Parser
 export function parseSections(markdown, docTitle = "Document") {
   const lines = markdown.split("\n");
@@ -186,8 +205,16 @@ export function createSmallChunks(mediumBlock, sectionId, docId) {
 
   // RULE FOR TABLES
   if (mediumBlock.block_type === "table") {
+    const summary = generateTableSummary(content, mediumBlock.breadcrumbs);
+    if (summary) {
+      makeChunk(summary, {
+        retrieval_policy: "table_summary",
+        policy_source_id: mediumBlock.id,
+      });
+    }
+
     if (tokenCount <= 350) {
-      makeChunk(content);
+      makeChunk(content, { retrieval_policy: "micro_chunk" });
       return smallChunks;
     }
 
@@ -208,7 +235,7 @@ export function createSmallChunks(mediumBlock, sectionId, docId) {
     for (let i = 0; i < dataLines.length; i += chunkSize) {
       const rowBatch = dataLines.slice(i, i + chunkSize);
       const tableChunkText = `${headerStr}\n${rowBatch.join("\n")}`;
-      makeChunk(tableChunkText);
+      makeChunk(tableChunkText, { retrieval_policy: "micro_chunk" });
     }
     return smallChunks;
   }
