@@ -12,6 +12,7 @@ const testSuites = [
   { category: "Unit", name: "unit_audit_fixes", file: "tests/unit/unit_audit_fixes.test.js" },
   { category: "Unit", name: "benchmark_report", file: "tests/unit/benchmark_report.test.js" },
   { category: "Unit", name: "chunker", file: "tests/unit/chunker.test.js" },
+  { category: "Unit", name: "policy_retrieval", file: "tests/unit/policy_retrieval.test.js" },
 
   // --- 2. INTEGRATION TESTS ---
   { category: "Integration", name: "expanded_features", file: "tests/integration/expanded_features.test.js" },

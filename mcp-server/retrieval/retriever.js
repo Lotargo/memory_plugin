@@ -287,7 +287,7 @@ export async function hybridQuery({
     const hitIds = fusedHits.map((h) => h.id);
     const placeholders = hitIds.map(() => "?").join(",");
     const rows = await db.prepare(`
-      SELECT id, medium_id, section_id FROM micro_chunks WHERE id IN (${placeholders});
+      SELECT id, medium_id, section_id, retrieval_policy, policy_source_id FROM micro_chunks WHERE id IN (${placeholders});
     `).all(...hitIds);
     const parentMap = new Map(rows.map((r) => [r.id, r]));
 
@@ -297,19 +297,34 @@ export async function hybridQuery({
       const parentKey = row ? (row.medium_id || row.section_id) : hit.id;
       if (!seenParents.has(parentKey)) {
         seenParents.add(parentKey);
-        parentDeduplicatedHits.push(hit);
+        parentDeduplicatedHits.push({ ...hit, retrieval_policy: row?.retrieval_policy || "micro_chunk", policy_source_id: row?.policy_source_id || null });
       }
     }
   }
 
-  const topHits = parentDeduplicatedHits.slice(0, limit);
+  // Policy-Based Deduplication: if multiple hits resolve to the same policy_source_id, keep only the highest-scored one
+  const policyDeduplicatedHits = [];
+  const seenPolicySources = new Set();
+  for (const hit of parentDeduplicatedHits) {
+    if (hit.policy_source_id && (hit.retrieval_policy === "table_summary" || hit.retrieval_policy === "code_signature")) {
+      if (!seenPolicySources.has(hit.policy_source_id)) {
+        seenPolicySources.add(hit.policy_source_id);
+        policyDeduplicatedHits.push(hit);
+      }
+    } else {
+      policyDeduplicatedHits.push(hit);
+    }
+  }
+
+  const topHits = policyDeduplicatedHits.slice(0, limit);
   const results = [];
 
   if (topHits.length > 0) {
     const topIds = topHits.map((h) => h.id);
     const placeholders = topIds.map(() => "?").join(",");
     const details = await db.prepare(`
-      SELECT m.id as micro_id, s.id as section_id, s.heading, s.breadcrumbs, s.content as section_content,
+      SELECT m.id as micro_id, m.retrieval_policy, m.policy_source_id,
+             s.id as section_id, s.heading, s.breadcrumbs, s.content as section_content,
              med.content as medium_content, d.title as doc_title, d.path as doc_path
       FROM micro_chunks m
       JOIN sections s ON m.section_id = s.id
@@ -329,11 +344,37 @@ export async function hybridQuery({
       }
     }
 
+    // Fetch full content for policy-based expansion (table_summary → full table, code_signature → full code)
+    const policySourceIds = details
+      .filter((d) => d.policy_source_id && (d.retrieval_policy === "table_summary" || d.retrieval_policy === "code_signature"))
+      .map((d) => d.policy_source_id);
+    const uniquePolicySourceIds = [...new Set(policySourceIds)];
+
+    let expandedContentMap = new Map();
+    if (uniquePolicySourceIds.length > 0) {
+      const policyPlaceholders = uniquePolicySourceIds.map(() => "?").join(",");
+      const expandedRows = await db.prepare(`
+        SELECT id, content, block_type FROM medium_chunks WHERE id IN (${policyPlaceholders});
+      `).all(...uniquePolicySourceIds);
+      expandedContentMap = new Map(expandedRows.map((r) => [r.id, r]));
+    }
+
     for (const hit of topHits) {
       const detail = detailMap.get(hit.id);
       if (!detail) continue;
 
       const symbols = symbolsBySection.get(detail.section_id) || [];
+
+      let snippet = hit.content;
+      let paragraphContext = detail.medium_content || hit.content;
+
+      if (detail.policy_source_id && (detail.retrieval_policy === "table_summary" || detail.retrieval_policy === "code_signature")) {
+        const expanded = expandedContentMap.get(detail.policy_source_id);
+        if (expanded) {
+          snippet = expanded.content;
+          paragraphContext = expanded.content;
+        }
+      }
 
       results.push({
         chunk_id: hit.id,
@@ -341,14 +382,15 @@ export async function hybridQuery({
         doc_path: detail.doc_path,
         heading: detail.heading,
         breadcrumbs: detail.breadcrumbs,
-        snippet: hit.content,
-        paragraph_context: detail.medium_content || hit.content,
+        snippet,
+        paragraph_context: paragraphContext,
         full_section_content: detail.section_content,
         score: parseFloat((hit.score || 0).toFixed(4)),
         rsf_score: hit.rsf_score ? parseFloat(hit.rsf_score.toFixed(4)) : null,
         rrf_score: hit.rrf_score ? parseFloat(hit.rrf_score.toFixed(4)) : null,
         cosine_sim: hit.cosine_sim ? parseFloat(hit.cosine_sim.toFixed(4)) : null,
         defined_symbols: symbols,
+        retrieval_policy: detail.retrieval_policy || "micro_chunk",
       });
     }
   }
