@@ -8,7 +8,8 @@
     "preinstall": "node mcp-server/preinstall.js || true",
     "test": "node tests/run_all.js",
     "smoke": "node tests/smoke/e2e_real_embeddings.test.js",
-    "benchmark": "node mcp-server/benchmarks/run_benchmarks.js"
+    "benchmark": "node mcp-server/benchmarks/run_benchmarks.js",
+    "benchmark:table-code": "node mcp-server/benchmarks/table_code_retrieval.js"
   },
   "bin": {
     "memory_plugin": "mcp-server/boot.js",
