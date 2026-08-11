@@ -25,6 +25,7 @@ export const DEFAULT_CONFIG = {
   username: "",           // Account username from the Turso OAuth profile
   ingestAllowedPaths: [], // Extra directories ingest_document(type:"file") may read from
   ingestAllowAnyPath: false, // Escape hatch: allow reading ANY path from disk (unsafe)
+  policyExpansion: true,    // Expand table_summary/code_signature policy chunks (boosts recall, slight MRR trade-off)
 };
 
 let cachedConfig = null;

@@ -110,9 +110,27 @@ export async function runPolicyRetrievalTests() {
     ok("policy deduplication");
   }
 
+  // ── 6. policyExpansion = false disables policy chunks ────────────────
+  {
+    const result = await hybridQuery({ query: "cosineSimilarity", limit: 5, customDb: db, generateEmbeddings: false, policyExpansion: false });
+    const sigHits = result.filter((r) => r.retrieval_policy === "code_signature");
+    assert.strictEqual(sigHits.length, 0, "no code_signature when policyExpansion=false");
+    const allMicro = result.every((r) => r.retrieval_policy === "micro_chunk");
+    assert.ok(allMicro, "all results are micro_chunk when policyExpansion=false");
+    ok("policyExpansion=false disables policy chunks");
+  }
+
+  // ── 7. policyExpansion = false: table_summary query returns micro ─────
+  {
+    const result = await hybridQuery({ query: "Table with columns", limit: 5, customDb: db, generateEmbeddings: false, policyExpansion: false });
+    const tableHits = result.filter((r) => r.retrieval_policy === "table_summary");
+    assert.strictEqual(tableHits.length, 0, "no table_summary when policyExpansion=false");
+    ok("policyExpansion=false: table query returns micro_chunks");
+  }
+
   closeDatabase();
   try { rmSync(temp, { recursive: true, force: true }); } catch {}
-  console.log(`✅ ALL POLICY RETRIEVAL TESTS PASSED (${passed}/5)`);
+  console.log(`✅ ALL POLICY RETRIEVAL TESTS PASSED (${passed}/7)`);
 }
 
 if (process.argv[1] && process.argv[1].endsWith("policy_retrieval.test.js")) {

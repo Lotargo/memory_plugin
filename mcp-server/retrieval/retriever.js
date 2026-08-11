@@ -233,6 +233,7 @@ export async function hybridQuery({
   rerankerEnabled = null,
   instruction = null,
   generateEmbeddings = true,
+  policyExpansion = null, // null = use config default
 }) {
   const db = customDb || await getDatabase();
   const activeConfig = getConfig();
@@ -248,6 +249,7 @@ export async function hybridQuery({
   const embModel = embeddingModel || activeConfig.embeddingModel || "Xenova/multilingual-e5-small";
   const useReranker = rerankerEnabled !== null ? rerankerEnabled : (activeConfig.rerankerEnabled ?? false);
   const rerankModelName = rerankerModel || activeConfig.rerankerModel || "Xenova/bge-reranker-base";
+  const usePolicyExpansion = policyExpansion !== null && policyExpansion !== undefined ? policyExpansion : (activeConfig.policyExpansion ?? true);
 
   let fusedHits = [];
 
@@ -281,7 +283,9 @@ export async function hybridQuery({
     fusedHits = await rerankHits(query, fusedHits, rerankModelName);
   }
 
-  // Parent-Child Rollup: Deduplicate hits sharing the same medium_id or section_id to prevent noise
+  // Parent-Child Rollup: Deduplicate hits sharing the same medium_id or section_id to prevent noise.
+  // Policy chunks (table_summary, code_signature) get a distinct parent key so they coexist
+  // with micro_chunks that share the same medium_id — otherwise BM25 would lose raw rows.
   const parentDeduplicatedHits = [];
   if (fusedHits.length > 0) {
     const hitIds = fusedHits.map((h) => h.id);
@@ -294,27 +298,35 @@ export async function hybridQuery({
     const seenParents = new Set();
     for (const hit of fusedHits) {
       const row = parentMap.get(hit.id);
-      const parentKey = row ? (row.medium_id || row.section_id) : hit.id;
+      const isPolicy = usePolicyExpansion && (row?.retrieval_policy === "table_summary" || row?.retrieval_policy === "code_signature");
+      const baseKey = row ? (row.medium_id || row.section_id) : hit.id;
+      const parentKey = isPolicy ? `policy:${baseKey}` : `micro:${baseKey}`;
       if (!seenParents.has(parentKey)) {
         seenParents.add(parentKey);
-        parentDeduplicatedHits.push({ ...hit, retrieval_policy: row?.retrieval_policy || "micro_chunk", policy_source_id: row?.policy_source_id || null });
+        parentDeduplicatedHits.push({ ...hit, retrieval_policy: isPolicy ? row?.retrieval_policy : "micro_chunk", policy_source_id: isPolicy ? (row?.policy_source_id || null) : null });
       }
     }
   }
 
   // Policy-Based Deduplication: if multiple hits resolve to the same policy_source_id, keep only the highest-scored one
-  const policyDeduplicatedHits = [];
-  const seenPolicySources = new Set();
-  for (const hit of parentDeduplicatedHits) {
-    if (hit.policy_source_id && (hit.retrieval_policy === "table_summary" || hit.retrieval_policy === "code_signature")) {
-      if (!seenPolicySources.has(hit.policy_source_id)) {
-        seenPolicySources.add(hit.policy_source_id);
-        policyDeduplicatedHits.push(hit);
+  // When policy expansion is disabled, skip — all chunks are already treated as micro_chunk
+  const policyDeduplicatedHits = usePolicyExpansion
+    ? (() => {
+      const result = [];
+      const seenPolicySources = new Set();
+      for (const hit of parentDeduplicatedHits) {
+        if (hit.policy_source_id && (hit.retrieval_policy === "table_summary" || hit.retrieval_policy === "code_signature")) {
+          if (!seenPolicySources.has(hit.policy_source_id)) {
+            seenPolicySources.add(hit.policy_source_id);
+            result.push(hit);
+          }
+        } else {
+          result.push(hit);
+        }
       }
-    } else {
-      policyDeduplicatedHits.push(hit);
-    }
-  }
+      return result;
+    })()
+    : parentDeduplicatedHits;
 
   const topHits = policyDeduplicatedHits.slice(0, limit);
   const results = [];
@@ -345,9 +357,12 @@ export async function hybridQuery({
     }
 
     // Fetch full content for policy-based expansion (table_summary → full table, code_signature → full code)
-    const policySourceIds = details
-      .filter((d) => d.policy_source_id && (d.retrieval_policy === "table_summary" || d.retrieval_policy === "code_signature"))
-      .map((d) => d.policy_source_id);
+    // When policy expansion is disabled, skip — snippets stay as micro_chunk content
+    const policySourceIds = usePolicyExpansion
+      ? details
+        .filter((d) => d.policy_source_id && (d.retrieval_policy === "table_summary" || d.retrieval_policy === "code_signature"))
+        .map((d) => d.policy_source_id)
+      : [];
     const uniquePolicySourceIds = [...new Set(policySourceIds)];
 
     let expandedContentMap = new Map();
@@ -368,7 +383,7 @@ export async function hybridQuery({
       let snippet = hit.content;
       let paragraphContext = detail.medium_content || hit.content;
 
-      if (detail.policy_source_id && (detail.retrieval_policy === "table_summary" || detail.retrieval_policy === "code_signature")) {
+      if (usePolicyExpansion && detail.policy_source_id && (detail.retrieval_policy === "table_summary" || detail.retrieval_policy === "code_signature")) {
         const expanded = expandedContentMap.get(detail.policy_source_id);
         if (expanded) {
           snippet = expanded.content;
@@ -390,7 +405,7 @@ export async function hybridQuery({
         rrf_score: hit.rrf_score ? parseFloat(hit.rrf_score.toFixed(4)) : null,
         cosine_sim: hit.cosine_sim ? parseFloat(hit.cosine_sim.toFixed(4)) : null,
         defined_symbols: symbols,
-        retrieval_policy: detail.retrieval_policy || "micro_chunk",
+        retrieval_policy: (usePolicyExpansion ? (detail.retrieval_policy || "micro_chunk") : "micro_chunk"),
       });
     }
   }
