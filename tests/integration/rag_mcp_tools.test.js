@@ -359,7 +359,7 @@ export async function runRagMcpToolsTests() {
     const tableDocRes = toolResult(
       await request("tools/call", {
         name: "ingest_document",
-        arguments: { content: tableDocContent, path: "benchmark_table.md" },
+        arguments: { content: tableDocContent, path: "benchmark_table.md", generateEmbeddings: false },
       })
     );
     assert.ok(tableDocRes.includes("docId") || tableDocRes.includes("doc_id"), "table document ingested");
@@ -405,7 +405,7 @@ export async function runRagMcpToolsTests() {
     const codeDocRes = toolResult(
       await request("tools/call", {
         name: "ingest_document",
-        arguments: { content: codeDocContent, path: "cosine_code.md" },
+        arguments: { content: codeDocContent, path: "cosine_code.md", generateEmbeddings: false },
       })
     );
     assert.ok(codeDocRes.includes("docId") || codeDocRes.includes("doc_id"), "code document ingested");
