@@ -169,6 +169,7 @@ export function createSmallChunks(mediumBlock, sectionId, docId) {
 
   function makeChunk(chunkText, extraMeta = {}) {
     if (!chunkText || chunkText.trim().length === 0) return;
+    const { retrieval_policy, policy_source_id, ...rest } = extraMeta;
     smallChunks.push({
       id: `${mediumBlock.id}_s${smallIdx++}`,
       medium_id: mediumBlock.id,
@@ -177,7 +178,9 @@ export function createSmallChunks(mediumBlock, sectionId, docId) {
       content: chunkText.trim(),
       breadcrumbs: mediumBlock.breadcrumbs,
       token_count: estimateTokens(chunkText),
-      ...extraMeta,
+      retrieval_policy: retrieval_policy || "micro_chunk",
+      policy_source_id: policy_source_id || null,
+      ...rest,
     });
   }
 

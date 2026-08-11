@@ -138,6 +138,21 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 5,
+    name: "005_retrieval_policy",
+    up: async (db) => {
+      try {
+        await db.exec(`ALTER TABLE micro_chunks ADD COLUMN retrieval_policy TEXT DEFAULT 'micro_chunk';`);
+      } catch (e) {}
+      try {
+        await db.exec(`ALTER TABLE micro_chunks ADD COLUMN policy_source_id TEXT;`);
+      } catch (e) {}
+      await db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_micro_chunks_retrieval_policy ON micro_chunks(retrieval_policy);
+      `);
+    },
+  },
 ];
 
 export async function runMigrations(db) {
