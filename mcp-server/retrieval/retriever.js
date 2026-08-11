@@ -1,5 +1,5 @@
 import { getDatabase } from "../db/database.js";
-import { embedText, cosineSimilarity, rerankHits } from "../ml/model_manager.js";
+import { embedText, embedBatch, cosineSimilarity, rerankHits } from "../ml/model_manager.js";
 import { getConfig } from "../config/config_manager.js";
 
 export function sanitizeFtsQuery(query) {
@@ -220,6 +220,72 @@ export function rsfFusion(bm25Hits, vectorHits, alpha = 0.5, scoreThreshold = 0.
   return merged.filter((item) => item.rsf_score >= scoreThreshold);
 }
 
+/**
+ * Execute multiple hybrid queries in a single batch.
+ * Optimizes ONNX inference by embedding all queries in one pass.
+ * Each query still gets independent BM25 + vector search + fusion.
+ *
+ * @param {string[]} queries - Array of query strings
+ * @param {object} options - Same as hybridQuery, applied to all queries
+ * @returns {Promise<Array<Array>>} - Array of result arrays (one per query)
+ */
+export async function batchHybridQuery(queries, options = {}) {
+  if (!Array.isArray(queries) || queries.length === 0) return [];
+
+  const {
+    limit = 5,
+    scoreThreshold = 0.01,
+    customDb = null,
+    includeGraphContext = true,
+    fusionAlgorithm = null,
+    alpha = null,
+    embeddingModel = null,
+    rerankerModel = null,
+    rerankerEnabled = null,
+    instruction = null,
+    generateEmbeddings = true,
+    policyExpansion = null,
+  } = options;
+
+  const db = customDb || await getDatabase();
+  const activeConfig = getConfig();
+
+  const algo = fusionAlgorithm || activeConfig.fusionAlgorithm || "rsf";
+  const alphaWeight = alpha !== null && alpha !== undefined ? alpha : (activeConfig.alpha ?? 0.5);
+  const embModel = embeddingModel || activeConfig.embeddingModel || "Xenova/multilingual-e5-small";
+  const usePolicyExpansion = policyExpansion !== null && policyExpansion !== undefined ? policyExpansion : (activeConfig.policyExpansion ?? true);
+  const useReranker = rerankerEnabled !== null ? rerankerEnabled : (activeConfig.rerankerEnabled ?? false);
+
+  // Batch embed all queries in one ONNX pass (major latency saving)
+  const queryVectors = generateEmbeddings
+    ? await embedBatch(queries.map((q) => q), true, embModel, null, instruction)
+    : queries.map(() => null);
+
+  // Execute all queries in parallel (BM25 + vector search are independent per query)
+  const results = await Promise.all(
+    queries.map((query, i) =>
+      hybridQuery({
+        query,
+        limit,
+        scoreThreshold,
+        customDb: db,
+        includeGraphContext,
+        fusionAlgorithm: algo,
+        alpha: alphaWeight,
+        embeddingModel: embModel,
+        rerankerModel,
+        rerankerEnabled: useReranker,
+        instruction,
+        generateEmbeddings,
+        policyExpansion: usePolicyExpansion,
+        _precomputedVector: queryVectors[i] || null,
+      })
+    )
+  );
+
+  return results;
+}
+
 export async function hybridQuery({
   query,
   limit = 5,
@@ -234,6 +300,7 @@ export async function hybridQuery({
   instruction = null,
   generateEmbeddings = true,
   policyExpansion = null, // null = use config default
+  _precomputedVector = null, // internal: skip embedText if batch already computed
 }) {
   const db = customDb || await getDatabase();
   const activeConfig = getConfig();
@@ -251,6 +318,12 @@ export async function hybridQuery({
   const rerankModelName = rerankerModel || activeConfig.rerankerModel || "Xenova/bge-reranker-base";
   const usePolicyExpansion = policyExpansion !== null && policyExpansion !== undefined ? policyExpansion : (activeConfig.policyExpansion ?? true);
 
+  // Resolve query vector: use precomputed (from batch) or embed on demand
+  const getQueryVector = async () => {
+    if (_precomputedVector) return _precomputedVector;
+    return await embedText(query, true, embModel, null, instruction);
+  };
+
   let fusedHits = [];
 
   if (algo === "lexical_only" || algo === "bm25_only") {
@@ -260,7 +333,7 @@ export async function hybridQuery({
       score: 1.0 / hit.bm25_rank,
     }));
   } else if (algo === "semantic_only" || algo === "vector_only") {
-    const queryVector = await embedText(query, true, embModel, null, instruction);
+    const queryVector = await getQueryVector();
     const vectorHits = await vectorSearch(db, queryVector, limit * 4, 0.10);
     fusedHits = vectorHits.map((hit) => ({
       ...hit,
@@ -268,13 +341,13 @@ export async function hybridQuery({
     }));
   } else if (algo === "rrf") {
     const bm25Hits = await bm25Search(db, query, 30);
-    const queryVector = await embedText(query, true, embModel, null, instruction);
+    const queryVector = await getQueryVector();
     const vectorHits = await vectorSearch(db, queryVector, 30, 0.10);
     fusedHits = rrfFusion(bm25Hits, vectorHits, 60, scoreThreshold);
   } else {
     // Default: RSF
     const bm25Hits = await bm25Search(db, query, 30);
-    const queryVector = await embedText(query, true, embModel, null, instruction);
+    const queryVector = await getQueryVector();
     const vectorHits = await vectorSearch(db, queryVector, 30, 0.10);
     fusedHits = rsfFusion(bm25Hits, vectorHits, alphaWeight, scoreThreshold);
   }

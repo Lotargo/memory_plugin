@@ -32,6 +32,7 @@ You have access to a persistent dual-layer memory engine supercharged with an **
 | Move or merge project memories to new target identity | `relink_project_memory` | `directory`, `remote` (target remote URL) |
 | User asks to index a documentation URL, file, or repository | `ingest_document` | `content` (text/file path/URL), `type` ("text", "file", "url"), `title`, `path` |
 | User asks a complex question about indexed docs or code | `query_knowledge_base` | `query`, `limit`, `instruction`, `generateEmbeddings` |
+| User needs multiple queries executed in batch (comparisons, multi-topic) | `batch_query_knowledge_base` | `queries` (array), `limit`, `instruction`, `generateEmbeddings` |
 | Read full raw content of an ambiguous/abstract document | `manage_knowledge_base` | `action: "read_document"`, `docId` |
 | View DB stats, list indexed docs, read/delete docs, export/import snapshots | `manage_knowledge_base` | `action` ("stats", "list", "read_document", "delete", "export_snapshot", "import_snapshot"), `docId`, `snapshotPath` |
 | Re-embed all documents after switching embedding model / dimension | `reindex_knowledge_base` | `model`, `dimension` (optional; defaults to active config) |
@@ -136,6 +137,14 @@ Use this tool when adding technical documentation, API specs, architectural docu
 Use this tool BEFORE answering deep architectural or technical questions when indexed documents exist.
 - Performs **Hybrid RRF/RSF Fusion** combining SQLite FTS5 BM25 keyword matching with dense ONNX vector semantic search.
 - Returns candidate sections with breadcrumb paths and defined code symbols (classes, functions, types).
+- **Policy Expansion** (default: ON): Table summaries and code signatures are automatically expanded to full content for better recall. Disable via config `policyExpansion: false` if pure micro_chunk precision is needed.
+
+### Batch Retrieval (`batch_query_knowledge_base`)
+Use when the user needs multiple related queries executed efficiently (comparisons, multi-topic analysis, cross-period reporting).
+- **Single API call** — all queries executed in parallel with one ONNX embedding pass.
+- Returns one result set per query, in the same order as input.
+- **Example use cases**: "Compare Q1 vs Q2 vs Q3 revenue", "Find data for category A and category B".
+- **Efficiency**: ~N× faster than N separate `query_knowledge_base` calls for N queries (shared ONNX inference).
 
 #### Query Formulation Rules (CRITICAL for retrieval quality)
 
@@ -200,7 +209,8 @@ When working in multi-server environments (e.g., OpenCode, Claude Code), you mig
 
 1. **Read Memories First (MANDATORY)**: At the very start of any session or conversation, your VERY FIRST STEP MUST BE to execute `recall` with `scope: "all"` (and without restrictive query filters) to load ALL saved global facts, user context, and project guidelines BEFORE performing any other task or code analysis. Do NOT filter or restrict the initial `recall` call with specific query keywords.
 2. **Be Proactive**: When the user mentions a durable preference, personal fact, or constraint, save it immediately using `remember`. Do not wait for explicit user commands.
-3. **Check Knowledge Base First**: If a query is related to specialized documentation, APIs, or project architectures, call `query_knowledge_base` using concept-dense search phrases.
+3. **Check Knowledge Base First**: If a query is related to specialized documentation, APIs, or project architectures, call `query_knowledge_base` using concept-dense search phrases. For multi-part queries (comparisons, cross-period analysis), prefer `batch_query_knowledge_base` to reduce API calls and ONNX inference overhead.
+4. **Optimize Search Queries**: Transform the user's natural language question into targeted search queries. "Compare revenue in Q1 vs Q3" → `["Выручка план факт Q1 2025", "Выручка план факт Q3 2025"]`. Avoid sending raw conversational questions to the RAG — formulated queries improve fact retrieval by 20-40%.
 4. **Inspect Ambiguous Docs Directly**: If querying produces low relevance scores on abstractly-named documents, call `manage_knowledge_base(action: "read_document")` to inspect the full text directly.
 5. **Keep Memory Clean**: If a preference changes, call `update_fact` to edit it in place, or `remember` with `supersedes` to keep a version trail. Use `keep: true` for facts that must survive an accidental `forget`, and give ephemeral facts a `ttl` so stale ones surface as `[EXPIRED]`.
 6. **Leverage MCP Servers**: Proactively list available tools using `list-mcp-tools` and query `mcp-reminder` if unsure of which platform tool can help you automate tasks.

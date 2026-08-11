@@ -1,12 +1,13 @@
 {
   "name": "@lotargo/memory_plugin",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "description": "100% local hybrid RAG memory for AI coding agents (OpenCode, Claude Code, Codex, Antigravity). MCP server + plugin: persistent user facts, document ingestion, vector + SQLite FTS5 retrieval across sessions.",
   "type": "module",
   "main": "opencode-plugin/index.js",
   "scripts": {
     "preinstall": "node mcp-server/preinstall.js || true",
     "test": "node tests/run_all.js",
+    "test:rag": "node tests/unit/rag_evaluation.test.js",
     "smoke": "node tests/smoke/e2e_real_embeddings.test.js",
     "benchmark": "node mcp-server/benchmarks/run_benchmarks.js",
     "benchmark:table-code": "node mcp-server/benchmarks/table_code_retrieval.js"
