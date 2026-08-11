@@ -6,6 +6,7 @@ import {
   createSmallChunks,
   buildTripleHierarchy,
   generateTableSummary,
+  extractCodeSignatures,
 } from "../../mcp-server/ingest/chunker.js";
 
 function ok(name) {
@@ -211,7 +212,7 @@ export async function runChunkerTests() {
     passed++;
   }
 
-  // ── createSmallChunks: large code block split by AST boundaries ────────
+  // ── createSmallChunks: large code block split by AST boundaries + signatures ─
   {
     const functions = Array.from({ length: 5 }, (_, i) =>
       `function fn${i}() {\n${"  // lots of code\n".repeat(30)}}`
@@ -227,8 +228,57 @@ export async function runChunkerTests() {
       token_count: estimateTokens(codeContent),
     };
     const chunks = createSmallChunks(medBlock, "s0", "d1");
-    assert.ok(chunks.length >= 5, `code split into ${chunks.length} chunks (expected ≥5 functions)`);
-    ok("createSmallChunks: large code block split by function boundaries");
+    const sigChunks = chunks.filter((c) => c.retrieval_policy === "code_signature");
+    const bodyChunks = chunks.filter((c) => c.retrieval_policy === "micro_chunk");
+    assert.strictEqual(sigChunks.length, 5, `5 code signatures extracted (got ${sigChunks.length})`);
+    assert.ok(bodyChunks.length >= 5, `code split into ${bodyChunks.length} body chunks`);
+    assert.ok(sigChunks[0].content.startsWith("function fn0"), "signature contains function name");
+    assert.strictEqual(sigChunks[0].policy_source_id, "s0_m0", "signature links to medium block");
+    ok("createSmallChunks: large code block split by function boundaries + signatures");
+    passed++;
+  }
+
+  // ── extractCodeSignatures: JS functions with JSDoc ──────────────────────
+  {
+    const code = "```javascript\n/**\n * Does the thing\n * @param {string} x\n */\nfunction doThing(x) {\n  return x + 1;\n}\n\nfunction other() {\n  return 42;\n}\n```";
+    const sigs = extractCodeSignatures(code);
+    assert.strictEqual(sigs.length, 2, "extracted 2 signatures");
+    assert.ok(sigs[0].signature.includes("Does the thing"), "first sig includes JSDoc");
+    assert.ok(sigs[0].signature.includes("function doThing(x)"), "first sig includes function signature");
+    assert.ok(sigs[1].signature.includes("function other()"), "second sig includes function signature");
+    ok("extractCodeSignatures: JS functions with JSDoc");
+    passed++;
+  }
+
+  // ── extractCodeSignatures: Python with docstrings ───────────────────────
+  {
+    const code = "```python\ndef greet(name):\n    \"\"\"Say hello to someone.\"\"\"\n    return f\"Hello {name}\"\n\ndef farewell(name):\n    '''Say goodbye.'''\n    return f\"Bye {name}\"\n```";
+    const sigs = extractCodeSignatures(code);
+    assert.strictEqual(sigs.length, 2, "extracted 2 Python signatures");
+    assert.ok(sigs[0].signature.includes("def greet(name):"), "first sig includes def");
+    assert.ok(sigs[0].signature.includes("Say hello"), "first sig includes docstring");
+    assert.ok(sigs[1].signature.includes("def farewell(name):"), "second sig includes def");
+    ok("extractCodeSignatures: Python with docstrings");
+    passed++;
+  }
+
+  // ── extractCodeSignatures: Rust with /// comments ───────────────────────
+  {
+    const code = "```rust\n/// Computes the sum\n/// of two numbers\npub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n\nfn private_helper() {\n    // internal\n}\n```";
+    const sigs = extractCodeSignatures(code);
+    assert.strictEqual(sigs.length, 2, "extracted 2 Rust signatures");
+    assert.ok(sigs[0].signature.includes("pub fn add"), "first sig includes pub fn");
+    assert.ok(sigs[0].signature.includes("Computes the sum"), "first sig includes doc comment");
+    ok("extractCodeSignatures: Rust with /// comments");
+    passed++;
+  }
+
+  // ── extractCodeSignatures: no functions ────────────────────────────────
+  {
+    const code = "```javascript\nconst x = 1;\nconst y = 2;\nconsole.log(x + y);\n```";
+    const sigs = extractCodeSignatures(code);
+    assert.strictEqual(sigs.length, 0, "no signatures for plain statements");
+    ok("extractCodeSignatures: no functions returns empty");
     passed++;
   }
 
