@@ -206,7 +206,7 @@ export function extractCodeSignatures(codeContent) {
   const lines = codeContent.split("\\n");
   const signatures = [];
 
-  const fenceMatch = lines[0] && lines[0].match(/^(\\s*)(~~~|~~~)/);
+  const fenceMatch = lines[0] && lines[0].match(/^(\\s*)(\`\`\`|~~~)/);
   const bodyStart = fenceMatch ? 1 : 0;
   const lastLine = lines[lines.length - 1];
   const tb = String.fromCharCode(96).repeat(3);
@@ -244,17 +244,17 @@ from typing import Optional
 
 def normalize_content(content: str, doc_type: str = "text") -> dict:
     """Normalize raw content into clean Markdown for ingestion.
-    
+
     Args:
         content: Raw document content
         doc_type: Content type (text, html, markdown)
-    
+
     Returns:
         dict with markdown, title, and metadata
     """
     if doc_type == "html":
         return _html_to_markdown(content)
-    
+
     title = _extract_title(content)
     return {
         "markdown": content.strip(),
@@ -265,11 +265,9 @@ def normalize_content(content: str, doc_type: str = "text") -> dict:
 
 def _html_to_markdown(html: str) -> dict:
     """Convert HTML content to clean Markdown."""
-    # Strip script/style tags
     cleaned = re.sub(r"<script.*?</script>", "", html, flags=re.DOTALL)
     cleaned = re.sub(r"<style.*?</style>", "", cleaned, flags=re.DOTALL)
-    
-    # Convert headers
+
     for i in range(6, 0, -1):
         cleaned = re.sub(
             rf"<h{i}[^>]*>(.*?)</h{i}>",
@@ -277,7 +275,7 @@ def _html_to_markdown(html: str) -> dict:
             cleaned,
             flags=re.DOTALL,
         )
-    
+
     return {"markdown": cleaned, "title": "", "metadata": {"source_type": "html"}}
 
 
@@ -291,143 +289,154 @@ def _extract_title(content: str) -> str:
 ];
 
 const TABLE_QUERIES = [
-  { query: "Table with columns containing Model and MRR", expectedDocIds: ["benchmark_results_table"], category: "Table Retrieval", description: "Column lookup" },
-  { query: "What is the MRR@5 score for RRF fusion?", expectedDocIds: ["benchmark_results_table"], category: "Table Retrieval", description: "Numeric lookup" },
-  { query: "Which model has the highest throughput?", expectedDocIds: ["benchmark_results_table"], category: "Table Retrieval", description: "Row lookup" },
-  { query: "Table with columns containing Model Name and Dimensions", expectedDocIds: ["model_config_table"], category: "Table Retrieval", description: "Column lookup" },
-  { query: "What is the size of bge-m3 model?", expectedDocIds: ["model_config_table"], category: "Table Retrieval", description: "Numeric lookup" },
-  { query: "Table with columns containing Method and Endpoint", expectedDocIds: ["api_endpoints_table"], category: "Table Retrieval", description: "Column lookup" },
-  { query: "What is the rate limit for query endpoint?", expectedDocIds: ["api_endpoints_table"], category: "Table Retrieval", description: "Row lookup" },
+  { query: "Table with columns containing Model and MRR", expectedDocIds: ["benchmark_results_table"], description: "Column lookup (summary)" },
+  { query: "What is the MRR@5 score for RRF fusion?", expectedDocIds: ["benchmark_results_table"], description: "Numeric lookup (row)" },
+  { query: "Which model has the highest throughput?", expectedDocIds: ["benchmark_results_table"], description: "Row lookup (comparison)" },
+  { query: "Table with columns containing Model Name and Dimensions", expectedDocIds: ["model_config_table"], description: "Column lookup (summary)" },
+  { query: "What is the size of bge-m3 model?", expectedDocIds: ["model_config_table"], description: "Numeric lookup (row)" },
+  { query: "Table with columns containing Method and Endpoint", expectedDocIds: ["api_endpoints_table"], description: "Column lookup (summary)" },
+  { query: "What is the rate limit for query endpoint?", expectedDocIds: ["api_endpoints_table"], description: "Row lookup (specific)" },
 ];
 
 const CODE_QUERIES = [
-  { query: "rrfFusion function signature", expectedDocIds: ["fusion_functions"], category: "Code Retrieval", description: "Function behavior" },
-  { query: "How does rsfFusion work?", expectedDocIds: ["fusion_functions"], category: "Code Retrieval", description: "API usage" },
-  { query: "generateTableSummary function", expectedDocIds: ["chunker_functions"], category: "Code Retrieval", description: "Function behavior" },
-  { query: "extractCodeSignatures implementation", expectedDocIds: ["chunker_functions"], category: "Code Retrieval", description: "API usage" },
-  { query: "normalize_content function python", expectedDocIds: ["python_pipeline"], category: "Code Retrieval", description: "Function behavior" },
-  { query: "_html_to_markdown implementation", expectedDocIds: ["python_pipeline"], category: "Code Retrieval", description: "API usage" },
+  { query: "rrfFusion function signature", expectedDocIds: ["fusion_functions"], description: "Function name (exact)" },
+  { query: "How does rsfFusion work?", expectedDocIds: ["fusion_functions"], description: "Function behavior (semantic)" },
+  { query: "generateTableSummary function", expectedDocIds: ["chunker_functions"], description: "Function name (exact)" },
+  { query: "extractCodeSignatures implementation", expectedDocIds: ["chunker_functions"], description: "Function behavior (semantic)" },
+  { query: "normalize_content function python", expectedDocIds: ["python_pipeline"], description: "Function name (exact)" },
+  { query: "_html_to_markdown implementation", expectedDocIds: ["python_pipeline"], description: "Function behavior (semantic)" },
 ];
 
+const MODES = [
+  { id: "bm25", label: "BM25 (lexical)", fusionAlgorithm: "bm25_only", generateEmbeddings: false },
+  { id: "vector", label: "Vector (semantic)", fusionAlgorithm: "vector_only", generateEmbeddings: true },
+  { id: "rrf", label: "RRF (hybrid)", fusionAlgorithm: "rrf", generateEmbeddings: true },
+  { id: "rsf", label: "RSF (hybrid)", fusionAlgorithm: "rsf", generateEmbeddings: true },
+];
+
+function evaluateHits(hits, expectedDocIds, policyType) {
+  const correctDoc = hits.some((h) => {
+    const path = h.doc_path || "";
+    return expectedDocIds.some((id) => path.includes(id));
+  });
+  const policyHit = hits.find((h) => h.retrieval_policy === policyType);
+  const expandedFully = policyHit
+    ? policyHit.snippet.length > 100 && (policyHit.snippet.includes("Model") || policyHit.snippet.includes("function") || policyHit.snippet.includes("def "))
+    : false;
+  return { found: correctDoc, hasPolicyHit: !!policyHit, expandedFully, topPolicy: hits[0]?.retrieval_policy || "none" };
+}
+
 export async function runTableCodeRetrievalBenchmark(options = {}) {
-  const { customDb = null, generateEmbeddings = false, verbose = true } = options;
+  const { customDb = null, verbose = true, modes = MODES } = options;
   const db = customDb || await getDatabase();
 
   if (verbose) {
-    console.log("\n╭──────────────────────────────────────────────────────╮");
-    console.log("│  TABLE & CODE RETRIEVAL BENCHMARK                    │");
-    console.log("╰──────────────────────────────────────────────────────╯\n");
+    console.log("\n╭────────────────────────────────────────────────────────────────────╮");
+    console.log("│         TABLE & CODE RETRIEVAL BENCHMARK (Multi-Mode)              │");
+    console.log("╰────────────────────────────────────────────────────────────────────╯\n");
   }
 
-  // Ingest all documents
   const allDocs = [...TABLE_DOCS, ...CODE_DOCS];
   for (const doc of allDocs) {
-    await ingestDocument({ content: doc.content, path: `${doc.id}.md`, customDb: db });
+    await ingestDocument({ content: doc.content, path: `${doc.id}.md`, customDb: db, generateEmbeddings: true });
   }
 
-  if (verbose) console.log(`Ingested ${allDocs.length} documents (${TABLE_DOCS.length} table, ${CODE_DOCS.length} code)\n`);
+  if (verbose) console.log(`Ingested ${allDocs.length} documents with real ONNX embeddings\n`);
 
-  // Run table queries
-  const tableResults = [];
-  for (const q of TABLE_QUERIES) {
-    const hits = await hybridQuery({ query: q.query, limit: 5, customDb: db, generateEmbeddings });
-    const policyHit = hits.find((h) => h.retrieval_policy === "table_summary");
-    const correctDoc = hits.some((h) => {
-      const path = h.doc_path || "";
-      return q.expectedDocIds.some((id) => path.includes(id));
-    });
-    const expandedFully = policyHit ? policyHit.snippet.includes("Model") && policyHit.snippet.length > 100 : false;
+  const allQueries = [
+    ...TABLE_QUERIES.map((q) => ({ ...q, type: "table", policyType: "table_summary" })),
+    ...CODE_QUERIES.map((q) => ({ ...q, type: "code", policyType: "code_signature" })),
+  ];
 
-    tableResults.push({
-      query: q.query,
-      category: q.category,
-      description: q.description,
-      found: correctDoc,
-      hasPolicyHit: !!policyHit,
-      expandedFully,
-      topPolicy: hits[0]?.retrieval_policy || "none",
-    });
+  const modeStats = {};
+  for (const mode of modes) {
+    modeStats[mode.id] = { table: { found: 0, policy: 0, expanded: 0, total: 0 }, code: { found: 0, policy: 0, expanded: 0, total: 0 } };
   }
 
-  // Run code queries
-  const codeResults = [];
-  for (const q of CODE_QUERIES) {
-    const hits = await hybridQuery({ query: q.query, limit: 5, customDb: db, generateEmbeddings });
-    const policyHit = hits.find((h) => h.retrieval_policy === "code_signature");
-    const correctDoc = hits.some((h) => {
-      const path = h.doc_path || "";
-      return q.expectedDocIds.some((id) => path.includes(id));
-    });
-    const expandedFully = policyHit ? policyHit.snippet.includes("function") && policyHit.snippet.length > 80 : false;
+  const rows = [];
 
-    codeResults.push({
-      query: q.query,
-      category: q.category,
-      description: q.description,
-      found: correctDoc,
-      hasPolicyHit: !!policyHit,
-      expandedFully,
-      topPolicy: hits[0]?.retrieval_policy || "none",
-    });
+  for (const q of allQueries) {
+    const row = { query: q.query, type: q.type, description: q.description };
+
+    for (const mode of modes) {
+      const hits = await hybridQuery({
+        query: q.query,
+        limit: 5,
+        customDb: db,
+        generateEmbeddings: mode.generateEmbeddings,
+        fusionAlgorithm: mode.fusionAlgorithm,
+      });
+
+      const evalResult = evaluateHits(hits, q.expectedDocIds, q.policyType);
+      row[mode.id] = evalResult;
+
+      const stats = modeStats[mode.id][q.type];
+      stats.total++;
+      if (evalResult.found) stats.found++;
+      if (evalResult.hasPolicyHit) stats.policy++;
+      if (evalResult.expandedFully) stats.expanded++;
+    }
+
+    rows.push(row);
   }
-
-  // Compute metrics
-  const tableFound = tableResults.filter((r) => r.found).length;
-  const tablePolicyHits = tableResults.filter((r) => r.hasPolicyHit).length;
-  const tableExpanded = tableResults.filter((r) => r.expandedFully).length;
-
-  const codeFound = codeResults.filter((r) => r.found).length;
-  const codePolicyHits = codeResults.filter((r) => r.hasPolicyHit).length;
-  const codeExpanded = codeResults.filter((r) => r.expandedFully).length;
 
   if (verbose) {
-    console.log("── Table Retrieval Results ──────────────────────────");
-    for (const r of tableResults) {
-      const status = r.found ? "✓" : "✗";
-      const policy = r.hasPolicyHit ? ` [${r.topPolicy}]` : "";
-      console.log(`  ${status} ${r.description.padEnd(18)} | ${r.query.substring(0, 50)}${policy}`);
+    // Per-mode accuracy table
+    console.log("── Accuracy by Mode ────────────────────────────────────────────────");
+    console.log("".padEnd(24) + modes.map((m) => m.label.padEnd(18)).join(""));
+    console.log("─".repeat(24 + modes.length * 18));
+
+    for (const type of ["table", "code"]) {
+      const label = type === "table" ? "Table Retrieval" : "Code Retrieval";
+      const cells = modes.map((mode) => {
+        const s = modeStats[mode.id][type];
+        const acc = s.total > 0 ? ((s.found / s.total) * 100).toFixed(0) : "0";
+        return `${s.found}/${s.total} (${acc}%)`.padEnd(18);
+      });
+      console.log(label.padEnd(24) + cells.join(""));
     }
-    console.log(`  Found: ${tableFound}/${tableResults.length} | Policy hits: ${tablePolicyHits} | Expanded: ${tableExpanded}\n`);
 
-    console.log("── Code Retrieval Results ───────────────────────────");
-    for (const r of codeResults) {
-      const status = r.found ? "✓" : "✗";
-      const policy = r.hasPolicyHit ? ` [${r.topPolicy}]` : "";
-      console.log(`  ${status} ${r.description.padEnd(18)} | ${r.query.substring(0, 50)}${policy}`);
+    console.log("\n── Policy Hit & Expansion Rate by Mode ────────────────────────────");
+    console.log("".padEnd(24) + modes.map((m) => m.label.padEnd(18)).join(""));
+    console.log("─".repeat(24 + modes.length * 18));
+
+    for (const type of ["table", "code"]) {
+      const label = type === "table" ? "Table Policy Hits" : "Code Policy Hits";
+      const cells = modes.map((mode) => {
+        const s = modeStats[mode.id][type];
+        const policyRate = s.total > 0 ? ((s.policy / s.total) * 100).toFixed(0) : "0";
+        const expandRate = s.policy > 0 ? ((s.expanded / s.policy) * 100).toFixed(0) : "0";
+        return `${policyRate}% hit / ${expandRate}% exp`.padEnd(18);
+      });
+      console.log(label.padEnd(24) + cells.join(""));
     }
-    console.log(`  Found: ${codeFound}/${codeResults.length} | Policy hits: ${codePolicyHits} | Expanded: ${codeExpanded}\n`);
-  }
 
-  const summary = {
-    table: {
-      total: tableResults.length,
-      found: tableFound,
-      policyHits: tablePolicyHits,
-      expanded: tableExpanded,
-      accuracy: Number((tableFound / tableResults.length).toFixed(2)),
-      policyHitRate: Number((tablePolicyHits / tableResults.length).toFixed(2)),
-      expansionRate: tablePolicyHits > 0 ? Number((tableExpanded / tablePolicyHits).toFixed(2)) : 0,
-    },
-    code: {
-      total: codeResults.length,
-      found: codeFound,
-      policyHits: codePolicyHits,
-      expanded: codeExpanded,
-      accuracy: Number((codeFound / codeResults.length).toFixed(2)),
-      policyHitRate: Number((codePolicyHits / codeResults.length).toFixed(2)),
-      expansionRate: codePolicyHits > 0 ? Number((codeExpanded / codePolicyHits).toFixed(2)) : 0,
-    },
-  };
-
-  if (verbose) {
-    console.log("── Summary ──────────────────────────────────────────");
-    console.log(`  Table Retrieval Accuracy: ${summary.table.accuracy * 100}%`);
-    console.log(`  Table Policy Hit Rate:    ${summary.table.policyHitRate * 100}%`);
-    console.log(`  Table Expansion Rate:     ${summary.table.expansionRate * 100}%`);
-    console.log(`  Code Retrieval Accuracy:  ${summary.code.accuracy * 100}%`);
-    console.log(`  Code Policy Hit Rate:     ${summary.code.policyHitRate * 100}%`);
-    console.log(`  Code Expansion Rate:      ${summary.code.expansionRate * 100}%`);
+    // Per-query breakdown
+    console.log("\n── Per-Query Breakdown (BM25 mode) ─────────────────────────────────");
+    for (const r of rows) {
+      const bm25 = r.bm25;
+      const status = bm25.found ? "✓" : "✗";
+      const policy = bm25.hasPolicyHit ? ` [${bm25.topPolicy}]` : "";
+      console.log(`  ${status} ${r.description.padEnd(28)} | ${r.query.substring(0, 45)}${policy}`);
+    }
     console.log("");
+  }
+
+  const summary = {};
+  for (const mode of modes) {
+    summary[mode.id] = {};
+    for (const type of ["table", "code"]) {
+      const s = modeStats[mode.id][type];
+      summary[mode.id][type] = {
+        total: s.total,
+        found: s.found,
+        accuracy: s.total > 0 ? Number((s.found / s.total).toFixed(2)) : 0,
+        policyHits: s.policy,
+        policyHitRate: s.total > 0 ? Number((s.policy / s.total).toFixed(2)) : 0,
+        expanded: s.expanded,
+        expansionRate: s.policy > 0 ? Number((s.expanded / s.policy).toFixed(2)) : 0,
+      };
+    }
   }
 
   return summary;
