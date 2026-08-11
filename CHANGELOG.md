@@ -5,6 +5,20 @@ All notable changes to `@lotargo/memory_plugin` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.2] - 2026-08-12
+
+### Added
+
+- **Batch retrieval API** (`batch_query_knowledge_base`): execute multiple search queries in a single MCP call. All query embeddings computed in one ONNX pass, queries run in parallel via `Promise.all`. Ideal for cross-document comparisons and multi-part analysis — significantly reduces API overhead vs N separate `query_knowledge_base` calls.
+- **Policy expansion toggle** (`config.policyExpansion`, default: `true`): table summaries and code signatures are automatically expanded to full content for better recall (~+5-10% recall, slight MRR trade-off). Disable per-call or via config for pure micro_chunk precision.
+- **RAG evaluation test** (`tests/unit/rag_evaluation.test.js`): 10 analytical queries with expected-fact verification (100% pass rate on financial reports). Includes raw-question vs optimized-query comparison demonstrating +33% fact retrieval improvement.
+
+### Changed
+
+- `hybridQuery()` accepts `_precomputedVector` internal parameter for batch embedding reuse.
+- `PROMPT_BLOCK` (injected into AGENTS.md/CLAUDE.md) updated with query optimization and batch usage directives.
+- SKILL.md updated with batch query tool and query formulation guidance.
+
 ## [1.6.1] - 2026-08-10
 
 ### Fixed

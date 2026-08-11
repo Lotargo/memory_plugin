@@ -129,8 +129,8 @@ export async function ingestDocument({
     }
 
     const insertMicroStmt = db.prepare(`
-      INSERT INTO micro_chunks (id, section_id, doc_id, content, vector, token_count, medium_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?);
+      INSERT INTO micro_chunks (id, section_id, doc_id, content, vector, token_count, medium_id, retrieval_policy, policy_source_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
     `);
     const insertFtsStmt = db.prepare(`
       INSERT INTO micro_chunks_fts (id, content, breadcrumbs)
@@ -138,7 +138,7 @@ export async function ingestDocument({
     `);
 
     for (const micro of hierarchy.microChunks) {
-      await insertMicroStmt.run(micro.id, micro.section_id, micro.doc_id, micro.content, micro.vector, micro.token_count, micro.medium_id || null);
+      await insertMicroStmt.run(micro.id, micro.section_id, micro.doc_id, micro.content, micro.vector, micro.token_count, micro.medium_id || null, micro.retrieval_policy || "micro_chunk", micro.policy_source_id || null);
       await insertFtsStmt.run(micro.id, micro.content, micro.breadcrumbs);
     }
 

@@ -5,6 +5,159 @@ export function estimateTokens(text) {
   return Math.ceil(text.length / 4);
 }
 
+const CODE_SIGNATURE_REGEX = /^\s*(?:export\s+|async\s+)?(?:function|class|def|pub\s+fn|fn|struct|interface|enum)\s+/;
+
+function _classifyLine(line) {
+  const t = line.trimStart();
+  if (t.startsWith("/**")) return "jsdoc_start";
+  if (t.startsWith("*/")) return "jsdoc_end";
+  if (t.startsWith("*")) return "jsdoc_mid";
+  if (t.startsWith("//")) return "line_comment";
+  if (t.startsWith("#")) return "hash_comment";
+  if (t.startsWith("'''") || t.startsWith('"""')) return "py_docstring";
+  return "code";
+}
+
+export function extractCodeSignatures(codeContent) {
+  const lines = codeContent.split("\n");
+  const signatures = [];
+
+  const fenceMatch = lines[0] && lines[0].match(/^(\s*)(```|~~~)/);
+  const bodyStart = fenceMatch ? 1 : 0
+  const bodyEnd = fenceMatch && (lines[lines.length - 1].startsWith("```") || lines[lines.length - 1].startsWith("~~~")) ? lines.length - 1 : lines.length;
+  const bodyLines = lines.slice(bodyStart, bodyEnd);
+
+  let i = 0;
+  while (i < bodyLines.length) {
+    const line = bodyLines[i];
+    const type = _classifyLine(line);
+
+    if (type === "jsdoc_start") {
+      const jsdocBlock = [line];
+      let j = i + 1;
+      while (j < bodyLines.length) {
+        jsdocBlock.push(bodyLines[j]);
+        if (_classifyLine(bodyLines[j]) === "jsdoc_end") {
+          j++;
+          break;
+        }
+        j++;
+      }
+
+      if (j < bodyLines.length && CODE_SIGNATURE_REGEX.test(bodyLines[j])) {
+        const sigLines = [bodyLines[j]];
+        const pyDocResult = _tryPyDocstring(bodyLines, j + 1);
+        if (pyDocResult.docLines.length > 0) {
+          sigLines.push(...pyDocResult.docLines);
+        }
+        const endIdx = pyDocResult.docLines.length > 0 ? pyDocResult.endIdx : j;
+
+        signatures.push({
+          signature: [...jsdocBlock, ...sigLines].join("\n").trim(),
+          line_number: j + bodyStart + 1,
+        });
+        i = endIdx + 1;
+        continue;
+      }
+
+      i = j;
+      continue;
+    }
+
+    if (type === "line_comment" || type === "hash_comment") {
+      const commentBlock = [line];
+      let j = i + 1;
+      while (j < bodyLines.length && _classifyLine(bodyLines[j]) === type) {
+        commentBlock.push(bodyLines[j]);
+        j++;
+      }
+
+      if (j < bodyLines.length && CODE_SIGNATURE_REGEX.test(bodyLines[j])) {
+        const sigLines = [bodyLines[j]];
+        const pyDocResult = _tryPyDocstring(bodyLines, j + 1);
+        if (pyDocResult.docLines.length > 0) {
+          sigLines.push(...pyDocResult.docLines);
+        }
+        const endIdx = pyDocResult.docLines.length > 0 ? pyDocResult.endIdx : j;
+
+        signatures.push({
+          signature: [...commentBlock, ...sigLines].join("\n").trim(),
+          line_number: j + bodyStart + 1,
+        });
+        i = endIdx + 1;
+        continue;
+      }
+
+      i = j;
+      continue;
+    }
+
+    if (CODE_SIGNATURE_REGEX.test(line)) {
+      const sigLines = [line];
+      const pyDocResult = _tryPyDocstring(bodyLines, i + 1);
+      if (pyDocResult.docLines.length > 0) {
+        sigLines.push(...pyDocResult.docLines);
+      }
+      const endIdx = pyDocResult.docLines.length > 0 ? pyDocResult.endIdx : i;
+
+      signatures.push({
+        signature: sigLines.join("\n").trim(),
+        line_number: i + bodyStart + 1,
+      });
+      i = endIdx + 1;
+      continue;
+    }
+
+    i++;
+  }
+
+  return signatures;
+}
+
+function _tryPyDocstring(bodyLines, startIdx) {
+  let k = startIdx;
+  while (k < bodyLines.length && bodyLines[k].trim() === "") k++;
+  if (k >= bodyLines.length) return { docLines: [], endIdx: startIdx - 1 };
+
+  const line = bodyLines[k];
+  const tripleDouble = /^\s*"""/.test(line);
+  const tripleSingle = /^\s*'''/.test(line);
+  const marker = tripleDouble ? '"""' : tripleSingle ? "'''" : null;
+  if (!marker) return { docLines: [], endIdx: startIdx - 1 };
+
+  const docLines = [line];
+  if (line.includes(marker.repeat(2)) && line.indexOf(marker) !== line.lastIndexOf(marker)) {
+    return { docLines, endIdx: k };
+  }
+
+  for (let m = k + 1; m < bodyLines.length; m++) {
+    docLines.push(bodyLines[m]);
+    if (bodyLines[m].includes(marker)) {
+      return { docLines, endIdx: m };
+    }
+  }
+  return { docLines, endIdx: k };
+}
+
+export function generateTableSummary(tableContent, breadcrumbs = "") {
+  const lines = tableContent.split("\n").filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return null;
+
+  const headerLine = lines[0];
+  const columns = headerLine
+    .split("|")
+    .map((c) => c.trim())
+    .filter((c) => c.length > 0);
+
+  const separatorLine = lines[1] || "";
+  const hasSeparator = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(separatorLine);
+  const dataLines = hasSeparator ? lines.slice(2) : lines.slice(1);
+  const rowCount = dataLines.length;
+
+  const contextPart = breadcrumbs ? ` Context: ${breadcrumbs}.` : "";
+  return `Table with columns [${columns.join(", ")}] containing ${rowCount} row${rowCount !== 1 ? "s" : ""}.${contextPart}`;
+}
+
 // 1. BIG LEVEL: Heading & Section Hierarchy Parser
 export function parseSections(markdown, docTitle = "Document") {
   const lines = markdown.split("\n");
@@ -72,7 +225,7 @@ export function extractMediumBlocks(section, sectionId, docId) {
   let blockIndex = 0;
 
   let currentLines = [];
-  let currentBlockType = "paragraph"; // 'paragraph', 'code', 'table', 'list', 'blockquote'
+  let currentBlockType = "paragraph";
 
   function pushCurrentBlock() {
     const blockContent = currentLines.join("\n").trim();
@@ -97,7 +250,6 @@ export function extractMediumBlocks(section, sectionId, docId) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    // Check code fence
     const fenceMatch = line.match(/^(\s*)(```|~~~)/);
     if (fenceMatch) {
       if (!inFencedCode) {
@@ -121,7 +273,6 @@ export function extractMediumBlocks(section, sectionId, docId) {
       continue;
     }
 
-    // Check table line
     const isTableLine = /^\s*\|.*\|\s*$/.test(line);
     if (isTableLine) {
       if (currentBlockType !== "table" && currentLines.length > 0) {
@@ -134,7 +285,6 @@ export function extractMediumBlocks(section, sectionId, docId) {
       pushCurrentBlock();
     }
 
-    // Check list item line
     const isListLine = /^\s*([*+-]|\d+\.)\s+/.test(line);
     if (isListLine) {
       if (currentBlockType !== "list" && currentBlockType !== "paragraph" && currentLines.length > 0) {
@@ -145,7 +295,6 @@ export function extractMediumBlocks(section, sectionId, docId) {
       continue;
     }
 
-    // Check empty line
     if (line.trim().length === 0) {
       if (currentLines.length > 0) {
         pushCurrentBlock();
@@ -169,6 +318,7 @@ export function createSmallChunks(mediumBlock, sectionId, docId) {
 
   function makeChunk(chunkText, extraMeta = {}) {
     if (!chunkText || chunkText.trim().length === 0) return;
+    const { retrieval_policy, policy_source_id, ...rest } = extraMeta;
     smallChunks.push({
       id: `${mediumBlock.id}_s${smallIdx++}`,
       medium_id: mediumBlock.id,
@@ -177,14 +327,24 @@ export function createSmallChunks(mediumBlock, sectionId, docId) {
       content: chunkText.trim(),
       breadcrumbs: mediumBlock.breadcrumbs,
       token_count: estimateTokens(chunkText),
-      ...extraMeta,
+      retrieval_policy: retrieval_policy || "micro_chunk",
+      policy_source_id: policy_source_id || null,
+      ...rest,
     });
   }
 
   // RULE FOR TABLES
   if (mediumBlock.block_type === "table") {
+    const summary = generateTableSummary(content, mediumBlock.breadcrumbs);
+    if (summary) {
+      makeChunk(summary, {
+        retrieval_policy: "table_summary",
+        policy_source_id: mediumBlock.id,
+      });
+    }
+
     if (tokenCount <= 350) {
-      makeChunk(content);
+      makeChunk(content, { retrieval_policy: "micro_chunk" });
       return smallChunks;
     }
 
@@ -205,15 +365,23 @@ export function createSmallChunks(mediumBlock, sectionId, docId) {
     for (let i = 0; i < dataLines.length; i += chunkSize) {
       const rowBatch = dataLines.slice(i, i + chunkSize);
       const tableChunkText = `${headerStr}\n${rowBatch.join("\n")}`;
-      makeChunk(tableChunkText);
+      makeChunk(tableChunkText, { retrieval_policy: "micro_chunk" });
     }
     return smallChunks;
   }
 
   // RULE FOR CODE BLOCKS
   if (mediumBlock.block_type === "code") {
+    const signatures = extractCodeSignatures(content);
+    for (const sig of signatures) {
+      makeChunk(sig.signature, {
+        retrieval_policy: "code_signature",
+        policy_source_id: mediumBlock.id,
+      });
+    }
+
     if (tokenCount <= 350) {
-      makeChunk(content);
+      makeChunk(content, { retrieval_policy: "micro_chunk" });
       return smallChunks;
     }
 
@@ -243,7 +411,7 @@ export function createSmallChunks(mediumBlock, sectionId, docId) {
 
     for (const block of astBlocks) {
       const fullChunk = fenceHeader ? `${fenceHeader}\n${block}\n${fenceFooter}` : block;
-      makeChunk(fullChunk);
+      makeChunk(fullChunk, { retrieval_policy: "micro_chunk" });
     }
     return smallChunks;
   }
@@ -265,8 +433,7 @@ export function createSmallChunks(mediumBlock, sectionId, docId) {
 
     if (currentTokens + sTokens > TARGET_WINDOW_TOKENS && currentWindow.length > 0) {
       makeChunk(currentWindow.join(" "));
-      
-      // Safe Overlap: Keep the last sentence of the previous window if available
+
       const lastSentence = currentWindow[currentWindow.length - 1];
       currentWindow = [lastSentence, sentence];
       currentTokens = estimateTokens(lastSentence) + sTokens;

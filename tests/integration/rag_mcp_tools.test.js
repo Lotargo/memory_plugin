@@ -342,18 +342,114 @@ export async function runRagMcpToolsTests() {
     assert.ok(docLinks.length >= 1, "document has at least 1 link");
     ok("link_knowledge: get_doc_links returns links for document");
 
-    // ── 13. manage_knowledge_base: delete ─────────────────────────────────
+    // ── 13. Policy-driven retrieval: table_summary expansion ─────────────
+    const tableDocContent = [
+      "# Benchmark Results",
+      "",
+      "| Model | MRR@5 | Recall@5 | Latency |",
+      "| --- | --- | --- | --- |",
+      "| BM25 | 0.65 | 0.72 | 12ms |",
+      "| Vector | 0.78 | 0.81 | 45ms |",
+      "| RRF | 0.82 | 0.88 | 52ms |",
+      "| RSF | 0.80 | 0.85 | 48ms |",
+      "",
+      "The table above shows retrieval quality metrics.",
+    ].join("\n");
+
+    const tableDocRes = toolResult(
+      await request("tools/call", {
+        name: "ingest_document",
+        arguments: { content: tableDocContent, path: "benchmark_table.md", generateEmbeddings: false },
+      })
+    );
+    assert.ok(tableDocRes.includes("docId") || tableDocRes.includes("doc_id"), "table document ingested");
+
+    const tableQueryRes = toolResult(
+      await request("tools/call", {
+        name: "query_knowledge_base",
+        arguments: {
+          query: "Table with columns containing Model and MRR",
+          limit: 3,
+          generateEmbeddings: false,
+        },
+      })
+    );
+    assert.ok(tableQueryRes.includes("RRF"), "table query found RRF content");
+    assert.ok(tableQueryRes.includes("0.82"), "table query includes RRF score");
+    assert.ok(tableQueryRes.includes("Model"), "table query includes column header");
+    ok("policy_driven: table_summary expands to full table");
+
+    // ── 14. Policy-driven retrieval: code_signature expansion ────────────
+    const codeDocContent = [
+      "# Utility Functions",
+      "",
+      "```javascript",
+      "/**",
+      " * Calculates the cosine similarity between two vectors.",
+      " * @param {number[]} a - First vector",
+      " * @param {number[]} b - Second vector",
+      " * @returns {number} Cosine similarity score",
+      " */",
+      "function cosineSimilarity(a, b) {",
+      "  let dot = 0, normA = 0, normB = 0;",
+      "  for (let i = 0; i < a.length; i++) {",
+      "    dot += a[i] * b[i];",
+      "    normA += a[i] * a[i];",
+      "    normB += b[i] * b[i];",
+      "  }",
+      "  return dot / (Math.sqrt(normA) * Math.sqrt(normB));",
+      "}",
+      "```",
+    ].join("\n");
+
+    const codeDocRes = toolResult(
+      await request("tools/call", {
+        name: "ingest_document",
+        arguments: { content: codeDocContent, path: "cosine_code.md", generateEmbeddings: false },
+      })
+    );
+    assert.ok(codeDocRes.includes("docId") || codeDocRes.includes("doc_id"), "code document ingested");
+
+    const codeQueryRes = toolResult(
+      await request("tools/call", {
+        name: "query_knowledge_base",
+        arguments: {
+          query: "cosineSimilarity function signature",
+          limit: 3,
+          generateEmbeddings: false,
+        },
+      })
+    );
+    assert.ok(codeQueryRes.includes("cosineSimilarity"), "code query found function name");
+    assert.ok(codeQueryRes.includes("Calculates the cosine similarity"), "code query includes JSDoc");
+    ok("policy_driven: code_signature expands to full function");
+
+    // ── 15. manage_knowledge_base: delete all test documents ──────────────
     const deleteRes = toolResult(
       await request("tools/call", {
         name: "manage_knowledge_base",
         arguments: { action: "delete", docId },
       })
     );
-    const deleteData = JSON.parse(deleteRes);
-    assert.ok(deleteData.deleted || deleteData.status === "deleted", `delete result: ${deleteRes}`);
+    assert.ok(deleteRes.includes("deleted") || deleteRes.includes("Deleted"), "first doc deleted");
+
+    const remainingListRes = toolResult(
+      await request("tools/call", {
+        name: "manage_knowledge_base",
+        arguments: { action: "list" },
+      })
+    );
+    const remainingListData = JSON.parse(remainingListRes);
+    const remainingDocs = Array.isArray(remainingListData) ? remainingListData : (remainingListData.documents || []);
+    for (const doc of remainingDocs) {
+      await request("tools/call", {
+        name: "manage_knowledge_base",
+        arguments: { action: "delete", docId: doc.id },
+      });
+    }
     ok("manage_knowledge_base: delete removes document");
 
-    // ── 14. Verify deletion ──────────────────────────────────────────────
+    // ── 16. Verify deletion ──────────────────────────────────────────────
     const postDeleteStats = toolResult(
       await request("tools/call", {
         name: "manage_knowledge_base",

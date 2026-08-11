@@ -1,5 +1,5 @@
 import { getDatabase } from "../db/database.js";
-import { embedText, cosineSimilarity, rerankHits } from "../ml/model_manager.js";
+import { embedText, embedBatch, cosineSimilarity, rerankHits } from "../ml/model_manager.js";
 import { getConfig } from "../config/config_manager.js";
 
 export function sanitizeFtsQuery(query) {
@@ -220,6 +220,72 @@ export function rsfFusion(bm25Hits, vectorHits, alpha = 0.5, scoreThreshold = 0.
   return merged.filter((item) => item.rsf_score >= scoreThreshold);
 }
 
+/**
+ * Execute multiple hybrid queries in a single batch.
+ * Optimizes ONNX inference by embedding all queries in one pass.
+ * Each query still gets independent BM25 + vector search + fusion.
+ *
+ * @param {string[]} queries - Array of query strings
+ * @param {object} options - Same as hybridQuery, applied to all queries
+ * @returns {Promise<Array<Array>>} - Array of result arrays (one per query)
+ */
+export async function batchHybridQuery(queries, options = {}) {
+  if (!Array.isArray(queries) || queries.length === 0) return [];
+
+  const {
+    limit = 5,
+    scoreThreshold = 0.01,
+    customDb = null,
+    includeGraphContext = true,
+    fusionAlgorithm = null,
+    alpha = null,
+    embeddingModel = null,
+    rerankerModel = null,
+    rerankerEnabled = null,
+    instruction = null,
+    generateEmbeddings = true,
+    policyExpansion = null,
+  } = options;
+
+  const db = customDb || await getDatabase();
+  const activeConfig = getConfig();
+
+  const algo = fusionAlgorithm || activeConfig.fusionAlgorithm || "rsf";
+  const alphaWeight = alpha !== null && alpha !== undefined ? alpha : (activeConfig.alpha ?? 0.5);
+  const embModel = embeddingModel || activeConfig.embeddingModel || "Xenova/multilingual-e5-small";
+  const usePolicyExpansion = policyExpansion !== null && policyExpansion !== undefined ? policyExpansion : (activeConfig.policyExpansion ?? true);
+  const useReranker = rerankerEnabled !== null ? rerankerEnabled : (activeConfig.rerankerEnabled ?? false);
+
+  // Batch embed all queries in one ONNX pass (major latency saving)
+  const queryVectors = generateEmbeddings
+    ? await embedBatch(queries.map((q) => q), true, embModel, null, instruction)
+    : queries.map(() => null);
+
+  // Execute all queries in parallel (BM25 + vector search are independent per query)
+  const results = await Promise.all(
+    queries.map((query, i) =>
+      hybridQuery({
+        query,
+        limit,
+        scoreThreshold,
+        customDb: db,
+        includeGraphContext,
+        fusionAlgorithm: algo,
+        alpha: alphaWeight,
+        embeddingModel: embModel,
+        rerankerModel,
+        rerankerEnabled: useReranker,
+        instruction,
+        generateEmbeddings,
+        policyExpansion: usePolicyExpansion,
+        _precomputedVector: queryVectors[i] || null,
+      })
+    )
+  );
+
+  return results;
+}
+
 export async function hybridQuery({
   query,
   limit = 5,
@@ -233,6 +299,8 @@ export async function hybridQuery({
   rerankerEnabled = null,
   instruction = null,
   generateEmbeddings = true,
+  policyExpansion = null, // null = use config default
+  _precomputedVector = null, // internal: skip embedText if batch already computed
 }) {
   const db = customDb || await getDatabase();
   const activeConfig = getConfig();
@@ -248,6 +316,13 @@ export async function hybridQuery({
   const embModel = embeddingModel || activeConfig.embeddingModel || "Xenova/multilingual-e5-small";
   const useReranker = rerankerEnabled !== null ? rerankerEnabled : (activeConfig.rerankerEnabled ?? false);
   const rerankModelName = rerankerModel || activeConfig.rerankerModel || "Xenova/bge-reranker-base";
+  const usePolicyExpansion = policyExpansion !== null && policyExpansion !== undefined ? policyExpansion : (activeConfig.policyExpansion ?? true);
+
+  // Resolve query vector: use precomputed (from batch) or embed on demand
+  const getQueryVector = async () => {
+    if (_precomputedVector) return _precomputedVector;
+    return await embedText(query, true, embModel, null, instruction);
+  };
 
   let fusedHits = [];
 
@@ -258,7 +333,7 @@ export async function hybridQuery({
       score: 1.0 / hit.bm25_rank,
     }));
   } else if (algo === "semantic_only" || algo === "vector_only") {
-    const queryVector = await embedText(query, true, embModel, null, instruction);
+    const queryVector = await getQueryVector();
     const vectorHits = await vectorSearch(db, queryVector, limit * 4, 0.10);
     fusedHits = vectorHits.map((hit) => ({
       ...hit,
@@ -266,13 +341,13 @@ export async function hybridQuery({
     }));
   } else if (algo === "rrf") {
     const bm25Hits = await bm25Search(db, query, 30);
-    const queryVector = await embedText(query, true, embModel, null, instruction);
+    const queryVector = await getQueryVector();
     const vectorHits = await vectorSearch(db, queryVector, 30, 0.10);
     fusedHits = rrfFusion(bm25Hits, vectorHits, 60, scoreThreshold);
   } else {
     // Default: RSF
     const bm25Hits = await bm25Search(db, query, 30);
-    const queryVector = await embedText(query, true, embModel, null, instruction);
+    const queryVector = await getQueryVector();
     const vectorHits = await vectorSearch(db, queryVector, 30, 0.10);
     fusedHits = rsfFusion(bm25Hits, vectorHits, alphaWeight, scoreThreshold);
   }
@@ -281,35 +356,60 @@ export async function hybridQuery({
     fusedHits = await rerankHits(query, fusedHits, rerankModelName);
   }
 
-  // Parent-Child Rollup: Deduplicate hits sharing the same medium_id or section_id to prevent noise
+  // Parent-Child Rollup: Deduplicate hits sharing the same medium_id or section_id to prevent noise.
+  // Policy chunks (table_summary, code_signature) get a distinct parent key so they coexist
+  // with micro_chunks that share the same medium_id — otherwise BM25 would lose raw rows.
   const parentDeduplicatedHits = [];
   if (fusedHits.length > 0) {
     const hitIds = fusedHits.map((h) => h.id);
     const placeholders = hitIds.map(() => "?").join(",");
     const rows = await db.prepare(`
-      SELECT id, medium_id, section_id FROM micro_chunks WHERE id IN (${placeholders});
+      SELECT id, medium_id, section_id, retrieval_policy, policy_source_id FROM micro_chunks WHERE id IN (${placeholders});
     `).all(...hitIds);
     const parentMap = new Map(rows.map((r) => [r.id, r]));
 
     const seenParents = new Set();
     for (const hit of fusedHits) {
       const row = parentMap.get(hit.id);
-      const parentKey = row ? (row.medium_id || row.section_id) : hit.id;
+      const isPolicy = usePolicyExpansion && (row?.retrieval_policy === "table_summary" || row?.retrieval_policy === "code_signature");
+      const baseKey = row ? (row.medium_id || row.section_id) : hit.id;
+      const parentKey = isPolicy ? `policy:${baseKey}` : `micro:${baseKey}`;
       if (!seenParents.has(parentKey)) {
         seenParents.add(parentKey);
-        parentDeduplicatedHits.push(hit);
+        parentDeduplicatedHits.push({ ...hit, retrieval_policy: isPolicy ? row?.retrieval_policy : "micro_chunk", policy_source_id: isPolicy ? (row?.policy_source_id || null) : null });
       }
     }
   }
 
-  const topHits = parentDeduplicatedHits.slice(0, limit);
+  // Policy-Based Deduplication: if multiple hits resolve to the same policy_source_id, keep only the highest-scored one
+  // When policy expansion is disabled, skip — all chunks are already treated as micro_chunk
+  const policyDeduplicatedHits = usePolicyExpansion
+    ? (() => {
+      const result = [];
+      const seenPolicySources = new Set();
+      for (const hit of parentDeduplicatedHits) {
+        if (hit.policy_source_id && (hit.retrieval_policy === "table_summary" || hit.retrieval_policy === "code_signature")) {
+          if (!seenPolicySources.has(hit.policy_source_id)) {
+            seenPolicySources.add(hit.policy_source_id);
+            result.push(hit);
+          }
+        } else {
+          result.push(hit);
+        }
+      }
+      return result;
+    })()
+    : parentDeduplicatedHits;
+
+  const topHits = policyDeduplicatedHits.slice(0, limit);
   const results = [];
 
   if (topHits.length > 0) {
     const topIds = topHits.map((h) => h.id);
     const placeholders = topIds.map(() => "?").join(",");
     const details = await db.prepare(`
-      SELECT m.id as micro_id, s.id as section_id, s.heading, s.breadcrumbs, s.content as section_content,
+      SELECT m.id as micro_id, m.retrieval_policy, m.policy_source_id,
+             s.id as section_id, s.heading, s.breadcrumbs, s.content as section_content,
              med.content as medium_content, d.title as doc_title, d.path as doc_path
       FROM micro_chunks m
       JOIN sections s ON m.section_id = s.id
@@ -329,11 +429,40 @@ export async function hybridQuery({
       }
     }
 
+    // Fetch full content for policy-based expansion (table_summary → full table, code_signature → full code)
+    // When policy expansion is disabled, skip — snippets stay as micro_chunk content
+    const policySourceIds = usePolicyExpansion
+      ? details
+        .filter((d) => d.policy_source_id && (d.retrieval_policy === "table_summary" || d.retrieval_policy === "code_signature"))
+        .map((d) => d.policy_source_id)
+      : [];
+    const uniquePolicySourceIds = [...new Set(policySourceIds)];
+
+    let expandedContentMap = new Map();
+    if (uniquePolicySourceIds.length > 0) {
+      const policyPlaceholders = uniquePolicySourceIds.map(() => "?").join(",");
+      const expandedRows = await db.prepare(`
+        SELECT id, content, block_type FROM medium_chunks WHERE id IN (${policyPlaceholders});
+      `).all(...uniquePolicySourceIds);
+      expandedContentMap = new Map(expandedRows.map((r) => [r.id, r]));
+    }
+
     for (const hit of topHits) {
       const detail = detailMap.get(hit.id);
       if (!detail) continue;
 
       const symbols = symbolsBySection.get(detail.section_id) || [];
+
+      let snippet = hit.content;
+      let paragraphContext = detail.medium_content || hit.content;
+
+      if (usePolicyExpansion && detail.policy_source_id && (detail.retrieval_policy === "table_summary" || detail.retrieval_policy === "code_signature")) {
+        const expanded = expandedContentMap.get(detail.policy_source_id);
+        if (expanded) {
+          snippet = expanded.content;
+          paragraphContext = expanded.content;
+        }
+      }
 
       results.push({
         chunk_id: hit.id,
@@ -341,14 +470,15 @@ export async function hybridQuery({
         doc_path: detail.doc_path,
         heading: detail.heading,
         breadcrumbs: detail.breadcrumbs,
-        snippet: hit.content,
-        paragraph_context: detail.medium_content || hit.content,
+        snippet,
+        paragraph_context: paragraphContext,
         full_section_content: detail.section_content,
         score: parseFloat((hit.score || 0).toFixed(4)),
         rsf_score: hit.rsf_score ? parseFloat(hit.rsf_score.toFixed(4)) : null,
         rrf_score: hit.rrf_score ? parseFloat(hit.rrf_score.toFixed(4)) : null,
         cosine_sim: hit.cosine_sim ? parseFloat(hit.cosine_sim.toFixed(4)) : null,
         defined_symbols: symbols,
+        retrieval_policy: (usePolicyExpansion ? (detail.retrieval_policy || "micro_chunk") : "micro_chunk"),
       });
     }
   }

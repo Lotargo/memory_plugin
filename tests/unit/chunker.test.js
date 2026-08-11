@@ -5,6 +5,8 @@ import {
   extractMediumBlocks,
   createSmallChunks,
   buildTripleHierarchy,
+  generateTableSummary,
+  extractCodeSignatures,
 } from "../../mcp-server/ingest/chunker.js";
 
 function ok(name) {
@@ -137,7 +139,7 @@ export async function runChunkerTests() {
     passed++;
   }
 
-  // ── createSmallChunks: small table kept whole ──────────────────────────
+  // ── createSmallChunks: small table kept whole + summary ────────────────
   {
     const tableContent = "| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |";
     const medBlock = {
@@ -150,12 +152,18 @@ export async function runChunkerTests() {
       token_count: estimateTokens(tableContent),
     };
     const chunks = createSmallChunks(medBlock, "s0", "d1");
-    assert.strictEqual(chunks.length, 1, "small table → 1 chunk");
-    ok("createSmallChunks: small table kept whole");
+    assert.strictEqual(chunks.length, 2, "small table → 2 chunks (summary + content)");
+    assert.strictEqual(chunks[0].retrieval_policy, "table_summary", "first chunk is table_summary");
+    assert.strictEqual(chunks[1].retrieval_policy, "micro_chunk", "second chunk is micro_chunk");
+    assert.ok(chunks[0].content.includes("columns"), "summary mentions columns");
+    assert.ok(chunks[0].content.includes("A"), "summary contains column name A");
+    assert.ok(chunks[0].content.includes("B"), "summary contains column name B");
+    assert.strictEqual(chunks[0].policy_source_id, "s0_m0", "summary links to medium block");
+    ok("createSmallChunks: small table kept whole + summary");
     passed++;
   }
 
-  // ── createSmallChunks: large table split into row batches ──────────────
+  // ── createSmallChunks: large table split into row batches + summary ─────
   {
     const header = "| Col1 | Col2 | Col3 |\n| --- | --- | --- |";
     const rows = Array.from({ length: 50 }, (_, i) => `| row_${i}_detailed_description_of_column_data | data_entry_${i}_value_field_with_extra_text | value_${i}_extended_metric_information |`);
@@ -170,16 +178,41 @@ export async function runChunkerTests() {
       token_count: estimateTokens(tableContent),
     };
     const chunks = createSmallChunks(medBlock, "s0", "d1");
-    assert.ok(chunks.length > 1, `large table split into ${chunks.length} chunks`);
-    // Each chunk should contain the header
-    for (const chunk of chunks) {
-      assert.ok(chunk.content.includes("Col1"), "each table chunk includes header");
+    assert.ok(chunks.length > 2, `large table split into ${chunks.length} chunks (summary + batches)`);
+    assert.strictEqual(chunks[0].retrieval_policy, "table_summary", "first chunk is table_summary");
+    assert.ok(chunks[0].content.includes("Col1"), "summary contains column name");
+    assert.ok(chunks[0].content.includes("50 rows"), "summary mentions row count");
+    // Row batch chunks should contain the header
+    for (let i = 1; i < chunks.length; i++) {
+      assert.ok(chunks[i].content.includes("Col1"), "each table chunk includes header");
+      assert.strictEqual(chunks[i].retrieval_policy, "micro_chunk", "batch chunks are micro_chunk");
     }
-    ok("createSmallChunks: large table split with headers preserved");
+    ok("createSmallChunks: large table split with headers preserved + summary");
     passed++;
   }
 
-  // ── createSmallChunks: large code block split by AST boundaries ────────
+  // ── generateTableSummary: extracts columns and row count ───────────────
+  {
+    const table = "| Name | Age | City |\n| --- | --- | --- |\n| Alice | 30 | NYC |\n| Bob | 25 | LA |\n| Carol | 35 | SF |";
+    const summary = generateTableSummary(table, "Doc > Users");
+    assert.ok(summary.includes("Name"), "summary contains column Name");
+    assert.ok(summary.includes("Age"), "summary contains column Age");
+    assert.ok(summary.includes("City"), "summary contains column City");
+    assert.ok(summary.includes("3 rows"), "summary mentions 3 rows");
+    assert.ok(summary.includes("Doc > Users"), "summary includes breadcrumbs");
+    ok("generateTableSummary: extracts columns, row count, and context");
+    passed++;
+  }
+
+  // ── generateTableSummary: empty table returns null ─────────────────────
+  {
+    assert.strictEqual(generateTableSummary(""), null, "empty string → null");
+    assert.strictEqual(generateTableSummary("   \n   "), null, "whitespace only → null");
+    ok("generateTableSummary: handles empty input");
+    passed++;
+  }
+
+  // ── createSmallChunks: large code block split by AST boundaries + signatures ─
   {
     const functions = Array.from({ length: 5 }, (_, i) =>
       `function fn${i}() {\n${"  // lots of code\n".repeat(30)}}`
@@ -195,8 +228,57 @@ export async function runChunkerTests() {
       token_count: estimateTokens(codeContent),
     };
     const chunks = createSmallChunks(medBlock, "s0", "d1");
-    assert.ok(chunks.length >= 5, `code split into ${chunks.length} chunks (expected ≥5 functions)`);
-    ok("createSmallChunks: large code block split by function boundaries");
+    const sigChunks = chunks.filter((c) => c.retrieval_policy === "code_signature");
+    const bodyChunks = chunks.filter((c) => c.retrieval_policy === "micro_chunk");
+    assert.strictEqual(sigChunks.length, 5, `5 code signatures extracted (got ${sigChunks.length})`);
+    assert.ok(bodyChunks.length >= 5, `code split into ${bodyChunks.length} body chunks`);
+    assert.ok(sigChunks[0].content.startsWith("function fn0"), "signature contains function name");
+    assert.strictEqual(sigChunks[0].policy_source_id, "s0_m0", "signature links to medium block");
+    ok("createSmallChunks: large code block split by function boundaries + signatures");
+    passed++;
+  }
+
+  // ── extractCodeSignatures: JS functions with JSDoc ──────────────────────
+  {
+    const code = "```javascript\n/**\n * Does the thing\n * @param {string} x\n */\nfunction doThing(x) {\n  return x + 1;\n}\n\nfunction other() {\n  return 42;\n}\n```";
+    const sigs = extractCodeSignatures(code);
+    assert.strictEqual(sigs.length, 2, "extracted 2 signatures");
+    assert.ok(sigs[0].signature.includes("Does the thing"), "first sig includes JSDoc");
+    assert.ok(sigs[0].signature.includes("function doThing(x)"), "first sig includes function signature");
+    assert.ok(sigs[1].signature.includes("function other()"), "second sig includes function signature");
+    ok("extractCodeSignatures: JS functions with JSDoc");
+    passed++;
+  }
+
+  // ── extractCodeSignatures: Python with docstrings ───────────────────────
+  {
+    const code = "```python\ndef greet(name):\n    \"\"\"Say hello to someone.\"\"\"\n    return f\"Hello {name}\"\n\ndef farewell(name):\n    '''Say goodbye.'''\n    return f\"Bye {name}\"\n```";
+    const sigs = extractCodeSignatures(code);
+    assert.strictEqual(sigs.length, 2, "extracted 2 Python signatures");
+    assert.ok(sigs[0].signature.includes("def greet(name):"), "first sig includes def");
+    assert.ok(sigs[0].signature.includes("Say hello"), "first sig includes docstring");
+    assert.ok(sigs[1].signature.includes("def farewell(name):"), "second sig includes def");
+    ok("extractCodeSignatures: Python with docstrings");
+    passed++;
+  }
+
+  // ── extractCodeSignatures: Rust with /// comments ───────────────────────
+  {
+    const code = "```rust\n/// Computes the sum\n/// of two numbers\npub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n\nfn private_helper() {\n    // internal\n}\n```";
+    const sigs = extractCodeSignatures(code);
+    assert.strictEqual(sigs.length, 2, "extracted 2 Rust signatures");
+    assert.ok(sigs[0].signature.includes("pub fn add"), "first sig includes pub fn");
+    assert.ok(sigs[0].signature.includes("Computes the sum"), "first sig includes doc comment");
+    ok("extractCodeSignatures: Rust with /// comments");
+    passed++;
+  }
+
+  // ── extractCodeSignatures: no functions ────────────────────────────────
+  {
+    const code = "```javascript\nconst x = 1;\nconst y = 2;\nconsole.log(x + y);\n```";
+    const sigs = extractCodeSignatures(code);
+    assert.strictEqual(sigs.length, 0, "no signatures for plain statements");
+    ok("extractCodeSignatures: no functions returns empty");
     passed++;
   }
 

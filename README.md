@@ -176,6 +176,7 @@ The MCP server registers **14 MCP tools** accessible across all connected AI env
 | :--- | :------------- | :---------- |
 | `ingest_document` | `content`, `type`, `title`, `path`, `generateEmbeddings` | Ingest local files, URLs, or raw text into the 3-tier index (Big/Medium/Small) with ONNX vector embeddings and GraphRAG symbol extraction. |
 | `query_knowledge_base` | `query`, `limit`, `instruction`, `generateEmbeddings` | Perform hybrid search (RSF/RRF BM25 + dense vector similarity) to retrieve candidate document sections with defined code symbols. |
+| `batch_query_knowledge_base` | `queries` (array), `limit`, `instruction`, `generateEmbeddings` | Execute multiple queries in a single batch call. More efficient than separate `query_knowledge_base` calls — all embeddings computed in one ONNX pass, queries run in parallel. Ideal for comparisons and multi-topic analysis. |
 | `manage_knowledge_base` | `action`, `docId`, `snapshotPath` | Inspect DB stats (`stats`), list documents (`list`), read full raw document (`read_document`), delete document (`delete`), or export/import snapshots (`export_snapshot` / `import_snapshot`). |
 | `reindex_knowledge_base` | `model`, `dimension` | Re-embed all stored vectors with the active (or specified) embedding model and vector dimension. Use after switching the embedding model or vector dimension so previously indexed documents remain retrievable. Preserves documents, FTS index, graph edges, and fact links. |
 | `link_knowledge` | `action`, `factText`, `docId`, `scope`, `startLine`, `endLine`, `relationType` | Create, list, or retrieve semantic graph links connecting Notebook facts to Knowledge Base documents, sections, or line ranges. Actions: `link`, `list_links`, `get_doc_links`. |
@@ -319,6 +320,7 @@ The engine is configured through `<memory-dir>/config.json` (created with defaul
 | `onnxThreads` | `0` | ONNX WASM threads: `0` auto-detect, or `1-16` |
 | `executionDevice` | `cpu` | `cpu` or `webgpu` (experimental) |
 | `vectorScanLimit` | `50000` | Max micro-chunks scanned per vector query (`0` = unlimited) |
+| `policyExpansion` | `true` | Expand table_summary/code_signature policy chunks for better recall (slight MRR trade-off). Disable for pure micro_chunk precision. |
 | `injectLimit` | `10` | Max facts injected into the agent's system prompt |
 | `conflictStrategy` | `merge` | Hybrid-sync conflict resolution: `merge`, `cloud-wins`, or `local-wins` |
 | `tursoUrl` | `""` | Primary Turso endpoint URL (set by `login`) |

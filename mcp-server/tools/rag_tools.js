@@ -126,6 +126,67 @@ export function registerRagTools(server) {
   );
 
   server.registerTool(
+    "batch_query_knowledge_base",
+    {
+      description:
+        "Execute multiple hybrid search queries in a single batch call. " +
+        "More efficient than separate query_knowledge_base calls: all query embeddings computed in one ONNX pass. " +
+        "Returns one result set per query, in the same order as input.",
+      inputSchema: z.object({
+        queries: z
+          .array(z.string())
+          .describe("Array of search queries to execute in batch"),
+        limit: defNum(5).describe("Maximum number of sections to return per query"),
+        instruction: optStr().describe(
+          "Optional task-specific retrieval instruction shaping embedding focus. Applied to all queries."
+        ),
+        generateEmbeddings: defBool(true).describe("Use vector search alongside BM25"),
+      }),
+    },
+    async ({ queries, limit, instruction, generateEmbeddings }) => {
+      const { batchHybridQuery } = await import("../retrieval/retriever.js");
+      const { getConfig } = await import("../config/config_manager.js");
+      const activeConfig = getConfig();
+
+      const allResults = await batchHybridQuery(queries, {
+        limit,
+        generateEmbeddings,
+        instruction: instruction || null,
+      });
+
+      const formatted = allResults
+        .map((results, qi) => {
+          const header = `## Query ${qi + 1}: "${queries[qi]}"\n`;
+          if (!results || results.length === 0) {
+            return header + "_No results found._";
+          }
+          const items = results
+            .map((r, i) => {
+              let h = `### [${i + 1}] ${r.doc_title || "Untitled"}`;
+              if (r.heading) h += ` > ${r.heading}`;
+              if (r.breadcrumbs) h += ` (${r.breadcrumbs})`;
+              let body = `Score: ${(r.score || 0).toFixed(4)}`;
+              if (r.retrieval_policy && r.retrieval_policy !== "micro_chunk") {
+                body += ` [${r.retrieval_policy}]`;
+              }
+              if (r.defined_symbols && r.defined_symbols.length > 0) {
+                body += `\nDefined Symbols: ${r.defined_symbols.join(", ")}`;
+              }
+              body += `\n\n${r.snippet || r.full_section_content || ""}`;
+              return `${h}\n${body}`;
+            })
+            .join("\n\n---\n\n");
+          return header + items;
+        })
+        .join("\n\n===\n\n");
+
+      const headerNote = `[Active Model: ${activeConfig.embeddingModel} | Fusion: ${activeConfig.fusionAlgorithm.toUpperCase()} | ${queries.length} queries]\n\n`;
+
+      return { content: [{ type: "text", text: headerNote + formatted }] };
+    }
+  );
+
+  server.registerTool(
     "reindex_knowledge_base",
     {
       description:
