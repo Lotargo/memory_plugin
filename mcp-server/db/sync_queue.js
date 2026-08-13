@@ -4,6 +4,7 @@ import { MEMORY_DIR, GLOBAL_KEY, buildMemoryContent, extractFacts, writeMemoryFi
 import { toVectorBytes } from "../retrieval/retriever.js";
 
 let isSyncing = false;
+let syncRequested = false;
 
 // Reverse sync (cloud -> local) throttling: only pull at most once per window
 // even if readMemory triggers it frequently (recall hits every keystroke).
@@ -32,11 +33,22 @@ async function processSyncTask(db, task) {
     });
     if (docRow.rows.length > 0) {
       const realDocId = docRow.rows[0].id;
+      await db.cloudClient.execute({
+        sql: `DELETE FROM graph_edges
+              WHERE source_id = ? OR target_id = ?
+                 OR target_id GLOB ?
+                 OR source_id IN (SELECT id FROM sections WHERE doc_id = ?)
+                 OR target_id IN (SELECT id FROM sections WHERE doc_id = ?)
+                 OR source_id IN (SELECT id FROM medium_chunks WHERE doc_id = ?)
+                 OR target_id IN (SELECT id FROM medium_chunks WHERE doc_id = ?)
+                 OR source_id IN (SELECT id FROM micro_chunks WHERE doc_id = ?)
+                 OR target_id IN (SELECT id FROM micro_chunks WHERE doc_id = ?);`,
+        args: [realDocId, realDocId, `${realDocId}:L*`, realDocId, realDocId, realDocId, realDocId, realDocId, realDocId],
+      });
       await db.cloudClient.execute({ sql: "DELETE FROM micro_chunks_fts WHERE id IN (SELECT id FROM micro_chunks WHERE doc_id = ?);", args: [realDocId] });
       await db.cloudClient.execute({ sql: "DELETE FROM micro_chunks WHERE doc_id = ?;", args: [realDocId] });
       await db.cloudClient.execute({ sql: "DELETE FROM medium_chunks WHERE doc_id = ?;", args: [realDocId] });
       await db.cloudClient.execute({ sql: "DELETE FROM sections WHERE doc_id = ?;", args: [realDocId] });
-      await db.cloudClient.execute({ sql: "DELETE FROM graph_edges WHERE source_id = ? OR target_id = ?;", args: [realDocId, realDocId] });
       await db.cloudClient.execute({ sql: "DELETE FROM knowledge_links WHERE doc_id = ?;", args: [realDocId] });
       await db.cloudClient.execute({ sql: "DELETE FROM documents WHERE id = ?;", args: [realDocId] });
     }
@@ -54,11 +66,22 @@ async function processSyncTask(db, task) {
     });
     if (existingDocRow.rows.length > 0) {
       const realDocId = existingDocRow.rows[0].id;
+      await db.cloudClient.execute({
+        sql: `DELETE FROM graph_edges
+              WHERE source_id = ? OR target_id = ?
+                 OR target_id GLOB ?
+                 OR source_id IN (SELECT id FROM sections WHERE doc_id = ?)
+                 OR target_id IN (SELECT id FROM sections WHERE doc_id = ?)
+                 OR source_id IN (SELECT id FROM medium_chunks WHERE doc_id = ?)
+                 OR target_id IN (SELECT id FROM medium_chunks WHERE doc_id = ?)
+                 OR source_id IN (SELECT id FROM micro_chunks WHERE doc_id = ?)
+                 OR target_id IN (SELECT id FROM micro_chunks WHERE doc_id = ?);`,
+        args: [realDocId, realDocId, `${realDocId}:L*`, realDocId, realDocId, realDocId, realDocId, realDocId, realDocId],
+      });
       await db.cloudClient.execute({ sql: "DELETE FROM micro_chunks_fts WHERE id IN (SELECT id FROM micro_chunks WHERE doc_id = ?);", args: [realDocId] });
       await db.cloudClient.execute({ sql: "DELETE FROM micro_chunks WHERE doc_id = ?;", args: [realDocId] });
       await db.cloudClient.execute({ sql: "DELETE FROM medium_chunks WHERE doc_id = ?;", args: [realDocId] });
       await db.cloudClient.execute({ sql: "DELETE FROM sections WHERE doc_id = ?;", args: [realDocId] });
-      await db.cloudClient.execute({ sql: "DELETE FROM graph_edges WHERE source_id = ? OR target_id = ?;", args: [realDocId, realDocId] });
       await db.cloudClient.execute({ sql: "DELETE FROM knowledge_links WHERE doc_id = ?;", args: [realDocId] });
       await db.cloudClient.execute({ sql: "DELETE FROM documents WHERE id = ?;", args: [realDocId] });
     }
@@ -81,6 +104,16 @@ async function processSyncTask(db, task) {
         doc.updated_at,
       ],
     });
+
+    const scopes = Array.isArray(data.document_scopes) && data.document_scopes.length
+      ? data.document_scopes
+      : [{ scope_key: "global", created_at: doc.created_at }];
+    for (const scope of scopes) {
+      await db.cloudClient.execute({
+        sql: "INSERT OR IGNORE INTO document_scopes (doc_id, scope_key, created_at) VALUES (?, ?, ?);",
+        args: [doc.id, scope.scope_key || "global", scope.created_at || Date.now()],
+      });
+    }
 
     // 3. Insert sections
     if (Array.isArray(data.sections)) {
@@ -112,8 +145,18 @@ async function processSyncTask(db, task) {
           ? Buffer.from(vecBytes.buffer, vecBytes.byteOffset, vecBytes.byteLength)
           : Buffer.alloc(0);
         await db.cloudClient.execute({
-          sql: "INSERT INTO micro_chunks (id, section_id, doc_id, content, vector, token_count, medium_id) VALUES (?, ?, ?, ?, ?, ?, ?);",
-          args: [mc.id, mc.section_id, doc.id, mc.content, vecBuf, mc.token_count, mc.medium_id || null],
+          sql: "INSERT INTO micro_chunks (id, section_id, doc_id, content, vector, token_count, medium_id, retrieval_policy, policy_source_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);",
+          args: [
+            mc.id,
+            mc.section_id,
+            doc.id,
+            mc.content,
+            vecBuf,
+            mc.token_count,
+            mc.medium_id || null,
+            mc.retrieval_policy || "micro_chunk",
+            mc.policy_source_id || null,
+          ],
         });
 
         // Insert into remote FTS
@@ -134,6 +177,28 @@ async function processSyncTask(db, task) {
         await db.cloudClient.execute({
           sql: "INSERT OR IGNORE INTO graph_edges (source_id, target_id, relation_type, metadata_json, created_at) VALUES (?, ?, ?, ?, ?);",
           args: [e.source_id, e.target_id, e.relation_type, e.metadata_json ? (typeof e.metadata_json === "string" ? e.metadata_json : JSON.stringify(e.metadata_json)) : null, e.created_at || Date.now()],
+        });
+      }
+    }
+
+    if (Array.isArray(data.knowledge_links)) {
+      for (const link of data.knowledge_links) {
+        await db.cloudClient.execute({
+          sql: `INSERT OR REPLACE INTO knowledge_links
+                (id, fact_key, fact_text, doc_id, section_id, start_line, end_line, relation_type, metadata_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+          args: [
+            link.id,
+            link.fact_key,
+            link.fact_text,
+            doc.id,
+            link.section_id || null,
+            link.start_line || null,
+            link.end_line || null,
+            link.relation_type || "LINKS_TO",
+            link.metadata_json || null,
+            link.created_at || Date.now(),
+          ],
         });
       }
     }
@@ -318,8 +383,12 @@ export function resetReverseSyncThrottle() {
 }
 
 export async function triggerBackgroundSync() {
-  if (isSyncing) return;
+  if (isSyncing) {
+    syncRequested = true;
+    return;
+  }
   isSyncing = true;
+  syncRequested = false;
 
   try {
     const { getDatabase } = await import("./database.js");
@@ -340,22 +409,23 @@ export async function triggerBackgroundSync() {
       );
     `);
 
-    // Fetch tasks ordered by id
-    const tasks = await db.prepare("SELECT * FROM sync_queue ORDER BY id ASC LIMIT 50;").all();
-    if (tasks.length === 0) {
-      isSyncing = false;
-      return;
-    }
+    // Drain until empty. New tasks can be enqueued while a batch is running;
+    // stopping after one snapshot of the queue left those tasks stranded until
+    // an unrelated future write happened to wake the worker again.
+    let syncFailed = false;
+    while (!syncFailed) {
+      const tasks = await db.prepare("SELECT * FROM sync_queue ORDER BY id ASC LIMIT 50;").all();
+      if (tasks.length === 0) break;
 
-    for (const task of tasks) {
-      try {
-        await processSyncTask(db, task);
-        // On success, delete from queue
-        await db.prepare("DELETE FROM sync_queue WHERE id = ?;").run(task.id);
-      } catch (err) {
-        console.error(`Failed to process sync task ${task.id} (${task.action}):`, err.message, err.stack);
-        // Stop processing this batch to preserve order on error, retry next time
-        break;
+      for (const task of tasks) {
+        try {
+          await processSyncTask(db, task);
+          await db.prepare("DELETE FROM sync_queue WHERE id = ?;").run(task.id);
+        } catch (err) {
+          console.error(`Failed to process sync task ${task.id} (${task.action}):`, err.message, err.stack);
+          syncFailed = true;
+          break;
+        }
       }
     }
 
@@ -365,5 +435,9 @@ export async function triggerBackgroundSync() {
     console.error("Error during background sync execution:", err.message);
   } finally {
     isSyncing = false;
+    if (syncRequested) {
+      syncRequested = false;
+      await triggerBackgroundSync();
+    }
   }
 }

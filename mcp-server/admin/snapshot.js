@@ -74,6 +74,8 @@ export async function exportSnapshot({ customDb = null, customBlobDir = BLOBS_DI
   const mediumChunks = await db.prepare("SELECT * FROM medium_chunks").all();
   const rawMicroChunks = await db.prepare("SELECT * FROM micro_chunks").all();
   const graphEdges = await db.prepare("SELECT * FROM graph_edges").all();
+  const knowledgeLinks = await db.prepare("SELECT * FROM knowledge_links").all();
+  const documentScopes = await db.prepare("SELECT * FROM document_scopes").all();
 
   const microChunks = rawMicroChunks.map((mc) => {
     let vecBase64 = "";
@@ -99,13 +101,15 @@ export async function exportSnapshot({ customDb = null, customBlobDir = BLOBS_DI
   }
 
   const snapshot = {
-    version: 2,
+    version: 3,
     created_at: new Date().toISOString(),
     documents,
     sections,
     medium_chunks: mediumChunks,
     micro_chunks: microChunks,
     graph_edges: graphEdges,
+    knowledge_links: knowledgeLinks,
+    document_scopes: documentScopes,
     blobs,
   };
 
@@ -188,13 +192,15 @@ export async function importSnapshot({ customDb = null, customBlobDir = BLOBS_DI
   `);
 
   const insertChunk = db.prepare(`
-    INSERT INTO micro_chunks (id, section_id, doc_id, content, vector, token_count, medium_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO micro_chunks (id, section_id, doc_id, content, vector, token_count, medium_id, retrieval_policy, policy_source_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       content=excluded.content,
       vector=excluded.vector,
       token_count=excluded.token_count,
-      medium_id=excluded.medium_id
+      medium_id=excluded.medium_id,
+      retrieval_policy=excluded.retrieval_policy,
+      policy_source_id=excluded.policy_source_id
   `);
 
   const insertFts = db.prepare(`
@@ -205,9 +211,30 @@ export async function importSnapshot({ customDb = null, customBlobDir = BLOBS_DI
   const deleteFts = db.prepare("DELETE FROM micro_chunks_fts WHERE id = ?");
 
   const insertEdge = db.prepare(`
-    INSERT INTO graph_edges (source_id, target_id, relation_type)
+    INSERT INTO graph_edges (source_id, target_id, relation_type, metadata_json, created_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET
+      metadata_json=excluded.metadata_json,
+      created_at=excluded.created_at
+  `);
+  const insertScope = db.prepare(`
+    INSERT OR IGNORE INTO document_scopes (doc_id, scope_key, created_at)
     VALUES (?, ?, ?)
-    ON CONFLICT(source_id, target_id, relation_type) DO NOTHING
+  `);
+  const insertLink = db.prepare(`
+    INSERT INTO knowledge_links
+      (id, fact_key, fact_text, doc_id, section_id, start_line, end_line, relation_type, metadata_json, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      fact_key=excluded.fact_key,
+      fact_text=excluded.fact_text,
+      doc_id=excluded.doc_id,
+      section_id=excluded.section_id,
+      start_line=excluded.start_line,
+      end_line=excluded.end_line,
+      relation_type=excluded.relation_type,
+      metadata_json=excluded.metadata_json,
+      created_at=excluded.created_at
   `);
 
   await db.exec("BEGIN IMMEDIATE;");
@@ -234,6 +261,18 @@ export async function importSnapshot({ customDb = null, customBlobDir = BLOBS_DI
       }
     }
 
+    if (Array.isArray(snapshot.document_scopes) && snapshot.document_scopes.length > 0) {
+      for (const scope of snapshot.document_scopes) {
+        await insertScope.run(scope.doc_id, scope.scope_key || "global", scope.created_at || Date.now());
+      }
+    } else if (Array.isArray(snapshot.documents)) {
+      // v1/v2 snapshots predate project-scoped RAG and retain their historical
+      // globally-visible behavior after import.
+      for (const d of snapshot.documents) {
+        await insertScope.run(d.id, "global", d.created_at || Date.now());
+      }
+    }
+
     if (Array.isArray(snapshot.medium_chunks)) {
       for (const m of snapshot.medium_chunks) {
         await insertMedium.run(m.id, m.section_id, m.doc_id, m.content, m.block_type, m.token_count, m.created_at || Date.now());
@@ -246,7 +285,17 @@ export async function importSnapshot({ customDb = null, customBlobDir = BLOBS_DI
         if (mc.vector) {
           vecBuf = Buffer.from(mc.vector, "base64");
         }
-        await insertChunk.run(mc.id, mc.section_id, mc.doc_id, mc.content, vecBuf, mc.token_count, mc.medium_id || null);
+        await insertChunk.run(
+          mc.id,
+          mc.section_id,
+          mc.doc_id,
+          mc.content,
+          vecBuf,
+          mc.token_count,
+          mc.medium_id || null,
+          mc.retrieval_policy || "micro_chunk",
+          mc.policy_source_id || null
+        );
 
         try {
           await deleteFts.run(mc.id);
@@ -257,7 +306,23 @@ export async function importSnapshot({ customDb = null, customBlobDir = BLOBS_DI
 
     if (Array.isArray(snapshot.graph_edges)) {
       for (const e of snapshot.graph_edges) {
-        await insertEdge.run(e.source_id, e.target_id, e.relation_type);
+        await insertEdge.run(e.source_id, e.target_id, e.relation_type, e.metadata_json || null, e.created_at || null);
+      }
+    }
+    if (Array.isArray(snapshot.knowledge_links)) {
+      for (const link of snapshot.knowledge_links) {
+        await insertLink.run(
+          link.id,
+          link.fact_key,
+          link.fact_text,
+          link.doc_id,
+          link.section_id || null,
+          link.start_line || null,
+          link.end_line || null,
+          link.relation_type || "LINKS_TO",
+          link.metadata_json || null,
+          link.created_at || Date.now()
+        );
       }
     }
     await db.exec("COMMIT;");
@@ -272,6 +337,8 @@ export async function importSnapshot({ customDb = null, customBlobDir = BLOBS_DI
     medium_chunks: snapshot.medium_chunks ? snapshot.medium_chunks.length : 0,
     micro_chunks: snapshot.micro_chunks ? snapshot.micro_chunks.length : 0,
     graph_edges: snapshot.graph_edges ? snapshot.graph_edges.length : 0,
+    knowledge_links: snapshot.knowledge_links ? snapshot.knowledge_links.length : 0,
+    document_scopes: snapshot.document_scopes ? snapshot.document_scopes.length : 0,
     blobs: blobCount,
   };
 }

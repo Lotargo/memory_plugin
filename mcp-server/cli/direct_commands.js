@@ -136,8 +136,10 @@ export async function handleDirectCommands(cliArgs) {
       }
 
       await writeMemory(targetKey, targetFacts);
-      await db.prepare("UPDATE project_aliases SET identity_key = ? WHERE identity_key = ?;").run(targetKey, sourceKey);
       await upsertIdentity(db, { key: targetKey, name: sourceIdentity.name, primaryRemote: normalizeRemoteUrl(remote) });
+      await db.prepare("UPDATE project_aliases SET identity_key = ? WHERE identity_key = ?;").run(targetKey, sourceKey);
+      const { moveKnowledgeScope } = await import("../graph/knowledge_linker.js");
+      await moveKnowledgeScope(db, sourceKey, targetKey);
       await removeIdentity(db, sourceKey);
 
       try {

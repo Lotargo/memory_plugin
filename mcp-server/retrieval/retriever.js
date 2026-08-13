@@ -10,19 +10,29 @@ export function sanitizeFtsQuery(query) {
   return words.join(" OR ");
 }
 
-export async function bm25Search(db, query, limit = 30) {
+export async function bm25Search(db, query, limit = 30, scopeKeys = null) {
   const ftsQuery = sanitizeFtsQuery(query);
   if (!ftsQuery) return [];
 
   try {
+    const scoped = Array.isArray(scopeKeys) && scopeKeys.length > 0;
+    const scopeClause = scoped
+      ? `AND EXISTS (
+          SELECT 1 FROM micro_chunks scoped_m
+          JOIN document_scopes scoped_ds ON scoped_ds.doc_id = scoped_m.doc_id
+          WHERE scoped_m.id = micro_chunks_fts.id
+            AND scoped_ds.scope_key IN (${scopeKeys.map(() => "?").join(",")})
+        )`
+      : "";
     const stmt = db.prepare(`
       SELECT id, content, breadcrumbs, rank
       FROM micro_chunks_fts
       WHERE micro_chunks_fts MATCH ?
+      ${scopeClause}
       ORDER BY rank
       LIMIT ?;
     `);
-    const rows = await stmt.all(ftsQuery, limit);
+    const rows = await stmt.all(ftsQuery, ...(scoped ? scopeKeys : []), limit);
     return rows.map((r, i) => ({
       id: r.id,
       content: r.content,
@@ -50,7 +60,7 @@ export function toVectorBytes(value) {
   return null;
 }
 
-export async function vectorSearch(db, queryVector, limit = 30, minSim = 0.25) {
+export async function vectorSearch(db, queryVector, limit = 30, minSim = 0.25, scopeKeys = null) {
   if (!queryVector || queryVector.length === 0) return [];
 
   const vectorDim = queryVector.length;
@@ -59,21 +69,32 @@ export async function vectorSearch(db, queryVector, limit = 30, minSim = 0.25) {
   const tempVec = new Float32Array(tempBuf);
 
   const scanLimit = Number(getConfig().vectorScanLimit) || 0;
+  const scoped = Array.isArray(scopeKeys) && scopeKeys.length > 0;
+  const scopeClause = scoped
+    ? `WHERE EXISTS (
+        SELECT 1 FROM document_scopes scoped_ds
+        WHERE scoped_ds.doc_id = m.doc_id
+          AND scoped_ds.scope_key IN (${scopeKeys.map(() => "?").join(",")})
+      )`
+    : "";
   const scanSql = scanLimit > 0
     ? `
       SELECT m.id, m.section_id, m.doc_id, m.content, m.vector, s.breadcrumbs
       FROM micro_chunks m
       JOIN sections s ON m.section_id = s.id
+      ${scopeClause}
       LIMIT ?;
     `
     : `
       SELECT m.id, m.section_id, m.doc_id, m.content, m.vector, s.breadcrumbs
       FROM micro_chunks m
-      JOIN sections s ON m.section_id = s.id;
+      JOIN sections s ON m.section_id = s.id
+      ${scopeClause};
     `;
 
   const stmt = db.prepare(scanSql);
-  const rows = scanLimit > 0 ? await stmt.all(scanLimit) : await stmt.all();
+  const scopeParams = scoped ? scopeKeys : [];
+  const rows = scanLimit > 0 ? await stmt.all(...scopeParams, scanLimit) : await stmt.all(...scopeParams);
   const scored = [];
   for (const r of rows) {
     // node:sqlite returns BLOBs as plain Uint8Array (NOT Buffer), the Turso
@@ -245,6 +266,7 @@ export async function batchHybridQuery(queries, options = {}) {
     instruction = null,
     generateEmbeddings = true,
     policyExpansion = null,
+    scopeKeys = null,
   } = options;
 
   const db = customDb || await getDatabase();
@@ -278,6 +300,7 @@ export async function batchHybridQuery(queries, options = {}) {
         instruction,
         generateEmbeddings,
         policyExpansion: usePolicyExpansion,
+        scopeKeys,
         _precomputedVector: queryVectors[i] || null,
       })
     )
@@ -300,6 +323,7 @@ export async function hybridQuery({
   instruction = null,
   generateEmbeddings = true,
   policyExpansion = null, // null = use config default
+  scopeKeys = null, // null = all documents; tool surfaces pass global/current-project keys
   _precomputedVector = null, // internal: skip embedText if batch already computed
 }) {
   const db = customDb || await getDatabase();
@@ -327,28 +351,28 @@ export async function hybridQuery({
   let fusedHits = [];
 
   if (algo === "lexical_only" || algo === "bm25_only") {
-    const bm25Hits = await bm25Search(db, query, limit * 4);
+    const bm25Hits = await bm25Search(db, query, limit * 4, scopeKeys);
     fusedHits = bm25Hits.map((hit) => ({
       ...hit,
       score: 1.0 / hit.bm25_rank,
     }));
   } else if (algo === "semantic_only" || algo === "vector_only") {
     const queryVector = await getQueryVector();
-    const vectorHits = await vectorSearch(db, queryVector, limit * 4, 0.10);
+    const vectorHits = await vectorSearch(db, queryVector, limit * 4, 0.10, scopeKeys);
     fusedHits = vectorHits.map((hit) => ({
       ...hit,
       score: hit.cosine_sim,
     }));
   } else if (algo === "rrf") {
-    const bm25Hits = await bm25Search(db, query, 30);
+    const bm25Hits = await bm25Search(db, query, 30, scopeKeys);
     const queryVector = await getQueryVector();
-    const vectorHits = await vectorSearch(db, queryVector, 30, 0.10);
+    const vectorHits = await vectorSearch(db, queryVector, 30, 0.10, scopeKeys);
     fusedHits = rrfFusion(bm25Hits, vectorHits, 60, scoreThreshold);
   } else {
     // Default: RSF
-    const bm25Hits = await bm25Search(db, query, 30);
+    const bm25Hits = await bm25Search(db, query, 30, scopeKeys);
     const queryVector = await getQueryVector();
-    const vectorHits = await vectorSearch(db, queryVector, 30, 0.10);
+    const vectorHits = await vectorSearch(db, queryVector, 30, 0.10, scopeKeys);
     fusedHits = rsfFusion(bm25Hits, vectorHits, alphaWeight, scoreThreshold);
   }
 

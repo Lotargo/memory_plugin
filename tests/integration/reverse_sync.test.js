@@ -17,6 +17,9 @@ export async function runReverseSyncTests() {
   const { readMemory, writeMemory, writeMemoryFile } = await import("../../mcp-server/memory.js");
   const { updateConfig, resetConfig } = await import("../../mcp-server/config/config_manager.js");
   const { syncFromCloud, triggerBackgroundSync, resetReverseSyncThrottle } = await import("../../mcp-server/db/sync_queue.js");
+  const { ingestDocument } = await import("../../mcp-server/ingest/pipeline.js");
+  const { linkFactToDocument } = await import("../../mcp-server/graph/knowledge_linker.js");
+  const { removeDocumentScopes } = await import("../../mcp-server/rag_scope.js");
 
   try {
     closeDatabase();
@@ -169,6 +172,79 @@ export async function runReverseSyncTests() {
     const autoFacts = await readMemory("auto_pull_key");
     assert.strictEqual(autoFacts.length, 1, "readMemory should reverse-sync and find cloud fact");
     assert(autoFacts[0].includes("Auto pulled fact"), "Auto pulled fact content should match");
+    console.log("  [PASS]");
+
+    // --- 7. RAG sync preserves vectors, policies, scopes, graph edges and Notebook links ---
+    console.log("7. RAG hybrid sync preserves complete retrieval and graph data...");
+    const localDb = await getDatabase();
+    const syncDoc = await ingestDocument({
+      content: "# Cloud RAG\n\ncloud-rag-integrity-token verifies complete document synchronization.",
+      type: "text",
+      path: "virtual://cloud-rag-integrity.md",
+      generateEmbeddings: false,
+      projectScope: "git:example.com/team/cloud-project",
+    });
+    await ingestDocument({
+      content: "# Cloud RAG\n\ncloud-rag-integrity-token verifies complete document synchronization.",
+      type: "text",
+      path: "virtual://cloud-rag-integrity.md",
+      generateEmbeddings: false,
+      projectScope: "global",
+    });
+    const localChunk = await localDb.prepare("SELECT id, medium_id FROM micro_chunks WHERE doc_id = ? LIMIT 1").get(syncDoc.docId);
+    const testVector = Buffer.from(new Float32Array([0.1, 0.2, 0.3, 0.4]).buffer);
+    await localDb.prepare("UPDATE micro_chunks SET vector = ?, retrieval_policy = ?, policy_source_id = ? WHERE id = ?")
+      .run(testVector, "code_signature", localChunk.medium_id, localChunk.id);
+    await linkFactToDocument({
+      factKey: "git:example.com/team/cloud-project",
+      factText: "Cloud RAG synchronization keeps complete data",
+      docId: syncDoc.docId,
+      startLine: 1,
+      endLine: 2,
+      relationType: "VERIFIES",
+    });
+    await triggerBackgroundSync();
+    await sleep(300);
+
+    const remoteRag = createClient({ url: CLOUD_DB_PATH });
+    const remoteChunk = (await remoteRag.execute({
+      sql: "SELECT LENGTH(vector) AS vector_bytes, retrieval_policy, policy_source_id FROM micro_chunks WHERE id = ?",
+      args: [localChunk.id],
+    })).rows[0];
+    assert.strictEqual(Number(remoteChunk.vector_bytes), testVector.byteLength, "cloud chunk keeps vector bytes");
+    assert.strictEqual(remoteChunk.retrieval_policy, "code_signature", "cloud chunk keeps retrieval policy");
+    assert.strictEqual(remoteChunk.policy_source_id, localChunk.medium_id, "cloud chunk keeps policy source");
+    const remoteScopes = (await remoteRag.execute({
+      sql: "SELECT scope_key FROM document_scopes WHERE doc_id = ?",
+      args: [syncDoc.docId],
+    })).rows.map((row) => row.scope_key).sort();
+    assert.deepStrictEqual(remoteScopes, ["git:example.com/team/cloud-project", "global"].sort(), "cloud document keeps every scope");
+    const remoteLink = (await remoteRag.execute({
+      sql: "SELECT fact_key FROM knowledge_links WHERE doc_id = ?",
+      args: [syncDoc.docId],
+    })).rows[0];
+    assert.strictEqual(remoteLink.fact_key, "git:example.com/team/cloud-project", "cloud document keeps Notebook link");
+    const remoteEdges = (await remoteRag.execute({
+      sql: "SELECT COUNT(*) AS cnt FROM graph_edges",
+      args: [],
+    })).rows[0];
+    assert.ok(Number(remoteEdges.cnt) > 0, "cloud document keeps graph edges");
+    const remoteLinkEdge = (await remoteRag.execute({
+      sql: "SELECT target_id FROM graph_edges WHERE target_id = ?",
+      args: [`${syncDoc.docId}:L1-2`],
+    })).rows[0];
+    assert.ok(remoteLinkEdge, "cloud document keeps line-range knowledge graph edge");
+
+    await removeDocumentScopes(localDb, syncDoc.docId, ["git:example.com/team/cloud-project"]);
+    await triggerBackgroundSync();
+    await sleep(300);
+    const remoteScopesAfterUnlink = (await remoteRag.execute({
+      sql: "SELECT scope_key FROM document_scopes WHERE doc_id = ?",
+      args: [syncDoc.docId],
+    })).rows.map((row) => row.scope_key);
+    assert.deepStrictEqual(remoteScopesAfterUnlink, ["global"], "partial scope unlink synchronizes to cloud");
+    remoteRag.close();
+    closeDatabase();
     console.log("  [PASS]");
 
     resetConfig();

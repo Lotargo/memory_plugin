@@ -153,6 +153,27 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 6,
+    name: "006_project_scoped_rag",
+    up: async (db) => {
+      await db.exec(`
+        CREATE TABLE IF NOT EXISTS document_scopes (
+          doc_id     TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+          scope_key  TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (doc_id, scope_key)
+        );
+      `);
+      await db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_document_scopes_scope ON document_scopes(scope_key, doc_id);
+      `);
+      await db.exec(`
+        INSERT OR IGNORE INTO document_scopes (doc_id, scope_key, created_at)
+        SELECT id, 'global', created_at FROM documents;
+      `);
+    },
+  },
 ];
 
 export async function runMigrations(db) {

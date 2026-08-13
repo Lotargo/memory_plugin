@@ -65,6 +65,9 @@ export async function runProjectIdentityTests() {
     db = await getDatabase();
     const identity = await resolveProjectIdentity(dirA);
     assert(identity, "Should resolve identity");
+    const { memoryInfo, recallFacts } = await import("../../mcp-server/tools/core/memory_core.js");
+    const beforeLinkInfo = await memoryInfo({}, { directory: dirA });
+    assert.ok(beforeLinkInfo.includes("Registry: unlinked"), beforeLinkInfo);
     await mem.writeMemory(identity.key, ["- [2026-08-03 12:00] **Initial** — Old project fact"]);
 
     // Upsert project identity first
@@ -74,6 +77,8 @@ export async function runProjectIdentityTests() {
     await registerAlias(db, { alias: `path:${mem.canonicalPath(dirA)}`, identityKey: identity.key, kind: "path" });
     const ids = await listIdentities(db);
     assert(ids.some((id) => id.key === identity.key), "Identity should be present in Registry database");
+    const afterLinkInfo = await memoryInfo({}, { directory: dirA });
+    assert.ok(afterLinkInfo.includes("Registry: linked"), afterLinkInfo);
     console.log("  [PASS] 4. Registry identity and alias registration succeeds");
 
     // (5) lookup via alias, then unregister alias keeps identity
@@ -100,7 +105,6 @@ export async function runProjectIdentityTests() {
     await mem.writeMemory(projectAKey, ["- [2026-08-13 12:01] **Project A rule** — project A private fact"]);
     await mem.writeMemory(projectBKey, ["- [2026-08-13 12:02] **Project B rule** — project B private fact"]);
 
-    const { recallFacts } = await import("../../mcp-server/tools/core/memory_core.js");
     const recallA = await recallFacts({ scope: "all" }, { directory: projectA });
     assert.ok(recallA.includes("shared global fact"), recallA);
     assert.ok(recallA.includes("project A private fact"), recallA);

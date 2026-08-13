@@ -11,9 +11,7 @@ import {
   factMeta,
   isSuperseded,
   displayFact,
-  factTitle,
   factBody,
-  metaBadges,
 } from "../mcp-server/fact_format.js";
 
 import {
@@ -29,6 +27,7 @@ import {
 
 import { closeDatabase } from "../mcp-server/db/database.js";
 import { requireProjectKey } from "../mcp-server/tools/helpers.js";
+import { resolveRagScopeKey, resolveRagScopeKeys, resolveManageRagScopeKeys, removeDocumentScopes } from "../mcp-server/rag_scope.js";
 // Shared Notebook tool implementations — the same code the MCP server runs, so
 // a fix in one surface can no longer miss the other.
 import {
@@ -105,6 +104,8 @@ const MEMORY_INSTRUCTION =
   "MANDATORY FIRST STEP (READ MEMORIES FIRST):\n" +
   "At the start of every session, you MUST thoroughly review all saved memories provided below BEFORE performing any user task or editing code.\n" +
   "If calling `recall` manually, your very first action MUST BE to request ALL global memories (`scope: \"all\"` without restrictive query filters) to ensure no global facts or preferences are missed.\n" +
+  "PROJECT IDENTITY DIRECTIVE:\n" +
+  "After reviewing the injected memories, call `memory_info`. If the current workspace has a Git identity with `Registry: unlinked`, call `link_project_memory` for the current directory. Re-read memories only when linking migrated legacy facts. Outside Git, use global memory only.\n" +
   "PROACTIVE MEMORY DIRECTIVE:\n" +
   "You MUST automatically and proactively call `remember` whenever the user shares durable facts, personal preferences, coding guidelines, tech stack choices, architecture decisions, or project conventions.\n" +
   "Do NOT wait for explicit user commands like \"remember this\". Automatically capture high-signal facts in real time.\n" +
@@ -112,7 +113,9 @@ const MEMORY_INSTRUCTION =
   "Save high-signal items: user role, goals, constraints, tech stack preferences, architecture decisions, project conventions.\n" +
   "DO NOT save: transient details, one-off statements, full conversation turns, or anything unlikely to be useful in future sessions.\n" +
   "When saving, translate the fact into clear, concise English.\n" +
-  "Use `scope: \"global\"` for personal facts, `scope: \"project\"` for project-specific facts.";
+  "Use `scope: \"global\"` for personal facts, `scope: \"project\"` for project-specific facts.\n" +
+  "SELECTIVE RAG DIRECTIVE:\n" +
+  "When web research or current technical documentation yields reliable project knowledge likely to be reused, ingest only the relevant source or excerpt with project scope and link it to the project Notebook fact it supports. Use global RAG only for intentionally cross-project sources. Prefer authoritative and newer-than-training documentation; do not dump everything encountered into RAG.";
 
 function sortNewestFirst(entries) {
   return [...entries].sort((a, b) => {
@@ -126,7 +129,7 @@ function sortNewestFirst(entries) {
   });
 }
 
-function formatInjectedFacts(entries, limit, now = Date.now()) {
+export function formatInjectedFacts(entries, limit, now = Date.now()) {
   const activeEntries = entries.filter((e) => !isSuperseded(e));
   const sorted = sortNewestFirst(activeEntries);
 
@@ -143,36 +146,23 @@ function formatInjectedFacts(entries, limit, now = Date.now()) {
   }
 
   const combined = [...injectPriority, ...normalPriority];
-  const sliced = combined.slice(0, limit);
+  const hasLimit = Number.isFinite(Number(limit)) && Number(limit) > 0;
+  const sliced = hasLimit ? combined.slice(0, Number(limit)) : combined;
 
   const formattedLines = [];
   for (let i = 0; i < sliced.length; i++) {
-    const entry = sliced[i];
-    const meta = factMeta(entry);
-    const isPriority = meta.inject === "1";
-
-    let contentStr;
-    if (isPriority) {
-      contentStr = displayFact(entry, now);
-    } else {
-      const title = factTitle(entry);
-      const badges = metaBadges(entry, now);
-      const badgesStr = badges.length ? `  [${badges.join("] [")}]` : "";
-      contentStr = `${title}${badgesStr}`;
-    }
-
-    formattedLines.push(`${i + 1}. ${contentStr}`);
+    formattedLines.push(`${i + 1}. ${displayFact(sliced[i], now)}`);
   }
 
-  if (activeEntries.length > limit) {
-    const remaining = activeEntries.length - limit;
+  if (hasLimit && activeEntries.length > Number(limit)) {
+    const remaining = activeEntries.length - Number(limit);
     formattedLines.push(`... and ${remaining} more of ${activeEntries.length} memories (use recall tool to fetch all)`);
   }
 
   return formattedLines.join("\n");
 }
 
-function buildMemoryContext(globalFacts, projectFacts, projectKey, injectLimit, now = Date.now()) {
+export function buildMemoryContext(globalFacts, projectFacts, projectKey, injectLimit, now = Date.now()) {
   const parts = [MEMORY_INSTRUCTION];
 
   if (globalFacts.length) {
@@ -232,11 +222,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
         readMemory(await currentProjectKey()),
       ]);
 
-      const { getConfig } = await import("../mcp-server/config/config_manager.js");
-      const config = getConfig();
-      const injectLimit = config.injectLimit !== undefined ? config.injectLimit : 100;
-
-      const context = buildMemoryContext(globalFacts, projectFacts, activeProjectKey, injectLimit);
+      const context = buildMemoryContext(globalFacts, projectFacts, activeProjectKey, null);
       const ref = firstUser.parts[0];
       firstUser.parts.unshift({ ...ref, type: "text", text: context });
     },
@@ -326,6 +312,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           mode: { type: "string", description: "Result mode: 'full' (with body, default) or 'headers' (title and badges only)", default: "full" },
           offset: { type: "number", description: "Pagination offset (optional)" },
           limit: { type: "number", description: "Pagination limit (optional)" },
+          includeSuperseded: { type: "boolean", description: "Include superseded historical facts (excluded by default)", default: false },
         },
         async execute(args, { worktree, directory }) {
           return await recallFacts(args, { worktree, directory });
@@ -417,9 +404,18 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
             if (!factText || !docId) {
               throw new Error("factText and docId are required parameters for link action");
             }
+            const facts = await readMemory(key);
+            const needle = factText.toLowerCase().trim();
+            const matches = facts.filter((entry) => {
+              const body = factBody(entry).toLowerCase();
+              return body === needle || body.includes(needle) || entry.toLowerCase().includes(needle);
+            });
+            if (matches.length === 0) throw new Error(`Notebook fact not found for link: ${factText}`);
+            if (matches.length > 1) throw new Error(`Notebook fact match is ambiguous; use a more specific factText: ${factText}`);
+            const resolvedFactText = factBody(matches[0]);
             const res = await linkFactToDocument({
               factKey: key,
-              factText,
+              factText: resolvedFactText,
               docId,
               startLine,
               endLine,
@@ -430,7 +426,8 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
 
           if (act === "get_doc_links") {
             if (!docId) throw new Error("docId parameter is required for get_doc_links action");
-            const links = await getLinksForDoc(docId);
+            const allowedScopes = key === GLOBAL_KEY ? [GLOBAL_KEY] : [GLOBAL_KEY, key];
+            const links = await getLinksForDoc(docId, allowedScopes);
             return JSON.stringify(links, null, 2);
           }
 
@@ -444,7 +441,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
       },
       "ingest_document": {
         description:
-          "Ingest a document into the RAG knowledge base. " +
+          "Selectively preserve a reliable, reusable source in the RAG knowledge base; do not ingest everything encountered. " +
           "Accepts local file paths, web URLs, or raw Markdown/text content. " +
           "For type='url' the page is fetched and its content is indexed (not just the URL). " +
           "Processes document through 3-tier hierarchy chunking (Big/Medium/Small), " +
@@ -454,16 +451,19 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           type: { type: "string", description: "Input content type: 'text', 'file', 'url' (url fetches the page content)", default: "text" },
           title: { type: "string", description: "Document title" },
           path: { type: "string", description: "Original document file path" },
+          scope: { type: "string", description: "RAG visibility: current Git project (default) or global", default: "project" },
           generateEmbeddings: { type: "boolean", description: "Compute dense vector embeddings", default: true },
         },
-        async execute({ content, type, title, path, generateEmbeddings }) {
+        async execute({ content, type, title, path, scope, generateEmbeddings }, { worktree, directory }) {
           const { ingestDocument } = await import("../mcp-server/ingest/pipeline.js");
+          const projectScope = await resolveRagScopeKey(scope || "project", { worktree, directory });
           const result = await ingestDocument({
             content,
             type: type || "text",
             title: title || null,
             path: path || null,
             generateEmbeddings: generateEmbeddings !== false,
+            projectScope,
           });
           return JSON.stringify(
             {
@@ -473,6 +473,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
               sectionsCount: result.sectionsCount,
               microChunksCount: result.microChunksCount,
               deduplicated: result.deduplicated,
+              scope: result.projectScope,
             },
             null,
             2
@@ -481,7 +482,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
       },
       "query_knowledge_base": {
         description:
-          "Perform hybrid search (RSF/RRF BM25 full-text + dense vector similarity) across the RAG knowledge base. " +
+          "Perform project-isolated hybrid search (RSF/RRF BM25 full-text + dense vector similarity) across the RAG knowledge base. " +
           "Returns top-ranked candidate document sections with breadcrumbs, GraphRAG defined code symbols, and relevance scores.",
         args: {
           query: { type: "string", description: "Search query in natural language or symbol name" },
@@ -491,17 +492,20 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
             description: "Optional task-specific retrieval instruction shaping embedding focus",
           },
           generateEmbeddings: { type: "boolean", description: "Use vector search alongside BM25", default: true },
+          scope: { type: "string", description: "Search global + current project (default), project only, or global only", default: "all" },
         },
-        async execute({ query, limit, instruction, generateEmbeddings }) {
+        async execute({ query, limit, instruction, generateEmbeddings, scope }, { worktree, directory }) {
           const { hybridQuery } = await import("../mcp-server/retrieval/retriever.js");
           const { getConfig } = await import("../mcp-server/config/config_manager.js");
           const activeConfig = getConfig();
+          const scopeKeys = await resolveRagScopeKeys(scope || "all", { worktree, directory });
 
           const results = await hybridQuery({
             query,
             limit: limit || 5,
             generateEmbeddings: generateEmbeddings !== false,
             instruction: instruction || null,
+            scopeKeys,
           });
 
           if (!results || results.length === 0) {
@@ -527,9 +531,54 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           return headerNote + formatted;
         },
       },
+      "batch_query_knowledge_base": {
+        description:
+          "Execute multiple project-isolated hybrid searches in one call. " +
+          "All query embeddings are computed in one ONNX pass and results are returned in input order.",
+        args: {
+          queries: { type: "array", items: { type: "string" }, description: "Search queries to execute in one batch" },
+          limit: { type: "number", description: "Maximum sections per query", default: 5 },
+          instruction: { type: "string", description: "Optional retrieval instruction applied to every query" },
+          generateEmbeddings: { type: "boolean", description: "Use vector search alongside BM25", default: true },
+          scope: { type: "string", description: "Search global + current project (default), project only, or global only", default: "all" },
+        },
+        async execute({ queries, limit, instruction, generateEmbeddings, scope }, { worktree, directory }) {
+          const { batchHybridQuery } = await import("../mcp-server/retrieval/retriever.js");
+          const { getConfig } = await import("../mcp-server/config/config_manager.js");
+          const activeConfig = getConfig();
+          const scopeKeys = await resolveRagScopeKeys(scope || "all", { worktree, directory });
+          const allResults = await batchHybridQuery(queries, {
+            limit: limit || 5,
+            generateEmbeddings: generateEmbeddings !== false,
+            instruction: instruction || null,
+            scopeKeys,
+          });
+
+          const formatted = allResults.map((results, queryIndex) => {
+            const header = `## Query ${queryIndex + 1}: "${queries[queryIndex]}"\n`;
+            if (!results || results.length === 0) return `${header}_No results found._`;
+            return header + results.map((result, resultIndex) => {
+              let itemHeader = `### [${resultIndex + 1}] ${result.doc_title || "Untitled"}`;
+              if (result.heading) itemHeader += ` > ${result.heading}`;
+              if (result.breadcrumbs) itemHeader += ` (${result.breadcrumbs})`;
+              let body = `Score: ${(result.score || 0).toFixed(4)}`;
+              if (result.retrieval_policy && result.retrieval_policy !== "micro_chunk") {
+                body += ` [${result.retrieval_policy}]`;
+              }
+              if (result.defined_symbols && result.defined_symbols.length > 0) {
+                body += `\nDefined Symbols: ${result.defined_symbols.join(", ")}`;
+              }
+              body += `\n\n${result.snippet || result.full_section_content || ""}`;
+              return `${itemHeader}\n${body}`;
+            }).join("\n\n---\n\n");
+          }).join("\n\n===\n\n");
+
+          return `[Active Model: ${activeConfig.embeddingModel} | Fusion: ${activeConfig.fusionAlgorithm.toUpperCase()} | ${queries.length} queries]\n\n${formatted}`;
+        },
+      },
       "manage_knowledge_base": {
         description:
-          "Manage the RAG knowledge base: inspect stats, list documents, read full raw document, delete documents, or export/import snapshots.",
+          "Manage the project-isolated RAG knowledge base: inspect stats, list documents, read full raw document, unlink/delete documents, or export/import complete snapshots.",
         args: {
           action: {
             type: "string",
@@ -537,20 +586,41 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           },
           docId: { type: "string", description: "Document ID, title, or path (required for read_document and delete)" },
           snapshotPath: { type: "string", description: "File path for snapshot export/import" },
+          scope: { type: "string", description: "For stats/list/read: global + current project by default. Delete defaults to the current project (or global outside Git); pass all/global explicitly for broader removal" },
         },
-        async execute({ action, docId, snapshotPath }) {
+        async execute({ action, docId, snapshotPath, scope }, { worktree, directory }) {
           const { getDatabase } = await import("../mcp-server/db/database.js");
           const db = await getDatabase();
+          const scopeKeys = ["stats", "list", "read_document", "delete"].includes(action)
+            ? await resolveManageRagScopeKeys(action, scope, { worktree, directory })
+            : null;
+          const placeholders = scopeKeys ? scopeKeys.map(() => "?").join(",") : "";
+          const visibleDocWhere = scopeKeys
+            ? `EXISTS (SELECT 1 FROM document_scopes ds WHERE ds.doc_id = d.id AND ds.scope_key IN (${placeholders}))`
+            : "1=1";
 
           if (action === "stats") {
-            const docCountRow = await db.prepare("SELECT COUNT(*) as cnt FROM documents").get();
+            const docCountRow = await db.prepare(`SELECT COUNT(*) as cnt FROM documents d WHERE ${visibleDocWhere}`).get(...scopeKeys);
             const docCount = docCountRow ? docCountRow.cnt : 0;
-            const secCountRow = await db.prepare("SELECT COUNT(*) as cnt FROM sections").get();
+            const secCountRow = await db.prepare(`SELECT COUNT(*) as cnt FROM sections s JOIN documents d ON d.id = s.doc_id WHERE ${visibleDocWhere}`).get(...scopeKeys);
             const secCount = secCountRow ? secCountRow.cnt : 0;
-            const chunkCountRow = await db.prepare("SELECT COUNT(*) as cnt FROM micro_chunks").get();
+            const chunkCountRow = await db.prepare(`SELECT COUNT(*) as cnt FROM micro_chunks m JOIN documents d ON d.id = m.doc_id WHERE ${visibleDocWhere}`).get(...scopeKeys);
             const chunkCount = chunkCountRow ? chunkCountRow.cnt : 0;
-            const edgeCountRow = await db.prepare("SELECT COUNT(*) as cnt FROM graph_edges").get();
-            const edgeCount = edgeCountRow ? edgeCountRow.cnt : 0;
+            const visibleDocIds = await db.prepare(`SELECT d.id FROM documents d WHERE ${visibleDocWhere}`).all(...scopeKeys);
+            let edgeCount = 0;
+            if (visibleDocIds.length > 0) {
+              const docIds = visibleDocIds.map((row) => row.id);
+              const docPlaceholders = docIds.map(() => "?").join(",");
+              const ownedRows = await db.prepare(`
+                SELECT id FROM sections WHERE doc_id IN (${docPlaceholders})
+                UNION SELECT id FROM medium_chunks WHERE doc_id IN (${docPlaceholders})
+                UNION SELECT id FROM micro_chunks WHERE doc_id IN (${docPlaceholders})
+              `).all(...docIds, ...docIds, ...docIds);
+              const ownedIds = [...docIds, ...ownedRows.map((row) => row.id)];
+              const edgePlaceholders = ownedIds.map(() => "?").join(",");
+              const edgeCountRow = await db.prepare(`SELECT COUNT(*) as cnt FROM graph_edges WHERE source_id IN (${edgePlaceholders}) OR target_id IN (${edgePlaceholders})`).get(...ownedIds, ...ownedIds);
+              edgeCount = edgeCountRow ? edgeCountRow.cnt : 0;
+            }
             return JSON.stringify(
               {
                 documents: docCount,
@@ -565,16 +635,16 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
 
           if (action === "list") {
             const docs = await db
-              .prepare("SELECT id, title, path, blob_hash, created_at FROM documents ORDER BY created_at DESC")
-              .all();
+              .prepare(`SELECT d.id, d.title, d.path, d.blob_hash, d.created_at FROM documents d WHERE ${visibleDocWhere} ORDER BY d.created_at DESC`)
+              .all(...scopeKeys);
             return JSON.stringify(docs, null, 2);
           }
 
           if (action === "read_document") {
             if (!docId) throw new Error("docId parameter is required for read_document action");
             const doc = await db
-              .prepare("SELECT id, title, path, blob_hash, created_at FROM documents WHERE id = ? OR path = ? OR title = ?")
-              .get(docId, docId, docId);
+              .prepare(`SELECT d.id, d.title, d.path, d.blob_hash, d.created_at FROM documents d WHERE (d.id = ? OR d.path = ? OR d.title = ?) AND ${visibleDocWhere}`)
+              .get(docId, docId, docId, ...scopeKeys);
             if (!doc) {
               throw new Error(`Document not found in knowledge base for docId: ${docId}`);
             }
@@ -595,8 +665,22 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
 
           if (action === "delete") {
             if (!docId) throw new Error("docId parameter is required for delete action");
+            const visible = await db
+              .prepare(`SELECT d.id FROM documents d WHERE (d.id = ? OR d.path = ? OR d.title = ?) AND ${visibleDocWhere}`)
+              .get(docId, docId, docId, ...scopeKeys);
+            if (!visible) throw new Error(`Document not found in the selected RAG scope for docId: ${docId}`);
+            const scopeRemoval = await removeDocumentScopes(db, visible.id, scopeKeys);
+            if (scopeRemoval.remainingScopes > 0) {
+              return JSON.stringify({
+                deleted: false,
+                unlinked: true,
+                docId: visible.id,
+                removedScopes: scopeRemoval.removedScopes,
+                remainingScopes: scopeRemoval.remainingScopes,
+              }, null, 2);
+            }
             const { deleteDocument } = await import("../mcp-server/ingest/pipeline.js");
-            const result = await deleteDocument(docId, db);
+            const result = await deleteDocument(visible.id, db);
             return JSON.stringify(result, null, 2);
           }
 
@@ -708,6 +792,9 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
               }
             } catch (e) {}
           }
+          const { moveKnowledgeScope } = await import("../mcp-server/graph/knowledge_linker.js");
+          const migratedKnowledge = await moveKnowledgeScope(db, legacyPathKey, key);
+          if (migratedKnowledge.movedLinks > 0 || migratedKnowledge.movedDocuments > 0) migrated = true;
 
           const res = {
             status: "success",
@@ -794,8 +881,10 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
 
           await writeMemory(targetKey, targetFacts);
 
-          await db.prepare("UPDATE project_aliases SET identity_key = ? WHERE identity_key = ?;").run(targetKey, sourceKey);
           await upsertIdentity(db, { key: targetKey, name: sourceIdentity.name, primaryRemote: normalizeRemoteUrl(remote) });
+          await db.prepare("UPDATE project_aliases SET identity_key = ? WHERE identity_key = ?;").run(targetKey, sourceKey);
+          const { moveKnowledgeScope } = await import("../mcp-server/graph/knowledge_linker.js");
+          const movedKnowledge = await moveKnowledgeScope(db, sourceKey, targetKey);
           await removeIdentity(db, sourceKey);
 
           try {
@@ -811,7 +900,9 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
             status: "success",
             sourceKey,
             targetKey,
-            mergedFacts: mergedCount
+            mergedFacts: mergedCount,
+            movedKnowledgeLinks: movedKnowledge.movedLinks,
+            movedRagDocuments: movedKnowledge.movedDocuments
           };
           await notify(client, "Project memory relinked");
           return JSON.stringify(res, null, 2);

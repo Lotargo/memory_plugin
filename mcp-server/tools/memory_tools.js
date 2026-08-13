@@ -51,6 +51,7 @@ export function registerMemoryTools(server) {
         "Use project: '<directory path>' with scope 'project'/'all' to read facts of a specific project from any working directory. " +
         "query filters by keyword (all space-separated terms must match). " +
         "tags filters by comma-separated tags. since/until filter by date (YYYY-MM-DD, inclusive). " +
+        "Superseded facts are excluded by default; pass includeSuperseded=true to inspect history. " +
         "Expired facts are shown with [EXPIRED], protected ones with [KEEP]. The response includes the store file paths.",
       inputSchema: z.object({
         scope: defStr("all").describe("'project', 'global', 'all', or 'list_projects'"),
@@ -62,6 +63,7 @@ export function registerMemoryTools(server) {
         mode: z.enum(["headers", "full"]).nullish().transform((v) => v || "full").describe("Result mode: 'full' (with body, default) or 'headers' (title and badges only)"),
         offset: optNum().describe("Pagination offset (optional)"),
         limit: optNum().describe("Pagination limit (optional)"),
+        includeSuperseded: defBool(false).describe("Include superseded historical facts (excluded by default)"),
       }),
     },
     async (args) => ({ content: [{ type: "text", text: await recallFacts(args) }] })

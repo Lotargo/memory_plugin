@@ -10,10 +10,12 @@ const END_MARKER = "<!-- END MEMORY AGENT PROMPT -->";
 export const PROMPT_BLOCK = `${START_MARKER}
 [SYSTEM INSTRUCTION: PERSONAL CONTEXT & MEMORY AGENT]
 1. MANDATORY FIRST STEP (SESSION INITIALIZATION): At the very start of every session or conversation, your VERY FIRST ACTION MUST BE to execute \`recall\` from \`memory-agent\` with \`scope: "all"\` (or without restrictive query filters) to load ALL saved global facts, user preferences, personal context, and project guidelines BEFORE performing any other tasks or reading code. Do NOT filter or restrict the initial \`recall\` call with specific query keywords or scoped parameters, so that no global facts are missed.
-2. PROACTIVE SAVING DIRECTIVE: You MUST automatically and proactively call \`remember\` from \`memory-agent\` whenever the user shares durable facts, personal preferences, coding guidelines, technology choices, or project architecture decisions. Do NOT wait for explicit user commands like "remember this".
-3. SIGNAL FILTER: Save only high-signal facts (name, language, roles, constraints, tech stack preferences, architecture decisions, conventions). Translate facts into clear, concise English when saving. Do NOT save transient details or one-off conversation turns.
-4. QUERY OPTIMIZATION: When using \`query_knowledge_base\` from \`memory-agent\`, transform the user's natural language question into concept-dense search queries. Do NOT send raw conversational questions ("как мне сделать X?", "что такое Y?"). Instead, extract key terms and use concise factual phrases. For multi-part queries or comparisons, use \`batch_query_knowledge_base\` with multiple targeted queries — this is more efficient (single API call, single ONNX inference pass) and yields higher retrieval quality than separate calls.
-5. POLICY EXPANSION: The knowledge base automatically expands table summaries and code signatures for better recall (config \`policyExpansion\`, default: ON). If you need raw micro_chunk precision without expansion, pass \`policyExpansion: false\` per-call or set via config.${END_MARKER}`;
+2. PROJECT IDENTITY INITIALIZATION: After the initial recall, call \`memory_info\` for the current workspace. If it reports a Git identity with \`Registry: unlinked\`, immediately call \`link_project_memory\` for the current directory. If linking migrated legacy facts, repeat \`recall(scope: "all")\`. Outside a Git repository, do not create project memory; use global memory only.
+3. PROACTIVE SAVING DIRECTIVE: You MUST automatically and proactively call \`remember\` from \`memory-agent\` whenever the user shares durable facts, personal preferences, coding guidelines, technology choices, or project architecture decisions. Do NOT wait for explicit user commands like "remember this".
+4. SIGNAL FILTER: Save only high-signal facts (name, language, roles, constraints, tech stack preferences, architecture decisions, conventions). Translate facts into clear, concise English when saving. Do NOT save transient details or one-off conversation turns.
+5. QUERY OPTIMIZATION: When using \`query_knowledge_base\` from \`memory-agent\`, transform the user's natural language question into concept-dense search queries. Do NOT send raw conversational questions ("как мне сделать X?", "что такое Y?"). Instead, extract key terms and use concise factual phrases. For multi-part queries or comparisons, use \`batch_query_knowledge_base\` with multiple targeted queries — this is more efficient (single API call, single ONNX inference pass) and yields higher retrieval quality than separate calls.
+6. SELECTIVE RAG CURATION: When web research or current technical documentation yields reliable project knowledge likely to be needed again, ingest the relevant source or excerpt with project scope and link it to the project-scoped Notebook fact it supports. Use global RAG scope only for sources intentionally reusable across projects. Prioritize authoritative documentation and knowledge newer than model training. Do not ingest everything encountered, transient output, or duplicate low-value content.
+7. POLICY EXPANSION: The knowledge base automatically expands table summaries and code signatures for better recall (config \`policyExpansion\`, default: ON). If you need raw micro_chunk precision without expansion, pass \`policyExpansion: false\` per-call or set via config.${END_MARKER}`;
 
 // Plugin-owned files live here so we never destroy user-owned config content.
 const AGENT_CONFIG_DIR = join(homedir(), ".config", "memory-agent");
@@ -115,9 +117,10 @@ export function upsertPromptBlock(content, block = PROMPT_BLOCK) {
   return clean ? `${clean}\n\n${block}\n` : `${block}\n`;
 }
 
-export async function enableGlobalPrompt() {
+export async function enableGlobalPrompt(targetNames = null) {
   const promptFile = await syncPromptFile();
-  const targets = getGlobalPromptTargets();
+  const requested = Array.isArray(targetNames) ? new Set(targetNames) : null;
+  const targets = getGlobalPromptTargets().filter((target) => !requested || requested.has(target.name));
   const state = await loadState();
   const results = [];
 

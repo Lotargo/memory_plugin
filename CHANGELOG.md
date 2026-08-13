@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.4] - 2026-08-13
+
+### Added
+
+- `memory_info` now reports whether the current Git identity is `Registry: linked`
+  or `Registry: unlinked`, enabling agents to register new repositories automatically.
+- RAG documents now have explicit global/project scope associations. The default
+  project scope follows the current linked Git identity, while `scope: "all"`
+  retrieves only global knowledge plus the current project's knowledge. A source
+  shared by several scopes is stored once and associated with each scope.
+- The native OpenCode plugin now exposes `batch_query_knowledge_base`, bringing it
+  to all 15 shared tools plus its two OpenCode-only helpers.
+
+### Changed
+
+- OpenCode auto-injected memory now includes complete fact bodies for both global and
+  current-project stores without the previous ten-fact truncation and instructs the
+  agent to register an unlinked Git identity. Header-only initialization was removed
+  because it loses essential context.
+- The bundled memory skill now defines full-body session recall, strict project
+  isolation, agent-resolved conflicts, automatic Git project registration, and
+  selective RAG curation for important web findings and current technical
+  documentation, including links from project facts to supporting sources.
+- `recall` hides superseded facts by default and exposes history through
+  `includeSuperseded: true`. Filtered output keeps physical storage indices stable,
+  so a displayed number always targets the same fact in `forget`.
+
+### Fixed
+
+- Re-ingesting an existing path or URL now preserves its document ID, scope
+  associations, and fact links while rebuilding chunks, vectors, FTS rows, and
+  structural graph edges for changed content.
+- Snapshot export/import and hybrid cloud synchronization now preserve vectors,
+  retrieval policies, policy provenance, document scopes, knowledge links, and
+  structural graph metadata. The hybrid sync worker also drains tasks queued during
+  an active flush instead of leaving them pending.
+- Relinking a Git project now moves its RAG scope associations and fact-to-document
+  links together with Notebook facts.
+- Environment-specific setup flags now update only their requested integration.
+  Codex setup also synchronizes the skill to both `~/.codex/skills` and the shared
+  `~/.agents/skills` location.
+- Shared documents no longer expose fact-link metadata belonging to another project.
+  Document deletion now defaults to unlinking only the current project (or global
+  outside Git); broader `global` / `all` removal must be requested explicitly.
+- Updating or forgetting a linked Notebook fact now keeps its knowledge-graph
+  projection and cloud payload consistent. Line-range graph edges are included in
+  per-document cloud sync, and superseding legacy facts without IDs assigns distinct
+  IDs to the old and new versions.
+- README tool counts now match the implementations: 15 MCP tools, 17 native
+  OpenCode tools, and 17 unique tool names across both surfaces. The OpenCode tool
+  list documents all shared and OpenCode-only helpers explicitly.
+
 ## [1.6.3] - 2026-08-13
 
 ### Added
@@ -28,7 +80,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   TOML sections or creating duplicates.
 - Repeated prompt setup now collapses duplicate plugin-owned blocks while preserving
   user-authored AGENTS.md / CLAUDE.md content.
-- README tool counts now match the implementations: 15 MCP tools, 16 native
+- README tool counts match the v1.6.3 implementations: 15 MCP tools, 16 native
   OpenCode tools, and 17 unique tool names across both surfaces. The OpenCode tool
   list and the MCP-only status of `batch_query_knowledge_base` are documented explicitly.
 

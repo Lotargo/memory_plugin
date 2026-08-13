@@ -216,10 +216,10 @@ export async function runSetup() {
             ? "  [OK] Codex: added direct Node.js memory-agent launcher to ~/.codex/config.toml"
             : "  [OK] Codex: migrated memory-agent to a direct Node.js launcher in ~/.codex/config.toml"
         );
-        configuredCount++;
       } else {
         console.log("  [INFO] Codex: direct Node.js memory-agent launcher already configured");
       }
+      configuredCount++;
     } catch (err) {
       console.log("  [FAIL] Codex setup failed:", err.message);
     }
@@ -228,7 +228,11 @@ export async function runSetup() {
   // 5. Global Prompt Instructions (Antigravity, Codex, Claude Code)
   try {
     const { enableGlobalPrompt } = await import("./prompt_manager.js");
-    const promptResults = await enableGlobalPrompt();
+    const promptTargets = [];
+    if (doAntigravity) promptTargets.push("Antigravity");
+    if (doCodex) promptTargets.push("Codex");
+    if (doClaude) promptTargets.push("Claude Code");
+    const promptResults = await enableGlobalPrompt(promptTargets);
     promptResults.forEach((r) => {
       if (r.status === "enabled") {
         console.log(`  [OK] ${r.name}: enabled global prompt instruction in ${r.filePath}`);
@@ -250,14 +254,16 @@ export async function runSetup() {
     const packageSkillsDir = join(packageDir, "skills");
     if (existsSync(packageSkillsDir)) {
       const opencodeDir = process.env.OPENCODE_CONFIG_DIR || join(home, ".config", "opencode");
-      const targets = [
-        { name: "OpenCode", dir: join(opencodeDir, "skills") },
-        { name: "Antigravity", dir: join(home, ".gemini", "config", "skills") },
-        { name: "Codex", dir: join(home, ".codex", "skills") },
-        { name: "Claude Code", dir: join(home, ".claude", "skills") },
-      ];
+      const targets = [];
+      if (doOpenCode) targets.push({ name: "OpenCode", dir: join(opencodeDir, "skills") });
+      if (doAntigravity) targets.push({ name: "Antigravity", dir: join(home, ".gemini", "config", "skills") });
+      if (doCodex) {
+        targets.push({ name: "Codex", dir: join(home, ".codex", "skills") });
+        targets.push({ name: "Codex shared agents", dir: join(home, ".agents", "skills") });
+      }
+      if (doClaude) targets.push({ name: "Claude Code", dir: join(home, ".claude", "skills") });
       const cwd = process.cwd();
-      if (existsSync(join(cwd, ".agents"))) {
+      if (doAntigravity && existsSync(join(cwd, ".agents"))) {
         targets.push({ name: "Antigravity (local)", dir: join(cwd, ".agents", "skills") });
       }
 

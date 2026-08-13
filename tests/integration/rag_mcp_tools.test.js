@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DatabaseSync } from "node:sqlite";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -311,6 +312,21 @@ export async function runRagMcpToolsTests() {
     const linkData = JSON.parse(linkRes);
     assert.ok(linkData.linkId, `link created: ${linkRes}`);
     ok("link_knowledge: link fact to document");
+
+    const updatedFactText = "Use RSF fusion with tuned weights";
+    const updateLinkedFact = toolResult(
+      await request("tools/call", {
+        name: "update_fact",
+        arguments: { id: factId, scope: "project", newText: updatedFactText },
+      })
+    );
+    assert.ok(updateLinkedFact.includes("doc link(s) updated"), updateLinkedFact);
+    const graphDb = new DatabaseSync(join(MEMORY_DIR, "storage", "memory.sqlite"));
+    const linkEdges = graphDb.prepare("SELECT source_id FROM graph_edges WHERE metadata_json LIKE '%linkId%'").all();
+    graphDb.close();
+    assert.ok(linkEdges.some((edge) => edge.source_id.includes(updatedFactText.substring(0, 30))), JSON.stringify(linkEdges));
+    assert.ok(!linkEdges.some((edge) => edge.source_id.includes("Use RSF fusion for all searches".substring(0, 30))), JSON.stringify(linkEdges));
+    ok("update_fact: refreshes knowledge link and graph projection");
 
     // ── 11. link_knowledge: list_links ────────────────────────────────────
     const listLinksRes = toolResult(

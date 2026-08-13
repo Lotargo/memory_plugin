@@ -7,7 +7,7 @@ description: Comprehensive guide for using the Memory, Hybrid RAG Knowledge Engi
 
 You have access to a persistent dual-layer memory engine supercharged with an **Agent-Driven Knowledge Graph** and general MCP integration helpers:
 1. **Layer 1: Notebook Store (Key-Value Facts)**: Stores high-signal personal preferences, project conventions, and durable rules in clean Markdown.
-2. **Layer 2: RAG Knowledge Base**: Indexes documentation, repositories, and technical guides for hybrid semantic retrieval.
+2. **Layer 2: Curated RAG Knowledge Base**: Preserves selected external findings, documentation, repositories, and technical guides that are likely to matter again.
 3. **Layer 3: Agent-Driven Knowledge Graph**: Connects Notebook facts (Layer 1) to specific Knowledge Base documents, sections, and **exact line ranges** (Layer 2).
 4. **Integration Layer (General MCP Helpers)**: Quickly discovers connected MCP servers and identifies appropriate tools for specific tasks.
 
@@ -27,12 +27,12 @@ You have access to a persistent dual-layer memory engine supercharged with an **
 | Filter facts by keyword / tags / date | `recall` | `query`, `tags`, `since`, `until` |
 | Show storage paths, versions, fact & RAG stats, git identity | `memory_info` | — |
 | Connect a Notebook fact to a document, section, or line range | `link_knowledge` | `action` ("link", "list_links", "get_doc_links"), `factText`, `docId`, `startLine`, `endLine`, `relationType` |
-| Link directory to Git project identity / migrate legacy stores | `link_project_memory` | `directory`, optional `remote` |
+| Register current Git project identity / migrate legacy stores | `memory_info` then `link_project_memory` when `Registry: unlinked` | `directory`, optional `remote` |
 | Remove path alias or purge project identity | `unlink_project_memory` | `directory`, `purge` (boolean) |
 | Move or merge project memories to new target identity | `relink_project_memory` | `directory`, `remote` (target remote URL) |
-| User asks to index a documentation URL, file, or repository | `ingest_document` | `content` (text/file path/URL), `type` ("text", "file", "url"), `title`, `path` |
-| User asks a complex question about indexed docs or code | `query_knowledge_base` | `query`, `limit`, `instruction`, `generateEmbeddings` |
-| User needs multiple queries executed in batch (comparisons, multi-topic) | `batch_query_knowledge_base` | `queries` (array), `limit`, `instruction`, `generateEmbeddings` |
+| User asks to index a documentation URL, file, or repository | `ingest_document` | `content` (text/file path/URL), `type` ("text", "file", "url"), `title`, `path`, `scope` (project default) |
+| User asks a complex question about indexed docs or code | `query_knowledge_base` | `query`, `scope` (all default), `limit`, `instruction`, `generateEmbeddings` |
+| User needs multiple queries executed in batch (comparisons, multi-topic) | `batch_query_knowledge_base` | `queries` (array), `scope` (all default), `limit`, `instruction`, `generateEmbeddings` |
 | Read full raw content of an ambiguous/abstract document | `manage_knowledge_base` | `action: "read_document"`, `docId` |
 | View DB stats, list indexed docs, read/delete docs, export/import snapshots | `manage_knowledge_base` | `action` ("stats", "list", "read_document", "delete", "export_snapshot", "import_snapshot"), `docId`, `snapshotPath` |
 | Re-embed all documents after switching embedding model / dimension | `reindex_knowledge_base` | `model`, `dimension` (optional; defaults to active config) |
@@ -46,14 +46,14 @@ You have access to a persistent dual-layer memory engine supercharged with an **
 ### Agent-Driven Knowledge Graph Architecture
 Automatic regex/heuristic algorithms alone CANNOT infer high-level semantic intent or cross-document relationships. **You (the AI Agent) are the primary architect of the Knowledge Graph.**
 
-Whenever you ingest project documentation, web pages, or local files, you should link durable facts in the Notebook store directly to the corresponding RAG documents and exact line ranges.
+When an ingested source supports a durable project decision or rule, link the corresponding Notebook fact directly to the RAG document and, when useful, its exact line range. The Notebook fact is the concise orientation point; the linked RAG source is its detailed evidence and technical context.
 
 ### What to Save and Link (`remember` & `link_knowledge`)
 - **High-Signal Facts**: User name, role, language preferences, architectural constraints, framework choices, coding standards, test rules.
 - **Formatting & Fact Titles**:
   - Always translate the fact into clear, concise English before calling `remember`.
   - **Always specify a descriptive `title` parameter** (a 2-5 word headline, e.g., `title: "Backend Framework Preference"`).
-  - Facts are stored in `**Title** — body` format. In `mode: "full"` (default in `recall`), both title and body are displayed. In `mode: "headers"` and in auto-injected `<MEMORY>` system prompt blocks, only `**Title**` is displayed to keep the system prompt lean.
+  - Facts are stored in `**Title** — body` format. Initial session recall and auto-injected `<MEMORY>` blocks MUST include full fact bodies. Header-only recall was tested and rejected because it loses essential context. Use `mode: "headers"` only when the user explicitly asks for a compact inventory, never for session initialization.
 - **Linking to Knowledge Base Documents**:
   - Pass `docId` (or document title/path) and optional `startLine` / `endLine` when calling `remember` or `link_knowledge`.
   - Example: `remember(title: "Backend Framework Preference", fact: "Use Fastify instead of Express for backend services", scope: "project", docId: "arch_specs.md", startLine: 5, endLine: 7)`
@@ -92,9 +92,16 @@ Supported metadata keys (set via `remember`, rendered as badges by `recall`):
 - `since` / `until`: "YYYY-MM-DD" (inclusive) to filter by fact date.
 - `project`: read a specific project's store from any working directory.
 - `mode`: `"full"` (default) or `"headers"` (returns title and badges only, omitting full text body).
+- `includeSuperseded`: `false` by default so obsolete history does not enter active context; set `true` only to inspect version history.
 - `offset` / `limit`: optional numeric pagination parameters.
 - `get_fact`: fetch exact text and full metadata of a single fact by its metadata id (e.g. `get_fact(id: "8f3a2c")`).
 - Output shows `[EXPIRED]`, `[KEEP]`, `[SUPERSEDED]`, `[INJECT]` badges and the `Store file:` path.
+
+### Scope Isolation and Conflicts
+- `scope: "all"` returns the complete global store plus only the current Git project's store.
+- Outside a Git repository, `scope: "all"` returns global memory only. It must not create a `null` project store.
+- Memories from unrelated projects are never included in normal session initialization. Use the explicit `project` parameter only when the user asks to inspect another project.
+- Global and project facts are both context sources. Neither store automatically overrides the other; if facts conflict, the agent evaluates the available context and decides how to proceed.
 
 ### Updating Facts (`update_fact`)
 When the user corrects an old fact, prefer `update_fact` over `forget`+`remember` — it rewrites the text while preserving the original date and all metadata (`ttl`, `keep`, `tags`, `supersedes`), and re-points any linked Knowledge Base documents.
@@ -106,30 +113,51 @@ When the user corrects an old fact, prefer `update_fact` over `forget`+`remember
 `forget` refuses to delete facts saved with `keep: true`; pass `force: true` to override. It still supports deleting by index number, range ("3-30"), or text.
 
 ### Project Memory Identity Management (`link_project_memory`, `unlink_project_memory`, `relink_project_memory`)
-Project stores are bound to Git-based project identities (`git:remote` or `git:local:<repo basename>`). Use these tools to manage bindings:
+Project stores are bound to Git-based project identities (`git:<normalized remote>` or `git:local:<repo basename>`). Normal recall resolves the current identity automatically from Git and never scans unrelated project stores.
+
+Session initialization sequence:
+1. Call `recall(scope: "all")` first, with full bodies and no filters.
+2. Call `memory_info` for the current workspace.
+3. If it reports `Identity: git` and `Registry: unlinked`, immediately call `link_project_memory` for the current directory. This registers the identity and aliases and migrates any matching legacy path store.
+4. If the link result reports `migrated: true`, call `recall(scope: "all")` again so the migrated facts enter the active context.
+5. If it reports `Identity: no-git`, do not create project memory and do not invent a remote; continue with global memory only.
+
+Use the identity tools as follows:
 - `link_project_memory(directory, remote)`: Links a working directory to a Git identity, registers path/remote aliases, and automatically merges any legacy path-based stores.
 - `unlink_project_memory(directory, purge)`: Removes the path alias link for a directory; set `purge: true` to purge the identity from SQLite.
 - `relink_project_memory(directory, remote)`: Moves and merges memories from the current project identity to a new target remote URL identity.
 
 ### Storage Diagnostics (`memory_info`)
-`memory_info` returns the package version, `MEMORY_DIR`, SQLite DB path, store-file locations, fact counts per store, Git identity info, and RAG stats (documents, sections, chunks, graph edges, links).
+`memory_info` returns the package version, `MEMORY_DIR`, SQLite DB path, store-file locations, fact counts per store, current Git identity, its registry status (`linked`, `unlinked`, or `not-applicable`), and RAG stats (documents, sections, chunks, graph edges, links).
 
 ---
 
 ## 3. Layer 2: RAG Knowledge Base (`ingest_document`, `query_knowledge_base`, `manage_knowledge_base`, `reindex_knowledge_base`)
 
 ### Document Ingestion (`ingest_document`)
-Use this tool when adding technical documentation, API specs, architectural documents, or code repos into the searchable knowledge base.
+RAG is a curated project reference library, not an automatic archive of everything the agent reads. Ingest content only when the agent judges that it is reliable, relevant to the current project, and likely to be needed in future work.
+
+Good ingestion candidates:
+- Important information found through web research that should remain available after the current session.
+- Official or otherwise authoritative documentation for a library, framework, API, or tool used by the project.
+- New-version features, changed behavior, migration guidance, or APIs that may be newer than the model's training knowledge.
+- A complete document when most of it is relevant, or only the useful excerpt when the rest would add retrieval noise.
+
+Do not ingest search-result dumps, incidental pages, duplicate explanations, transient troubleshooting output, or documentation with no expected future project value. After ingestion, create or update a concise project-scoped Notebook fact when the source supports a durable choice, constraint, or discovery, and link that fact to the document with `remember(docId, ...)` or `link_knowledge`.
+- **RAG Scope Isolation**: `scope: "project"` is the ingestion default and associates the source with the current Git identity. Query scope `"all"` searches global RAG plus only the current project; outside Git it searches global only. Use global ingestion only for sources intentionally reusable across projects.
+- **Shared Sources**: Re-ingesting the same path or URL from another project adds that project association without duplicating the document. Removing it from one scope leaves it available to other linked scopes; the underlying document is deleted only after its last scope is removed.
+- **Stable Updates**: Re-ingesting an updated source preserves its `docId` and Notebook links while replacing chunks, vectors, policies, and structural graph edges.
 - **Hierarchy Chunking**: The engine automatically creates 3-tier chunks (Big Document -> Medium Section -> Small Micro-Chunk) and extracts GraphRAG code symbols.
 - **Auto Vector Embeddings**: Dense ONNX vectors (`multilingual-e5-small`) are automatically computed and indexed in SQLite.
 - **CRITICAL Schema Usage & Parameters**:
-  - `content` (required, string): For `type: "text"`/`"file"` it must be the **actual raw text or markdown content** of the document, NOT just a file path! For `type: "url"` it must be the **page URL** — the page is fetched automatically and its content is indexed (not just the URL).
-  - `type` (optional, enum: `"text"`, `"file"`, `"url"`): `"text"` (default), `"file"`, or `"url"` (fetches the web page and indexes its content).
-  - `path` (optional, string): Provide the absolute file path (e.g. `f:\projects\plugins\memory\README.md`). For URLs the final URL is used for deduplication.
+  - `content` (required, string): For `type: "text"`, pass actual raw text or Markdown. For `type: "file"`, pass either an allowed local file path or already-read file content. For `type: "url"`, pass the page URL; the page is fetched and its content is indexed.
+  - `type` (optional, enum: `"text"`, `"file"`, `"url"`): `"text"` (default), `"file"` (safe local-path read or supplied content), or `"url"` (fetches page content).
+  - `path` (optional, string): Original/deduplication path. With `type: "file"`, the server reads `path` when supplied; otherwise it treats `content` as the path when applicable. File reads are restricted by the built-in cwd/MEMORY_DIR allowlist and `ingestAllowedPaths`.
   - `title` (optional, string): Provide document title (e.g. `README.md`). If omitted for a URL, the page `<title>` is used.
   - **Correct Example (URL)**: `ingest_document(content: "https://docs.example.com/guide", type: "url", title: "Example Guide")`
-  - **Correct Example (text)**: `ingest_document(content: "<full text content>", path: "f:/path/to/file.md", title: "file.md", type: "file")`
-  - ❌ **Common Error**: `ingest_document(content: "f:/path/to/file.md")` — this causes validation failures because `content` is missing the text content.
+  - **Correct Example (local file path)**: `ingest_document(content: "f:/project/docs/guide.md", type: "file", title: "guide.md")`
+  - **Correct Example (already-read content)**: `ingest_document(content: "<full text content>", path: "f:/project/docs/guide.md", title: "guide.md", type: "file")`
+  - ❌ **Common Error**: passing a file path with the default `type: "text"`; that indexes the path string instead of reading the file.
 
 - **CLI/Script Execution Note**: When writing batch node scripts to call `ingestDocument`, remember that `@lotargo/memory_plugin` uses ES Modules (`"type": "module"`). Use `import` syntax instead of `require()`.
 
@@ -183,9 +211,9 @@ In such cases, use the **Full Raw Document Reading** mechanism:
 - Use `action: "stats"` to inspect stored document count and total micro-chunks.
 - Use `action: "list"` to see all ingested documents.
 - Use `action: "read_document"` with `docId` to read the complete raw text content of any document.
-- Use `action: "delete"` with `docId` to remove an outdated document and purge its CAS blob.
-- Use `action: "export_snapshot"` with `snapshotPath` to export a JSON backup of the RAG base.
-- Use `action: "import_snapshot"` with `snapshotPath` to import and merge a JSON backup into the current database.
+- Use `action: "delete"` with `docId` to unlink a source from the current project by default (or global outside Git). Pass `scope: "global"` or `scope: "all"` only when broader removal is intentional. The document and CAS blob are purged only when no scopes remain.
+- Use `action: "export_snapshot"` with `snapshotPath` to export a complete RAG backup, including scopes, vectors, retrieval policies, graph edges, and Notebook links.
+- Use `action: "import_snapshot"` with `snapshotPath` to import and merge a complete backup. Older unscoped snapshots remain globally visible for compatibility.
 
 ### Re-Indexing Embeddings (`reindex_knowledge_base`)
 Use this tool AFTER changing the embedding model or vector dimension so previously ingested documents remain vector-searchable.
@@ -207,10 +235,13 @@ When working in multi-server environments (e.g., OpenCode, Claude Code), you mig
 
 ## 5. Core Directives for AI Agents
 
-1. **Read Memories First (MANDATORY)**: At the very start of any session or conversation, your VERY FIRST STEP MUST BE to execute `recall` with `scope: "all"` (and without restrictive query filters) to load ALL saved global facts, user context, and project guidelines BEFORE performing any other task or code analysis. Do NOT filter or restrict the initial `recall` call with specific query keywords.
-2. **Be Proactive**: When the user mentions a durable preference, personal fact, or constraint, save it immediately using `remember`. Do not wait for explicit user commands.
-3. **Check Knowledge Base First**: If a query is related to specialized documentation, APIs, or project architectures, call `query_knowledge_base` using concept-dense search phrases. For multi-part queries (comparisons, cross-period analysis), prefer `batch_query_knowledge_base` to reduce API calls and ONNX inference overhead.
-4. **Optimize Search Queries**: Transform the user's natural language question into targeted search queries. "Compare revenue in Q1 vs Q3" → `["Выручка план факт Q1 2025", "Выручка план факт Q3 2025"]`. Avoid sending raw conversational questions to the RAG — formulated queries improve fact retrieval by 20-40%.
-4. **Inspect Ambiguous Docs Directly**: If querying produces low relevance scores on abstractly-named documents, call `manage_knowledge_base(action: "read_document")` to inspect the full text directly.
-5. **Keep Memory Clean**: If a preference changes, call `update_fact` to edit it in place, or `remember` with `supersedes` to keep a version trail. Use `keep: true` for facts that must survive an accidental `forget`, and give ephemeral facts a `ttl` so stale ones surface as `[EXPIRED]`.
-6. **Leverage MCP Servers**: Proactively list available tools using `list-mcp-tools` and query `mcp-reminder` if unsure of which platform tool can help you automate tasks.
+1. **Read Full Memories First (MANDATORY)**: At the very start of any session or conversation, your VERY FIRST STEP MUST BE to execute `recall` with `scope: "all"`, full bodies, and no restrictive filters. Do not use `mode: "headers"` for initialization.
+2. **Ensure Git Project Registration**: After initial recall, call `memory_info`. If the current Git identity is `Registry: unlinked`, call `link_project_memory` automatically. Re-run full recall only when legacy facts were migrated. Outside Git, stay global-only.
+3. **Be Proactive**: When the user mentions a durable preference, personal fact, or constraint, save it immediately using `remember`. Do not wait for explicit user commands.
+4. **Curate RAG Selectively**: Preserve important web findings and current technical documentation that the project is likely to need again, especially knowledge newer than model training. Ingest the relevant whole source or excerpt with project scope, not everything encountered, and link it to the project fact it supports. Use global scope only for intentionally cross-project sources.
+5. **Check Knowledge Base First**: If a query depends on ingested specialized documentation, APIs, code, or project architecture, call `query_knowledge_base` using a concept-dense phrase. Do not use RAG for ordinary conversation or facts already present in Notebook memory. For multi-part queries, prefer `batch_query_knowledge_base`.
+6. **Optimize Search Queries**: Transform the user's natural language question into targeted search queries. "Compare revenue in Q1 vs Q3" → `["Выручка план факт Q1 2025", "Выручка план факт Q3 2025"]`. Avoid raw conversational questions in RAG queries.
+7. **Inspect Ambiguous Docs Directly**: If querying produces low relevance scores on abstractly named documents, call `manage_knowledge_base(action: "list")`, then `manage_knowledge_base(action: "read_document")` to inspect the full text.
+8. **Keep Memory Clean**: If a preference changes, call `update_fact` to edit it in place, or `remember` with `supersedes` to keep a version trail. Use `keep: true` for facts that must survive accidental deletion, and give ephemeral facts a `ttl`.
+9. **Resolve Context, Do Not Enforce Store Precedence**: Global and current-project facts are both evidence. If they conflict, reason over both; do not apply an automatic global-wins or project-wins rule.
+10. **Leverage MCP Servers**: Use `list-mcp-tools` and `mcp-reminder` when unsure which connected platform tool fits the task.

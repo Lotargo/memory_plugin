@@ -1,6 +1,6 @@
 import assert from "node:assert";
 import { spawn, execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, readdirSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -122,18 +122,35 @@ export async function runMcpToolsTests() {
     assert.ok(r3.includes("superseded"), r3);
     ok("remember: supersedes marks target");
 
+    appendFileSync(storeFile, "- [2025-01-01 00:00] **Legacy Preference** — legacy preference without metadata\n");
+    const legacySupersede = toolResult(await request("tools/call", {
+      name: "remember",
+      arguments: { scope: "project", fact: "legacy preference replacement", supersedes: "legacy preference without metadata" },
+    }));
+    assert.ok(legacySupersede.includes("superseded"), legacySupersede);
+    const legacyLines = readFileSync(storeFile, "utf8").split("\n").filter((line) => line.includes("legacy preference"));
+    const legacyTargetId = legacyLines[0].match(/\bid:([^\s]+)\b/)?.[1];
+    const legacyReplacementId = legacyLines[1].match(/\bid:([^\s]+)\b/)?.[1];
+    assert.ok(legacyTargetId && legacyReplacementId && legacyTargetId !== legacyReplacementId, JSON.stringify(legacyLines));
+    await request("tools/call", { name: "forget", arguments: { scope: "project", query: "legacy preference", force: true } });
+    ok("remember: legacy supersede assigns distinct IDs");
+
     const rec = toolResult(await request("tools/call", { name: "recall", arguments: { scope: "project" } }));
     assert.ok(rec.includes("alpha prefers vanilla ice cream"), rec);
     assert.ok(rec.includes("alpha uses ESM (v2)"), rec);
-    assert.ok(rec.includes("[SUPERSEDED]"), rec);
+    assert.ok(!rec.includes("[SUPERSEDED]"), rec);
     assert.ok(rec.includes("Store file: "), rec);
-    ok("recall: shows all facts with SUPERSEDED badge + store path");
+    ok("recall: excludes superseded history by default + shows store path");
+
+    const recHistory = toolResult(await request("tools/call", { name: "recall", arguments: { scope: "project", includeSuperseded: true } }));
+    assert.ok(recHistory.includes("[SUPERSEDED]"), recHistory);
+    ok("recall: includeSuperseded exposes version history explicitly");
 
     const recQ = toolResult(await request("tools/call", { name: "recall", arguments: { scope: "project", query: "vanilla" } }));
     assert.ok(recQ.includes("vanilla") && !recQ.includes("ESM"), recQ);
     ok("recall: query filter");
 
-    const recT = toolResult(await request("tools/call", { name: "recall", arguments: { scope: "project", tags: "pref" } }));
+    const recT = toolResult(await request("tools/call", { name: "recall", arguments: { scope: "project", tags: "pref", includeSuperseded: true } }));
     assert.ok(recT.includes("ESM") && !recT.includes("vanilla"), recT);
     ok("recall: tags filter");
 
@@ -163,6 +180,7 @@ export async function runMcpToolsTests() {
     assert.ok(mi.includes("Version:"), mi);
     assert.ok(mi.includes("MEMORY_DIR: " + MEMORY_DIR), mi);
     assert.ok(mi.includes("SQLite DB:"), mi);
+    assert.ok(mi.includes("Registry:"), mi);
     assert.ok(mi.includes("RAG:"), mi);
     ok("memory_info: version, paths, RAG stats");
 

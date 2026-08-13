@@ -86,6 +86,10 @@ not `npx`. This avoids Windows stdio handshake failures caused by `.cmd` launche
 Running setup again safely migrates legacy `npx` entries and preserves unrelated
 sections in `~/.codex/config.toml`.
 
+`memory_plugin setup --codex` updates only the Codex MCP registration, Codex prompt,
+and the Codex-compatible skill locations (`~/.codex/skills` and the shared
+`~/.agents/skills`). It does not modify Claude Code, OpenCode, or Antigravity files.
+
 To verify registration, the Node runtime, MCP initialization, tool discovery, and
 real `memory_info` / `recall(scope="all")` calls:
 
@@ -125,6 +129,9 @@ memory_plugin setup --mode only-cloud
 2. **Layer 2: RAG Knowledge Base (Technical Documents & Codebases)**
    - **Tools**: `ingest_document`, `query_knowledge_base`, `batch_query_knowledge_base`, `manage_knowledge_base`, `reindex_knowledge_base`
    - **Capabilities**: Ingests raw text files, Markdown, HTML, Web URLs, office documents (PDF, DOCX, XLSX, CSV), and codebases.
+   - **Curation Model**: Stores only project-relevant sources likely to be reused—for example important web findings and current library/framework documentation that may be newer than model training. Ingest the useful document or excerpt, then link it to the project memory it supports; do not archive everything the agent encounters.
+   - **Scope Isolation**: New documents default to the current linked Git project. `scope: "all"` searches global sources plus the current project's sources; outside a Git repository it searches global sources only. Use `scope: "global"` only for genuinely cross-project material.
+   - **Stable Shared Sources**: Ingesting the same path or URL in another scope reuses one document and adds a scope association. Re-ingesting updated content preserves the document ID and its fact links; removing one scope does not delete a document still used by another scope.
    - **Engine Components**: 3-tier hierarchy chunking (Big / Medium / Small), SQLite FTS5 BM25 search, ONNX dense vector embeddings (`multilingual-e5-small`), Reciprocal Rank Fusion (RRF / RSF), cross-encoder reranking (optional), and GraphRAG Lite code symbol extraction.
 
 3. **Layer 3: Agent-Driven Knowledge Graph**
@@ -170,11 +177,11 @@ The package currently exposes **17 unique tool names** across its two integratio
 | Integration surface | Tool count | Composition |
 | :------------------ | ---------: | :---------- |
 | **MCP server** (Codex, Claude Code, Antigravity / Gemini CLI and other MCP clients) | **15** | 6 Notebook + 4 identity/graph + 5 RAG tools |
-| **Native OpenCode plugin** | **16** | 14 shared memory/identity/RAG tools + 2 OpenCode-only helpers |
+| **Native OpenCode plugin** | **17** | 15 shared memory/identity/RAG tools + 2 OpenCode-only helpers |
 
-The two surfaces are intentionally counted separately. The OpenCode plugin adds
-`list-mcp-tools` and `mcp-reminder`, but currently does not register the MCP-only
-`batch_query_knowledge_base` tool.
+The two surfaces are intentionally counted separately. The OpenCode plugin exposes
+all 15 shared tools, including `batch_query_knowledge_base`, and adds the native
+`list-mcp-tools` and `mcp-reminder` helpers.
 
 ### MCP Server Tools (15)
 
@@ -183,7 +190,7 @@ The two surfaces are intentionally counted separately. The OpenCode plugin adds
 | Tool | Scope / Target | Key Parameters | Description |
 | :--- | :------------- | :------------- | :---------- |
 | `remember` | `project` / `global` | `fact`, `title`, `scope`, `docId`, `startLine`, `endLine`, `relationType`, `ttl`, `keep`, `tags`, `supersedes` | Save a durable fact or preference. Supports optional title, document linking, TTL, keep protection, tags, and version superseding. |
-| `recall` | `all`, `project`, `global`, `list_projects` | `scope`, `project`, `query`, `tags`, `since`, `until`, `mode`, `offset`, `limit` | Display saved facts with metadata badges and linked docs. Supports cross-project lookup via `project: '<path>'` and header-only mode (`mode: "headers"`). |
+| `recall` | `all`, `project`, `global`, `list_projects` | `scope`, `project`, `query`, `tags`, `since`, `until`, `mode`, `offset`, `limit`, `includeSuperseded` | Display saved facts with metadata badges and linked docs. Superseded facts are hidden by default; opt into history with `includeSuperseded: true`. Filtered results retain stable storage indices for safe `forget` operations. |
 | `get_fact` | `all`, `project`, `global` | `id`, `scope` | Retrieve full text, raw line, and metadata of a single fact by its metadata ID (e.g. `"8f3a2c"`). |
 | `update_fact` | `project` / `global` | `id`, `newText`, `title`, `scope` | Rewrite a fact (and optionally its `**Title**`) while preserving its original creation date, metadata, and knowledge links. |
 | `forget` | `project` / `global` | `id` / `range` / `query`, `scope`, `force` | Remove a fact by index number, ID, range (e.g. `"3-30"`), or query. Requires `force: true` for protected (`[KEEP]`) facts. |
@@ -201,20 +208,20 @@ The two surfaces are intentionally counted separately. The OpenCode plugin adds
 
 | Tool | Key Parameters | Description |
 | :--- | :------------- | :---------- |
-| `ingest_document` | `content`, `type`, `title`, `path`, `generateEmbeddings` | Ingest local files, URLs, or raw text into the 3-tier index (Big/Medium/Small) with ONNX vector embeddings and GraphRAG symbol extraction. |
-| `query_knowledge_base` | `query`, `limit`, `instruction`, `generateEmbeddings` | Perform hybrid search (RSF/RRF BM25 + dense vector similarity) to retrieve candidate document sections with defined code symbols. |
-| `batch_query_knowledge_base` | `queries` (array), `limit`, `instruction`, `generateEmbeddings` | Execute multiple queries in a single batch call. More efficient than separate `query_knowledge_base` calls — all embeddings computed in one ONNX pass, queries run in parallel. Ideal for comparisons and multi-topic analysis. |
-| `manage_knowledge_base` | `action`, `docId`, `snapshotPath` | Inspect DB stats (`stats`), list documents (`list`), read full raw document (`read_document`), delete document (`delete`), or export/import snapshots (`export_snapshot` / `import_snapshot`). |
+| `ingest_document` | `content`, `type`, `title`, `path`, `scope`, `generateEmbeddings` | Ingest local files, URLs, or raw text into the 3-tier index. Defaults to the current linked Git project; use `scope: "global"` for intentionally shared knowledge. |
+| `query_knowledge_base` | `query`, `scope`, `limit`, `instruction`, `generateEmbeddings` | Perform hybrid search (RSF/RRF BM25 + dense vectors). `all` means global plus the current project, while `project` and `global` restrict retrieval explicitly. |
+| `batch_query_knowledge_base` | `queries` (array), `scope`, `limit`, `instruction`, `generateEmbeddings` | Execute multiple scoped queries in one call. All embeddings are computed in one ONNX pass, making this the preferred API for comparisons and multi-part research. |
+| `manage_knowledge_base` | `action`, `scope`, `docId`, `snapshotPath` | Inspect, list, read, or unlink documents within the selected scope, or export/import complete snapshots. Delete defaults to the current project (global outside Git); broader removal requires explicit `global` or `all`. |
 | `reindex_knowledge_base` | `model`, `dimension` | Re-embed all stored vectors with the active (or specified) embedding model and vector dimension. Use after switching the embedding model or vector dimension so previously indexed documents remain retrievable. Preserves documents, FTS index, graph edges, and fact links. |
 | `link_knowledge` | `action`, `factText`, `docId`, `scope`, `startLine`, `endLine`, `relationType` | Create, list, or retrieve semantic graph links connecting Notebook facts to Knowledge Base documents, sections, or line ranges. Actions: `link`, `list_links`, `get_doc_links`. |
 
-### Native OpenCode Plugin Tools (16)
+### Native OpenCode Plugin Tools (17)
 
 | Group | Count | Tools |
 | :---- | ----: | :---- |
 | **Memory Notebook** | 6 | `remember`, `recall`, `get_fact`, `forget`, `update_fact`, `memory_info` |
 | **Project Identity & Knowledge Graph** | 4 | `link_knowledge`, `link_project_memory`, `unlink_project_memory`, `relink_project_memory` |
-| **RAG Knowledge Base** | 4 | `ingest_document`, `query_knowledge_base`, `manage_knowledge_base`, `reindex_knowledge_base` |
+| **RAG Knowledge Base** | 5 | `ingest_document`, `query_knowledge_base`, `batch_query_knowledge_base`, `manage_knowledge_base`, `reindex_knowledge_base` |
 | **OpenCode-only helpers** | 2 | `list-mcp-tools`, `mcp-reminder` |
 
 The OpenCode-only helpers have the following purpose:
@@ -284,9 +291,11 @@ Use **Up / Down** arrows to navigate, **ENTER** to select, and **BACKSPACE** to 
 ### Built-in Agent Skill (`using-memory`)
 
 The plugin bundles a pre-configured Agent Skill located at [`skills/using-memory/SKILL.md`](./skills/using-memory/SKILL.md). When installed in supported environments (such as Antigravity / Gemini CLI or OpenCode), coding agents automatically read this skill to:
-1. **Initialize Sessions**: Automatically invoke `recall(scope: "all")` at the start of every chat turn to load all saved preferences and project rules.
-2. **Proactively Save Context**: Automatically call `remember` whenever you share durable facts, tech stack choices, or coding guidelines.
-3. **Architect Knowledge Graphs**: Use `link_knowledge` or `remember(docId, startLine, endLine)` to connect memories directly to technical documentation.
+1. **Initialize Sessions**: Invoke full-body `recall(scope: "all")` first, loading global memory plus only the current Git project's memory (or global-only outside Git).
+2. **Register Git Projects**: Inspect `memory_info` after recall and automatically call `link_project_memory` when the current Git identity reports `Registry: unlinked`.
+3. **Proactively Save Context**: Automatically call `remember` whenever you share durable facts, tech stack choices, or coding guidelines.
+4. **Curate and Use RAG Deliberately**: Preserve important web findings and current technical documentation only when they are likely to matter again. Store project-specific sources in the current project scope, reserve global scope for reusable cross-project material, query with concept-dense searches, and avoid low-value bulk ingestion.
+5. **Architect Knowledge Graphs**: Use `link_knowledge` or `remember(docId, startLine, endLine)` to connect concise project memories to their supporting technical sources.
 
 ### Global System Prompt Synchronization
 
@@ -358,7 +367,6 @@ The engine is configured through `<memory-dir>/config.json` (created with defaul
 | `executionDevice` | `cpu` | `cpu` or `webgpu` (experimental) |
 | `vectorScanLimit` | `50000` | Max micro-chunks scanned per vector query (`0` = unlimited) |
 | `policyExpansion` | `true` | Expand table_summary/code_signature policy chunks for better recall (slight MRR trade-off). Disable for pure micro_chunk precision. |
-| `injectLimit` | `10` | Max facts injected into the agent's system prompt |
 | `conflictStrategy` | `merge` | Hybrid-sync conflict resolution: `merge`, `cloud-wins`, or `local-wins` |
 | `tursoUrl` | `""` | Primary Turso endpoint URL (set by `login`) |
 | `failoverUrl` | `""` | Secondary cloud endpoint for the circuit breaker; empty = failover disabled |
@@ -376,7 +384,7 @@ The engine is configured through `<memory-dir>/config.json` (created with defaul
 To run the automated test suite and benchmarks locally, from the repository root:
 
 ```bash
-# Unit + integration + cloud suites (16 files) — fast and fully offline
+# Unit + integration + cloud suites (18 files) — fast and fully offline
 npm test
 
 # End-to-end smoke test with REAL ONNX embeddings — run before a release

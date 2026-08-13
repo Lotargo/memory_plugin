@@ -1,6 +1,6 @@
 import * as z from "zod/v4";
 import { basename } from "node:path";
-import { scopeKey, canonicalPath, readMemory, writeMemory, storeFilePath } from "../memory.js";
+import { GLOBAL_KEY, scopeKey, canonicalPath, readMemory, writeMemory, storeFilePath } from "../memory.js";
 import { factBody } from "../fact_format.js";
 import { optStr, optNum, defStr, defBool, requireProjectKey } from "./helpers.js";
 
@@ -33,9 +33,18 @@ export function registerIdentityTools(server) {
         if (!factText || !docId) {
           throw new Error("factText and docId are required parameters for link action");
         }
+        const facts = await readMemory(key);
+        const needle = factText.toLowerCase().trim();
+        const matches = facts.filter((entry) => {
+          const body = factBody(entry).toLowerCase();
+          return body === needle || body.includes(needle) || entry.toLowerCase().includes(needle);
+        });
+        if (matches.length === 0) throw new Error(`Notebook fact not found for link: ${factText}`);
+        if (matches.length > 1) throw new Error(`Notebook fact match is ambiguous; use a more specific factText: ${factText}`);
+        const resolvedFactText = factBody(matches[0]);
         const res = await linkFactToDocument({
           factKey: key,
-          factText,
+          factText: resolvedFactText,
           docId,
           startLine,
           endLine,
@@ -48,7 +57,8 @@ export function registerIdentityTools(server) {
 
       if (action === "get_doc_links") {
         if (!docId) throw new Error("docId parameter is required for get_doc_links action");
-        const links = await getLinksForDoc(docId);
+        const allowedScopes = key === GLOBAL_KEY ? [GLOBAL_KEY] : [GLOBAL_KEY, key];
+        const links = await getLinksForDoc(docId, allowedScopes);
         return {
           content: [{ type: "text", text: JSON.stringify(links, null, 2) }],
         };
@@ -130,6 +140,9 @@ export function registerIdentityTools(server) {
           }
         } catch (e) {}
       }
+      const { moveKnowledgeScope } = await import("../graph/knowledge_linker.js");
+      const migratedKnowledge = await moveKnowledgeScope(db, legacyPathKey, key);
+      if (migratedKnowledge.movedLinks > 0 || migratedKnowledge.movedDocuments > 0) migrated = true;
 
       return {
         content: [
@@ -242,8 +255,10 @@ export function registerIdentityTools(server) {
 
       await writeMemory(targetKey, targetFacts);
 
-      await db.prepare("UPDATE project_aliases SET identity_key = ? WHERE identity_key = ?;").run(targetKey, sourceKey);
       await upsertIdentity(db, { key: targetKey, name: sourceIdentity.name, primaryRemote: normalizeRemoteUrl(remote) });
+      await db.prepare("UPDATE project_aliases SET identity_key = ? WHERE identity_key = ?;").run(targetKey, sourceKey);
+      const { moveKnowledgeScope } = await import("../graph/knowledge_linker.js");
+      const movedKnowledge = await moveKnowledgeScope(db, sourceKey, targetKey);
       await removeIdentity(db, sourceKey);
 
       try {
@@ -265,6 +280,8 @@ export function registerIdentityTools(server) {
                 sourceKey,
                 targetKey,
                 mergedFacts: mergedCount,
+                movedKnowledgeLinks: movedKnowledge.movedLinks,
+                movedRagDocuments: movedKnowledge.movedDocuments,
               },
               null,
               2

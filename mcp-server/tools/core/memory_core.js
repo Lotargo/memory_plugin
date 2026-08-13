@@ -81,8 +81,12 @@ export async function rememberFact(
     if (supersedes) {
       const targetIdx = resolveFactIndex(entries, supersedes);
       if (targetIdx !== -1) {
+        let targetId = factMeta(entries[targetIdx]).id;
+        if (!targetId) {
+          targetId = nextFactId(entries);
+          entries[targetIdx] = withMeta(entries[targetIdx], { id: targetId });
+        }
         const newId = nextFactId(entries);
-        const targetId = factMeta(entries[targetIdx]).id || nextFactId(entries);
         entries[targetIdx] = withMeta(entries[targetIdx], { id: targetId, supersededBy: newId });
         meta.id = newId;
         meta.supersedes = targetId;
@@ -129,7 +133,7 @@ async function resolveTargetKey(projectPath) {
 }
 
 export async function recallFacts(
-  { scope, project, query, tags, since, until, mode, offset, limit },
+  { scope, project, query, tags, since, until, mode, offset, limit, includeSuperseded = false },
   ctx = {}
 ) {
   const results = [];
@@ -196,9 +200,15 @@ export async function recallFacts(
   };
 
   const collect = async (entries, key) => {
-    const matched = entries.filter(
-      (e) => matchesQuery(e, query) && matchesTags(e, tags) && inDateRange(e, since, until)
-    );
+    const matched = entries
+      .map((entry, storageIndex) => ({ entry, storageIndex }))
+      .filter(
+        ({ entry }) =>
+          (includeSuperseded || !isSuperseded(entry)) &&
+          matchesQuery(entry, query) &&
+          matchesTags(entry, tags) &&
+          inDateRange(entry, since, until)
+      );
     if (!matched.length) return;
     if (results.length) results.push("");
     results.push(`--- ${key === GLOBAL_KEY ? "Global" : `Project: ${key === target ? label : key}`} ---`);
@@ -207,7 +217,9 @@ export async function recallFacts(
     const targetLimit = hasLimit ? limit : matched.length;
     const paginated = matched.slice(targetOffset, targetOffset + targetLimit);
     for (let i = 0; i < paginated.length; i++) {
-      results.push(await formatFactWithLinks(paginated[i], targetOffset + i + 1, key));
+      results.push(
+        await formatFactWithLinks(paginated[i].entry, paginated[i].storageIndex + 1, key)
+      );
     }
     if (hasLimit && matched.length > targetLimit) {
       results.push(
@@ -281,8 +293,14 @@ export async function forgetFacts({ query, scope, force }, ctx = {}) {
   const removable = indices.filter((i) => force || !isKeepFact(entries[i]));
   const protectedCount = indices.length - removable.length;
   if (removable.length) {
+    const removedBodies = removable.map((i) => factBody(entries[i]) || factText(entries[i]));
     for (const i of removable.sort((a, b) => b - a)) entries.splice(i, 1);
     await writeMemory(key, entries);
+    try {
+      const { getDatabase } = await import("../../db/database.js");
+      const { deleteLinksForFacts } = await import("../../graph/knowledge_linker.js");
+      await deleteLinksForFacts(await getDatabase(), key, removedBodies);
+    } catch {}
   }
   let text = removable.length ? "Memory updated" : "Nothing removed.";
   if (protectedCount) text += ` (${protectedCount} protected fact(s) skipped; use force=true to override)`;
@@ -314,10 +332,41 @@ export async function updateFactText({ id, newText, title, scope }, ctx = {}) {
   try {
     const { getDatabase } = await import("../../db/database.js");
     const db = await getDatabase();
+    const linkedRows = await db
+      .prepare("SELECT * FROM knowledge_links WHERE fact_key = ? AND fact_text = ?")
+      .all(key, oldBody);
     const res = await db
       .prepare("UPDATE knowledge_links SET fact_text = ? WHERE fact_key = ? AND fact_text = ?")
       .run(finalFact, key, oldBody);
     linksUpdated = res.changes;
+    if (linksUpdated) {
+      const { queueDocumentSyncIfNeeded } = await import("../../graph/knowledge_linker.js");
+      const docIds = new Set();
+      for (const link of linkedRows) {
+        const targetSpec = link.start_line
+          ? `${link.doc_id}:L${link.start_line}-${link.end_line || link.start_line}`
+          : link.doc_id;
+        await db.prepare(
+          "DELETE FROM graph_edges WHERE source_id = ? AND target_id = ? AND relation_type = ?"
+        ).run(
+          `fact:${key}:${oldBody.substring(0, 30)}`,
+          targetSpec,
+          link.relation_type || "LINKS_TO"
+        );
+        await db.prepare(`
+          INSERT OR IGNORE INTO graph_edges (source_id, target_id, relation_type, metadata_json, created_at)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(
+          `fact:${key}:${finalFact.substring(0, 30)}`,
+          targetSpec,
+          link.relation_type || "LINKS_TO",
+          link.metadata_json || JSON.stringify({ linkId: link.id }),
+          link.created_at || Date.now()
+        );
+        docIds.add(link.doc_id);
+      }
+      for (const docId of docIds) await queueDocumentSyncIfNeeded(db, docId);
+    }
   } catch {}
 
   return `Fact updated${linksUpdated ? `, ${linksUpdated} doc link(s) updated` : ""}`;
@@ -327,7 +376,7 @@ export async function memoryInfo(_args = {}, ctx = {}) {
   const dbPath = join(MEMORY_DIR, "storage", "memory.sqlite");
   const activeKey = await projectKey(ctx.worktree ?? null, ctx.directory ?? null);
   const globalFile = storeFilePath(GLOBAL_KEY);
-  const projectFile = storeFilePath(activeKey);
+  const projectFile = activeKey ? storeFilePath(activeKey) : null;
 
   let version = "unknown";
   try {
@@ -360,6 +409,7 @@ export async function memoryInfo(_args = {}, ctx = {}) {
     const db = await getDatabase();
     const identity = await resolveProjectIdentity(ctx.worktree || ctx.directory || process.cwd());
     const all = await listIdentities(db);
+    const registered = identity ? all.find((item) => item.key === identity.key) : null;
     identityLines.push(
       `Identity: ${identity ? "git" : "no-git"}` +
         (identity
@@ -367,6 +417,8 @@ export async function memoryInfo(_args = {}, ctx = {}) {
               identity.primaryRemote ? ` | remote: ${identity.primaryRemote}` : ""
             }`
           : ""),
+      `Registry: ${identity ? (registered ? "linked" : "unlinked") : "not-applicable"}` +
+        (registered ? ` | aliases: ${registered.aliases.length}` : ""),
       `Known identities: ${all.length}`
     );
   } catch (e) {
@@ -378,7 +430,7 @@ export async function memoryInfo(_args = {}, ctx = {}) {
     `MEMORY_DIR: ${MEMORY_DIR}`,
     `SQLite DB: ${dbPath}`,
     `Global store: ${globalFile}`,
-    `Project store: ${projectFile}`,
+    `Project store: ${projectFile || "not applicable (outside Git)"}`,
     `Project stores: ${stores.length}`,
     `Facts (global): ${(await readMemoryRaw(GLOBAL_KEY)).length}`,
     `Facts (project): ${(await readMemoryRaw(activeKey)).length}`,

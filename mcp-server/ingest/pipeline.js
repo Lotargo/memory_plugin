@@ -10,6 +10,8 @@ import { buildGraphEdges, saveGraphEdges } from "../graph/graph_extractor.js";
 import { getConfig } from "../config/config_manager.js";
 import { assertIngestPathAllowed } from "../security/path_guard.js";
 import { logger } from "../logger.js";
+import { GLOBAL_KEY } from "../memory.js";
+import { addDocumentScope } from "../rag_scope.js";
 
 export async function ingestDocument({
   content,
@@ -19,6 +21,7 @@ export async function ingestDocument({
   customDb = null,
   customBlobDir = BLOBS_DIR,
   generateEmbeddings = true,
+  projectScope = GLOBAL_KEY,
 }) {
   const db = customDb || await getDatabase();
 
@@ -50,9 +53,53 @@ export async function ingestDocument({
   const blobRes = await saveBlob(markdown, customBlobDir);
   const blobHash = blobRes.hash;
 
-  const docId = `doc_${randomUUID().replace(/-/g, "").substring(0, 12)}`;
-  const docPath = effectivePath || `virtual://${type}/${docId}`;
+  const generatedDocId = `doc_${randomUUID().replace(/-/g, "").substring(0, 12)}`;
+  const docPath = effectivePath || `virtual://${type}/${generatedDocId}`;
+  const existingDoc = await db.prepare("SELECT * FROM documents WHERE path = ?").get(docPath);
+  const docId = existingDoc?.id || generatedDocId;
   const now = Date.now();
+
+  // Identical re-ingestion only adds the new project/global scope. Keeping the
+  // existing document id preserves every Notebook link and avoids recomputing vectors.
+  if (existingDoc && existingDoc.checksum === blobHash) {
+    await db.exec("BEGIN IMMEDIATE;");
+    try {
+      await db
+        .prepare("UPDATE documents SET title = ?, metadata_json = ?, updated_at = ? WHERE id = ?;")
+        .run(docTitle, JSON.stringify(metadata), now, docId);
+      const assignedScope = await addDocumentScope(db, docId, projectScope);
+      await db.exec("COMMIT;");
+
+      const sectionsRow = await db.prepare("SELECT COUNT(*) AS cnt FROM sections WHERE doc_id = ?").get(docId);
+      const chunksRow = await db.prepare("SELECT COUNT(*) AS cnt FROM micro_chunks WHERE doc_id = ?").get(docId);
+      if (getConfig().mode === "hybrid-sync") {
+        try {
+          const { exportDocumentData } = await import("./exporter.js");
+          const { enqueueSyncTask } = await import("../db/sync_queue.js");
+          await enqueueSyncTask("ingest_document", docId, await exportDocumentData(docId, db));
+        } catch (err) {
+          logger.error("Failed to queue document scope sync task:", err.message);
+        }
+      }
+      return {
+        docId,
+        doc_id: docId,
+        path: docPath,
+        blobHash,
+        blob_hash: blobHash,
+        title: docTitle,
+        sectionsCount: sectionsRow?.cnt || 0,
+        sections_count: sectionsRow?.cnt || 0,
+        microChunksCount: chunksRow?.cnt || 0,
+        micro_chunks_count: chunksRow?.cnt || 0,
+        deduplicated: true,
+        projectScope: assignedScope,
+      };
+    } catch (err) {
+      await db.exec("ROLLBACK;");
+      throw new Error(`Ingestion scope transaction failed: ${err.message}`);
+    }
+  }
 
   const hierarchy = buildTripleHierarchy(markdown, docId, docTitle);
 
@@ -86,29 +133,47 @@ export async function ingestDocument({
 
   await db.exec("BEGIN IMMEDIATE;");
   try {
-    const existingDoc = await db.prepare("SELECT id FROM documents WHERE path = ?").get(docPath);
     if (existingDoc) {
+      const ownedRows = await db.prepare(`
+        SELECT id FROM sections WHERE doc_id = ?
+        UNION SELECT id FROM medium_chunks WHERE doc_id = ?
+        UNION SELECT id FROM micro_chunks WHERE doc_id = ?;
+      `).all(docId, docId, docId);
+      const ownedIds = [docId, ...ownedRows.map((row) => row.id)];
       try {
-        await db.prepare("DELETE FROM micro_chunks_fts WHERE id IN (SELECT id FROM micro_chunks WHERE doc_id = ?);").run(existingDoc.id);
+        await db.prepare("DELETE FROM micro_chunks_fts WHERE id IN (SELECT id FROM micro_chunks WHERE doc_id = ?);").run(docId);
       } catch {}
-      await db.prepare("DELETE FROM graph_edges WHERE source_id = ? OR target_id = ?").run(existingDoc.id, existingDoc.id);
-      await db.prepare("DELETE FROM documents WHERE id = ?").run(existingDoc.id);
+      if (ownedIds.length > 0) {
+        const placeholders = ownedIds.map(() => "?").join(",");
+        await db
+          .prepare(`DELETE FROM graph_edges WHERE source_id IN (${placeholders}) OR target_id IN (${placeholders});`)
+          .run(...ownedIds, ...ownedIds);
+      }
+      await db.prepare("DELETE FROM micro_chunks WHERE doc_id = ?;").run(docId);
+      await db.prepare("DELETE FROM medium_chunks WHERE doc_id = ?;").run(docId);
+      await db.prepare("DELETE FROM sections WHERE doc_id = ?;").run(docId);
+      await db.prepare(`
+        UPDATE documents
+        SET blob_hash = ?, title = ?, checksum = ?, toc_json = ?, metadata_json = ?, updated_at = ?
+        WHERE id = ?;
+      `).run(blobHash, docTitle, blobHash, hierarchy.toc, JSON.stringify(metadata), now, docId);
+    } else {
+      await db.prepare(`
+        INSERT INTO documents (id, path, blob_hash, title, checksum, toc_json, metadata_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+      `).run(
+        docId,
+        docPath,
+        blobHash,
+        docTitle,
+        blobHash,
+        hierarchy.toc,
+        JSON.stringify(metadata),
+        now,
+        now
+      );
     }
-
-    await db.prepare(`
-      INSERT INTO documents (id, path, blob_hash, title, checksum, toc_json, metadata_json, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-    `).run(
-      docId,
-      docPath,
-      blobHash,
-      docTitle,
-      blobHash,
-      hierarchy.toc,
-      JSON.stringify(metadata),
-      now,
-      now
-    );
+    const assignedScope = await addDocumentScope(db, docId, projectScope);
 
     const insertSectionStmt = db.prepare(`
       INSERT INTO sections (id, doc_id, heading, breadcrumbs, content, token_count)
@@ -145,10 +210,42 @@ export async function ingestDocument({
     const edges = buildGraphEdges(docId, hierarchy);
     await saveGraphEdges(db, edges);
 
+    // Recreate graph projections for preserved Notebook links after replacing
+    // the document's structural chunks. The knowledge_links rows themselves
+    // remain stable because the document id remains stable.
+    if (existingDoc) {
+      const links = await db.prepare("SELECT * FROM knowledge_links WHERE doc_id = ?").all(docId);
+      const insertLinkEdge = db.prepare(`
+        INSERT OR IGNORE INTO graph_edges (source_id, target_id, relation_type, metadata_json, created_at)
+        VALUES (?, ?, ?, ?, ?);
+      `);
+      for (const link of links) {
+        const targetSpec = link.start_line
+          ? `${docId}:L${link.start_line}-${link.end_line || link.start_line}`
+          : docId;
+        await insertLinkEdge.run(
+          `fact:${link.fact_key}:${link.fact_text.substring(0, 30)}`,
+          targetSpec,
+          link.relation_type || "LINKS_TO",
+          JSON.stringify({ linkId: link.id }),
+          link.created_at || now
+        );
+      }
+    }
+
     await db.exec("COMMIT;");
   } catch (err) {
     await db.exec("ROLLBACK;");
     throw new Error(`Ingestion transaction failed: ${err.message}`);
+  }
+
+  if (existingDoc?.blob_hash && existingDoc.blob_hash !== blobHash) {
+    const refs = await db.prepare("SELECT COUNT(*) AS cnt FROM documents WHERE blob_hash = ?").get(existingDoc.blob_hash);
+    if (!refs?.cnt) {
+      try {
+        await deleteBlob(existingDoc.blob_hash, customBlobDir);
+      } catch {}
+    }
   }
 
   if (getConfig().mode === "hybrid-sync") {
@@ -174,12 +271,13 @@ export async function ingestDocument({
     microChunksCount: hierarchy.microChunks.length,
     micro_chunks_count: hierarchy.microChunks.length,
     deduplicated: blobRes.deduplicated,
+    projectScope: projectScope || GLOBAL_KEY,
   };
 }
 
 export async function deleteDocument(docIdOrPath, customDb = null, customBlobDir = BLOBS_DIR) {
   const db = customDb || await getDatabase();
-  const doc = await db.prepare("SELECT * FROM documents WHERE id = ? OR path = ?").get(docIdOrPath, docIdOrPath);
+  const doc = await db.prepare("SELECT * FROM documents WHERE id = ? OR path = ? OR title = ?").get(docIdOrPath, docIdOrPath, docIdOrPath);
   if (!doc) {
     return { deleted: false, reason: "Document not found" };
   }

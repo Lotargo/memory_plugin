@@ -10,6 +10,8 @@ const testSuites = [
   { category: "Unit", name: "identity", file: "tests/unit/identity.test.js" },
   { category: "Unit", name: "codex_compat", file: "tests/unit/codex_compat.test.js" },
   { category: "Unit", name: "prompt_manager", file: "tests/unit/prompt_manager.test.js" },
+  { category: "Unit", name: "opencode_memory_context", file: "tests/unit/opencode_memory_context.test.js" },
+  { category: "Unit", name: "rag_integrity", file: "tests/unit/rag_integrity.test.js" },
   { category: "Unit", name: "project_identity", file: "tests/unit/project_identity.test.js" },
   { category: "Unit", name: "unit_audit_fixes", file: "tests/unit/unit_audit_fixes.test.js" },
   { category: "Unit", name: "benchmark_report", file: "tests/unit/benchmark_report.test.js" },

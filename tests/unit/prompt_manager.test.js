@@ -9,6 +9,8 @@ export async function runPromptManagerTests() {
   assert.strictEqual((updated.match(/<!-- START MEMORY AGENT PROMPT -->/g) || []).length, 1);
   assert.strictEqual((updated.match(/<!-- END MEMORY AGENT PROMPT -->/g) || []).length, 1);
   assert.ok(updated.includes(userText), updated);
+  assert.ok(updated.includes("SELECTIVE RAG CURATION"), updated);
+  assert.ok(updated.includes("link it to the project-scoped Notebook fact"), updated);
   assert.strictEqual(upsertPromptBlock(updated), updated, "enable-prompt must be idempotent");
   assert.strictEqual(stripPromptBlock(updated), userText, "disable must remove only the plugin-owned block");
   console.log("✅ ALL PROMPT MANAGER IDEMPOTENCY TESTS PASSED!");

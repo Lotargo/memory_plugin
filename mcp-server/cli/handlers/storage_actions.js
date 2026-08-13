@@ -405,8 +405,10 @@ export async function handleStorageAction(value, config, stats) {
             }
 
             await writeMemory(targetKey, targetFacts);
-            await db.prepare("UPDATE project_aliases SET identity_key = ? WHERE identity_key = ?;").run(targetKey, sourceKey);
             await upsertIdentity(db, { key: targetKey, name: identity.name, primaryRemote: normalizeRemoteUrl(targetRemote) });
+            await db.prepare("UPDATE project_aliases SET identity_key = ? WHERE identity_key = ?;").run(targetKey, sourceKey);
+            const { moveKnowledgeScope } = await import("../../graph/knowledge_linker.js");
+            await moveKnowledgeScope(db, sourceKey, targetKey);
             await removeIdentity(db, sourceKey);
 
             try {
