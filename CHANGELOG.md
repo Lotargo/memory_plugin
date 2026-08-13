@@ -5,6 +5,33 @@ All notable changes to `@lotargo/memory_plugin` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.6.3] - 2026-08-13
+
+### Added
+
+- `memory_plugin doctor --codex` validates the configured executable and Node.js
+  version, performs direct MCP `initialize` / `tools/list`, and calls both
+  `memory_info` and `recall(scope="all")`.
+- Codex regression coverage for Windows paths with spaces, legacy config migration,
+  duplicate removal, standalone MCP protocol smoke testing, two-repository project
+  isolation, global-only recall outside Git, and prompt idempotency.
+
+### Fixed
+
+- Codex setup no longer launches the memory MCP through `npx` or a Windows `.cmd`
+  shim. It writes absolute paths for the active Node executable and packaged
+  `mcp-server/boot.js` entry point after validating Node.js >= 22.5.0.
+- Existing plugin-owned `[mcp_servers.memory-agent]` sections, including the legacy
+  `opencode-memory-plugin` entry, are migrated in place without modifying unrelated
+  TOML sections or creating duplicates.
+- Repeated prompt setup now collapses duplicate plugin-owned blocks while preserving
+  user-authored AGENTS.md / CLAUDE.md content.
+- README tool counts now match the implementations: 15 MCP tools, 16 native
+  OpenCode tools, and 17 unique tool names across both surfaces. The OpenCode tool
+  list and the MCP-only status of `batch_query_knowledge_base` are documented explicitly.
+
 ## [1.6.2] - 2026-08-12
 
 ### Added

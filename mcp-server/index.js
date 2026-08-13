@@ -37,6 +37,7 @@ const CLI_COMMANDS = new Set([
   "migrate_titles",
   "enable-prompt",
   "disable-prompt",
+  "doctor",
 ]);
 
 function printUsage() {
@@ -52,6 +53,7 @@ Usage:
   memory_plugin link|unlink|relink|identity [--dir <path>] [--remote <url>]
   memory_plugin migrate_titles [--key <key>]
   memory_plugin enable-prompt | disable-prompt
+  memory_plugin doctor --codex
 
 Options:
   -h, --help                         Show this help text

@@ -81,6 +81,22 @@ memory_plugin setup --claude
 memory_plugin setup --codex
 ```
 
+Codex is configured with a direct executable chain (`node` → `mcp-server/boot.js`),
+not `npx`. This avoids Windows stdio handshake failures caused by `.cmd` launchers.
+Running setup again safely migrates legacy `npx` entries and preserves unrelated
+sections in `~/.codex/config.toml`.
+
+To verify registration, the Node runtime, MCP initialization, tool discovery, and
+real `memory_info` / `recall(scope="all")` calls:
+
+```bash
+memory_plugin doctor --codex
+```
+
+The doctor checks the server process itself. If it passes but a fresh Codex Desktop
+task still does not expose the tools, the remaining fault is in Desktop tool
+exposure rather than the memory MCP launcher.
+
 `setup` also accepts `--gemini` (alias for Antigravity) and `--local` (registers the MCP server in the project-local `.agents/` directory). Without a specific flag, all detected environments are configured.
 
 ### Headless & Cloud Setup (CI / Docker / Cloud Workspaces)
@@ -107,7 +123,7 @@ memory_plugin setup --mode only-cloud
    - **Project Identity**: Project stores are bound to a **Git-based project identity** — the normalized remote URL (`git:github.com/owner/repo`) or `git:local:<repo basename>` — never to a directory path. Memories follow the repository across machines, OSes, and subdirectories. Legacy path/basename stores can be linked and merged via `link_project_memory`.
 
 2. **Layer 2: RAG Knowledge Base (Technical Documents & Codebases)**
-   - **Tools**: `ingest_document`, `query_knowledge_base`, `manage_knowledge_base`, `reindex_knowledge_base`
+   - **Tools**: `ingest_document`, `query_knowledge_base`, `batch_query_knowledge_base`, `manage_knowledge_base`, `reindex_knowledge_base`
    - **Capabilities**: Ingests raw text files, Markdown, HTML, Web URLs, office documents (PDF, DOCX, XLSX, CSV), and codebases.
    - **Engine Components**: 3-tier hierarchy chunking (Big / Medium / Small), SQLite FTS5 BM25 search, ONNX dense vector embeddings (`multilingual-e5-small`), Reciprocal Rank Fusion (RRF / RSF), cross-encoder reranking (optional), and GraphRAG Lite code symbol extraction.
 
@@ -147,11 +163,22 @@ Cloud authentication tokens are never written to `config.json`. They are stored 
 
 ---
 
-## Available MCP Tools
+## Available Tools
 
-The MCP server registers **14 MCP tools** accessible across all connected AI environments, plus **2 OpenCode-plugin helper tools** available only inside OpenCode:
+The package currently exposes **17 unique tool names** across its two integration surfaces:
 
-### 1. Memory Notebook Tools (Layer 1)
+| Integration surface | Tool count | Composition |
+| :------------------ | ---------: | :---------- |
+| **MCP server** (Codex, Claude Code, Antigravity / Gemini CLI and other MCP clients) | **15** | 6 Notebook + 4 identity/graph + 5 RAG tools |
+| **Native OpenCode plugin** | **16** | 14 shared memory/identity/RAG tools + 2 OpenCode-only helpers |
+
+The two surfaces are intentionally counted separately. The OpenCode plugin adds
+`list-mcp-tools` and `mcp-reminder`, but currently does not register the MCP-only
+`batch_query_knowledge_base` tool.
+
+### MCP Server Tools (15)
+
+#### 1. Memory Notebook Tools (Layer 1)
 
 | Tool | Scope / Target | Key Parameters | Description |
 | :--- | :------------- | :------------- | :---------- |
@@ -162,7 +189,7 @@ The MCP server registers **14 MCP tools** accessible across all connected AI env
 | `forget` | `project` / `global` | `id` / `range` / `query`, `scope`, `force` | Remove a fact by index number, ID, range (e.g. `"3-30"`), or query. Requires `force: true` for protected (`[KEEP]`) facts. |
 | `memory_info` | - | - | Show storage paths, fact counts, RAG statistics, git identity bindings, and package version. |
 
-### 2. Project Identity Tools
+#### 2. Project Identity Tools
 
 | Tool | Key Parameters | Description |
 | :--- | :------------- | :---------- |
@@ -170,7 +197,7 @@ The MCP server registers **14 MCP tools** accessible across all connected AI env
 | `unlink_project_memory` | `directory`, `purge` | Remove a path alias binding for a directory. Optionally purge the project identity entry if `purge: true`. |
 | `relink_project_memory` | `directory`, `remote` | Switch a project's primary identity to a new remote URL and merge all stored facts into the target store with fact-text deduplication. |
 
-### 3. RAG Knowledge Base & Graph Tools (Layers 2 & 3)
+#### 3. RAG Knowledge Base & Graph Tools (Layers 2 & 3)
 
 | Tool | Key Parameters | Description |
 | :--- | :------------- | :---------- |
@@ -181,12 +208,21 @@ The MCP server registers **14 MCP tools** accessible across all connected AI env
 | `reindex_knowledge_base` | `model`, `dimension` | Re-embed all stored vectors with the active (or specified) embedding model and vector dimension. Use after switching the embedding model or vector dimension so previously indexed documents remain retrievable. Preserves documents, FTS index, graph edges, and fact links. |
 | `link_knowledge` | `action`, `factText`, `docId`, `scope`, `startLine`, `endLine`, `relationType` | Create, list, or retrieve semantic graph links connecting Notebook facts to Knowledge Base documents, sections, or line ranges. Actions: `link`, `list_links`, `get_doc_links`. |
 
-### 4. Agent & OpenCode Helpers (OpenCode plugin only, not exposed by the MCP server)
+### Native OpenCode Plugin Tools (16)
+
+| Group | Count | Tools |
+| :---- | ----: | :---- |
+| **Memory Notebook** | 6 | `remember`, `recall`, `get_fact`, `forget`, `update_fact`, `memory_info` |
+| **Project Identity & Knowledge Graph** | 4 | `link_knowledge`, `link_project_memory`, `unlink_project_memory`, `relink_project_memory` |
+| **RAG Knowledge Base** | 4 | `ingest_document`, `query_knowledge_base`, `manage_knowledge_base`, `reindex_knowledge_base` |
+| **OpenCode-only helpers** | 2 | `list-mcp-tools`, `mcp-reminder` |
+
+The OpenCode-only helpers have the following purpose:
 
 | Tool | Key Parameters | Description |
 | :--- | :------------- | :---------- |
-| `list-mcp-tools` | - | Discover all connected MCP servers and their available tool definitions. |
-| `mcp-reminder` | `task` | Recommends the appropriate MCP tool or server for a specific developer task. |
+| `list-mcp-tools` | - | Discover connected MCP servers and their intended use cases. |
+| `mcp-reminder` | `task` | Recommend the appropriate MCP tool or server for a developer task. |
 
 ---
 
@@ -217,6 +253,7 @@ Both binaries accept the same commands. `memory_plugin` with **no** command star
 | **`migrate_titles`** | `--key <key>` | Auto-generates `**Title**` prefixes for legacy facts without titles. |
 | **`enable-prompt`** | - | Injects memory agent instructions into client agent files (`AGENTS.md`, `CLAUDE.md`). |
 | **`disable-prompt`** | - | Removes memory agent instructions from client agent files. |
+| **`doctor`** | `--codex` | Validates Codex config, direct Node runtime, MCP initialize/tools/list, and live `memory_info` + `recall` calls. |
 | **`login`** | `--api-token`, `--from-env`, `--db-url <URL> --db-token`, `$TURSO_API_TOKEN`, `$TURSO_DB_TOKEN` | Authenticates with Turso Cloud via API token, direct DB token, or environment variables. Token values are read from the environment or a hidden stdin prompt. |
 | **`logout`** | `--api-key` | Signs out of Turso Cloud or removes stored API key while retaining DB session. |
 | **`auth-status`** | - | Displays authentication source, endpoint URL, username, organization, database, and sync mode. |
@@ -295,7 +332,7 @@ During `ingest_document`, code symbols are extracted from code blocks using fast
 | Platform | Status | Configuration Mechanism |
 | :--- | :--- | :--- |
 | **Antigravity / Gemini CLI** | Supported | MCP Server (`~/.gemini/config/mcp_config.json` & `.agents/mcp_config.json`) |
-| **OpenCode** | Native | Native plugin + MCP Server (`~/.config/opencode/opencode.json`) |
+| **OpenCode** | Native | Native plugin with 16 tools (`~/.config/opencode/opencode.json`) |
 | **Claude Code** | Supported | MCP Server (`~/.claude.json`) |
 | **Codex** | Supported | MCP Server (`~/.codex/config.toml`) |
 | **Google Jules** | Supported | MCP Server via global install + setup (`memory_plugin setup`) |
@@ -339,7 +376,7 @@ The engine is configured through `<memory-dir>/config.json` (created with defaul
 To run the automated test suite and benchmarks locally, from the repository root:
 
 ```bash
-# Unit + integration + cloud suites (12 files) — fast and fully offline
+# Unit + integration + cloud suites (16 files) — fast and fully offline
 npm test
 
 # End-to-end smoke test with REAL ONNX embeddings — run before a release

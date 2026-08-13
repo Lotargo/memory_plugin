@@ -190,22 +190,38 @@ export async function runSetup() {
   // 4. Codex (~/.codex/config.toml)
   if (doCodex) {
     try {
+      const {
+        updateCodexMemoryAgentConfig,
+        validateCodexRuntime,
+      } = await import("./codex_config.js");
       const codexDir = join(home, ".codex");
       const codexConfig = join(codexDir, "config.toml");
-      if (existsSync(codexDir)) {
-        let content = existsSync(codexConfig) ? await readFile(codexConfig, "utf-8") : "";
-        if (!content.includes("memory-agent")) {
-          const tomlSnippet = `\n[mcp_servers.memory-agent]\ncommand = "npx"\nargs = ["-y", "@lotargo/memory_plugin"]\n`;
-          content += tomlSnippet;
-          await writeFile(codexConfig, content);
-          console.log("  [OK] Codex: added mcp_servers.memory-agent to ~/.codex/config.toml");
-          configuredCount++;
-        } else {
-          console.log("  [INFO] Codex: already configured");
-        }
+      const nodePath = process.execPath;
+      const bootPath = fileURLToPath(new URL("./boot.js", import.meta.url));
+      const runtime = validateCodexRuntime({ nodePath, nodeVersion: process.versions.node, bootPath });
+      if (!runtime.ok) {
+        throw new Error(`Codex direct launcher validation failed: ${runtime.errors.join("; ")}`);
+      }
+
+      await mkdir(codexDir, { recursive: true });
+      const content = existsSync(codexConfig) ? await readFile(codexConfig, "utf-8") : "";
+      const update = updateCodexMemoryAgentConfig(content, { nodePath, bootPath });
+      if (update.status === "conflict") {
+        throw new Error(update.reason);
+      }
+      if (update.changed) {
+        await writeFile(codexConfig, update.content, "utf-8");
+        console.log(
+          update.status === "added"
+            ? "  [OK] Codex: added direct Node.js memory-agent launcher to ~/.codex/config.toml"
+            : "  [OK] Codex: migrated memory-agent to a direct Node.js launcher in ~/.codex/config.toml"
+        );
+        configuredCount++;
+      } else {
+        console.log("  [INFO] Codex: direct Node.js memory-agent launcher already configured");
       }
     } catch (err) {
-      console.log("  [SKIP] Codex setup skipped:", err.message);
+      console.log("  [FAIL] Codex setup failed:", err.message);
     }
   }
 

@@ -99,16 +99,20 @@ function buildIncludeBlock(promptFile) {
 ${END_MARKER}`;
 }
 
-function stripPromptBlock(content) {
-  const startIndex = content.indexOf(START_MARKER);
-  const endIndex = content.indexOf(END_MARKER);
-
-  if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-    const before = content.substring(0, startIndex);
-    const after = content.substring(endIndex + END_MARKER.length);
-    return (before + after).replace(/\n{3,}/g, "\n\n").trim();
+export function stripPromptBlock(content) {
+  let clean = String(content || "");
+  while (true) {
+    const startIndex = clean.indexOf(START_MARKER);
+    const endIndex = clean.indexOf(END_MARKER, startIndex + START_MARKER.length);
+    if (startIndex === -1 || endIndex === -1 || endIndex <= startIndex) break;
+    clean = clean.substring(0, startIndex) + clean.substring(endIndex + END_MARKER.length);
   }
-  return content.trim();
+  return clean.replace(/\r?\n(?:[ \t]*\r?\n){2,}/g, "\n\n").trim();
+}
+
+export function upsertPromptBlock(content, block = PROMPT_BLOCK) {
+  const clean = stripPromptBlock(content);
+  return clean ? `${clean}\n\n${block}\n` : `${block}\n`;
 }
 
 export async function enableGlobalPrompt() {
@@ -126,12 +130,10 @@ export async function enableGlobalPrompt() {
 
       const existed = existsSync(target.filePath);
       const existing = existed ? await readFile(target.filePath, "utf-8") : "";
-      const clean = stripPromptBlock(existing);
-
       const block = target.includeSupported
         ? buildIncludeBlock(promptFile)
         : PROMPT_BLOCK;
-      const updated = clean ? `${clean}\n\n${block}\n` : `${block}\n`;
+      const updated = upsertPromptBlock(existing, block);
 
       const key = target.filePath;
       const prev = state[key];

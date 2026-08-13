@@ -87,6 +87,36 @@ export async function runProjectIdentityTests() {
     assert(idsStill.some((id) => id.key === identity.key), "Identity retained after alias removal (unlink keeps identity)");
     console.log("  [PASS] 5. Unregister alias removes mapping but keeps identity");
 
+    // (6) scope=all keeps project stores isolated and falls back to global-only outside Git.
+    const projectA = join(ROOT, "project-a");
+    const projectB = join(ROOT, "project-b");
+    execFileSync(GIT_CMD, ["init", projectA], { stdio: "ignore" });
+    execFileSync(GIT_CMD, ["-C", projectA, "remote", "add", "origin", "https://github.com/myorg/project-a.git"], { stdio: "ignore" });
+    execFileSync(GIT_CMD, ["init", projectB], { stdio: "ignore" });
+    execFileSync(GIT_CMD, ["-C", projectB, "remote", "add", "origin", "https://github.com/myorg/project-b.git"], { stdio: "ignore" });
+    const projectAKey = await mem.projectKey(null, projectA);
+    const projectBKey = await mem.projectKey(null, projectB);
+    await mem.writeMemory(mem.GLOBAL_KEY, ["- [2026-08-13 12:00] **Global rule** — shared global fact"]);
+    await mem.writeMemory(projectAKey, ["- [2026-08-13 12:01] **Project A rule** — project A private fact"]);
+    await mem.writeMemory(projectBKey, ["- [2026-08-13 12:02] **Project B rule** — project B private fact"]);
+
+    const { recallFacts } = await import("../../mcp-server/tools/core/memory_core.js");
+    const recallA = await recallFacts({ scope: "all" }, { directory: projectA });
+    assert.ok(recallA.includes("shared global fact"), recallA);
+    assert.ok(recallA.includes("project A private fact"), recallA);
+    assert.ok(!recallA.includes("project B private fact"), recallA);
+
+    const recallB = await recallFacts({ scope: "all" }, { directory: projectB });
+    assert.ok(recallB.includes("shared global fact"), recallB);
+    assert.ok(recallB.includes("project B private fact"), recallB);
+    assert.ok(!recallB.includes("project A private fact"), recallB);
+
+    const recallOutsideGit = await recallFacts({ scope: "all" }, { directory: nonGitDir });
+    assert.ok(recallOutsideGit.includes("shared global fact"), recallOutsideGit);
+    assert.ok(!recallOutsideGit.includes("Project:"), recallOutsideGit);
+    assert.ok(!recallOutsideGit.includes("null.md"), recallOutsideGit);
+    console.log("  [PASS] 6. scope=all isolates two projects and is global-only outside Git");
+
   } finally {
     try {
       if (db && typeof db.close === "function") db.close();

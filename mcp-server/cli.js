@@ -24,6 +24,7 @@ Usage:
   memory-cli link|unlink|relink|identity [--dir <path>] [--remote <url>]
   memory-cli migrate_titles [--key <key>]
   memory-cli enable-prompt | disable-prompt
+  memory-cli doctor --codex
 
 Options:
   -h, --help                         Show this help text`);

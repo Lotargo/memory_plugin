@@ -12,6 +12,15 @@ import {
 import { factBody } from "../fact_format.js";
 
 export async function handleDirectCommands(cliArgs) {
+  if (cliArgs[0] === "doctor" && cliArgs.includes("--codex")) {
+    const { runCodexDoctor } = await import("../codex_diagnostics.js");
+    console.log("\nCodex memory-agent diagnostics\n");
+    const result = await runCodexDoctor();
+    console.log("");
+    if (!result.ok) process.exitCode = 1;
+    return true;
+  }
+
   if (cliArgs[0] === "link") {
     const dirIdx = cliArgs.indexOf("--dir");
     const dir = dirIdx >= 0 && cliArgs[dirIdx + 1] ? cliArgs[dirIdx + 1] : process.cwd();
