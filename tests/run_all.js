@@ -20,6 +20,7 @@ const testSuites = [
 
   // --- 2. INTEGRATION TESTS ---
   { category: "Integration", name: "expanded_features", file: "tests/integration/expanded_features.test.js" },
+  { category: "Integration", name: "memory_ux", file: "tests/integration/memory_ux.test.js" },
   { category: "Integration", name: "memory_verification", file: "tests/integration/memory_verification.test.js" },
   { category: "Integration", name: "mcp_tools", file: "tests/integration/mcp_tools.test.js" },
   { category: "Integration", name: "codex_mcp_smoke", file: "tests/integration/codex_mcp_smoke.test.js" },
@@ -41,21 +42,21 @@ async function main() {
   for (const suite of testSuites) {
     if (suite.category !== currentCategory) {
       currentCategory = suite.category;
-      console.log(`\n▶ Running ${currentCategory} Test Suite...`);
+      console.log(`\nRunning ${currentCategory} Test Suite...`);
     }
 
     const filePath = join(ROOT, suite.file);
     try {
       execFileSync(process.execPath, [filePath], { stdio: "inherit" });
     } catch (err) {
-      console.error(`\n❌ TEST SUITE FAILED: ${suite.name} (${suite.file})`);
+      console.error(`\nTEST SUITE FAILED: ${suite.name} (${suite.file})`);
       process.exit(1);
     }
   }
 
   const duration = ((Date.now() - startTime) / 1000).toFixed(2);
   console.log("\n=================================================");
-  console.log(`🎉 ALL TEST SUITES PASSED IN ${duration}s!`);
+  console.log(`ALL TEST SUITES PASSED IN ${duration}s!`);
   console.log("=================================================\n");
 }
 
