@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.6] - 2026-08-17
+
+### Fixed
+
+- Fixed npm package distribution files list to include `mcp-server/rag_scope.js` and all server modules.
+
 ## [1.6.5] - 2026-08-17
 
 ### Added
