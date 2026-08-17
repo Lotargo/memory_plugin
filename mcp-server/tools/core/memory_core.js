@@ -32,6 +32,11 @@ import {
   autoGenerateTitle,
 } from "../../fact_format.js";
 import { requireProjectKey, resolveFactIndex } from "../helpers.js";
+import {
+  captureMemorySnapshot,
+  recordMemoryOperation,
+  undoLastMemoryOperation,
+} from "./memory_history.js";
 
 // Single implementation of the Notebook tools, shared by the MCP server
 // (mcp-server/tools/memory_tools.js) and the OpenCode plugin
@@ -70,6 +75,29 @@ async function resolveScopeKey(scope, args = {}, ctx = {}) {
   return await scopeKey(scope || "project", ctx?.worktree ?? null, dir);
 }
 
+async function captureSnapshotBestEffort(key, entries) {
+  try {
+    return await captureMemorySnapshot(key, entries);
+  } catch {
+    // Notebook operations must remain usable even when the optional SQLite/RAG
+    // layer is unavailable. In that case the mutation simply cannot be undone.
+    return null;
+  }
+}
+
+async function recordOperationBestEffort(factKey, operationType, beforeSnapshot, afterEntries) {
+  if (!beforeSnapshot) return null;
+  try {
+    return await recordMemoryOperation({ factKey, operationType, beforeSnapshot, afterEntries });
+  } catch {
+    return null;
+  }
+}
+
+function operationBadge(operationId) {
+  return operationId ? ` [undo:${operationId}]` : "";
+}
+
 export async function rememberFact(
   { fact, title, scope, directory, project, docId, startLine, endLine, relationType, ttl, keep, tags, supersedes },
   ctx = {}
@@ -83,6 +111,8 @@ export async function rememberFact(
   const text = `**${finalTitle}** — ${finalFact}`;
   const factBodyNormalized = finalFact.toLowerCase();
   const duplicate = entries.some((e) => factBody(e).toLowerCase().trim() === factBodyNormalized);
+  const beforeSnapshot = !duplicate || docId ? await captureSnapshotBestEffort(key, entries) : null;
+  let mutated = false;
 
   let supersededInfo = "";
   if (!duplicate) {
@@ -109,6 +139,7 @@ export async function rememberFact(
     if (!meta.id) meta.id = nextFactId(entries);
     entries.push(formatFactEntry({ date, time, text, meta }));
     await writeMemory(key, entries);
+    mutated = true;
   }
 
   let linkInfo = "";
@@ -125,12 +156,16 @@ export async function rememberFact(
       });
       const linesStr = startLine ? `:L${startLine}${endLine ? `-${endLine}` : ""}` : "";
       linkInfo = ` [Linked to Doc: "${linkRes.docTitle}"${linesStr}]`;
+      mutated = true;
     } catch (err) {
       linkInfo = ` (Note: Fact saved, but document link failed: ${err.message})`;
     }
   }
 
-  return `Memory updated${supersededInfo}${linkInfo}`;
+  const operationId = mutated
+    ? await recordOperationBestEffort(key, "remember", beforeSnapshot, entries)
+    : null;
+  return `Memory updated${supersededInfo}${linkInfo}${operationBadge(operationId)}`;
 }
 
 async function resolveTargetKey(projectPath) {
@@ -146,14 +181,62 @@ async function resolveTargetKey(projectPath) {
   return canonicalPath(projectPath);
 }
 
+function factTimestamp(entry) {
+  const parsed = parseFactEntry(entry);
+  if (!parsed) return 0;
+  const ts = new Date(`${parsed.date}T${parsed.time}:00`).getTime();
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function sortMatchedFacts(matched, order) {
+  if (order !== "newest" && order !== "oldest") return matched;
+  const direction = order === "newest" ? -1 : 1;
+  return [...matched].sort((a, b) => {
+    const timeDiff = factTimestamp(a.entry) - factTimestamp(b.entry);
+    if (timeDiff) return timeDiff * direction;
+    return (a.storageIndex - b.storageIndex) * direction;
+  });
+}
+
+function primaryFactTag(entry) {
+  const tags = String(factMeta(entry).tags || "")
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+  return tags[0] || "untagged";
+}
+
 export async function recallFacts(
-  { scope, directory, project, query, tags, since, until, mode, offset, limit, includeSuperseded = false },
+  {
+    scope,
+    directory,
+    project,
+    query,
+    tags,
+    since,
+    until,
+    mode,
+    offset,
+    limit,
+    order = "storage",
+    recent,
+    last = false,
+    groupBy = "none",
+    includeSuperseded = false,
+  },
   ctx = {}
 ) {
   const results = [];
   const now = Date.now();
   const targetMode = mode || "full";
-  const targetOffset = offset !== undefined && offset !== null ? offset : 0;
+  const targetOffset = offset !== undefined && offset !== null ? Math.max(0, Number(offset) || 0) : 0;
+  const requestedRecent = last
+    ? 1
+    : recent !== undefined && recent !== null && Number(recent) > 0
+      ? Math.floor(Number(recent))
+      : null;
+  const targetOrder = requestedRecent ? "newest" : (order || "storage");
+  const effectiveLimit = requestedRecent ?? limit;
   const targetProjectInput = directory || project || ctx.directory || ctx.worktree || null;
 
   if (scope === "list_projects") {
@@ -215,7 +298,7 @@ export async function recallFacts(
   };
 
   const collect = async (entries, key) => {
-    const matched = entries
+    let matched = entries
       .map((entry, storageIndex) => ({ entry, storageIndex }))
       .filter(
         ({ entry }) =>
@@ -224,19 +307,35 @@ export async function recallFacts(
           matchesTags(entry, tags) &&
           inDateRange(entry, since, until)
       );
+    matched = sortMatchedFacts(matched, targetOrder);
     if (!matched.length) return;
     if (results.length) results.push("");
     results.push(`--- ${key === GLOBAL_KEY ? "Global" : `Project: ${key === target ? label : key}`} ---`);
 
-    const hasLimit = limit !== undefined && limit !== null;
-    const targetLimit = hasLimit ? limit : matched.length;
+    const hasLimit = effectiveLimit !== undefined && effectiveLimit !== null;
+    const targetLimit = hasLimit ? Math.max(0, Number(effectiveLimit) || 0) : matched.length;
     const paginated = matched.slice(targetOffset, targetOffset + targetLimit);
-    for (let i = 0; i < paginated.length; i++) {
-      results.push(
-        await formatFactWithLinks(paginated[i].entry, paginated[i].storageIndex + 1, key)
-      );
+
+    if (groupBy === "tag") {
+      const grouped = new Map();
+      for (const item of paginated) {
+        const tag = primaryFactTag(item.entry);
+        if (!grouped.has(tag)) grouped.set(tag, []);
+        grouped.get(tag).push(item);
+      }
+      for (const [tag, items] of grouped) {
+        results.push(`### tag:${tag}`);
+        for (const item of items) {
+          results.push(await formatFactWithLinks(item.entry, item.storageIndex + 1, key));
+        }
+      }
+    } else {
+      for (const item of paginated) {
+        results.push(await formatFactWithLinks(item.entry, item.storageIndex + 1, key));
+      }
     }
-    if (hasLimit && matched.length > targetLimit) {
+
+    if (hasLimit && matched.length > targetOffset + targetLimit) {
       results.push(
         `Showing entries ${targetOffset + 1}-${Math.min(targetOffset + targetLimit, matched.length)} of ${matched.length}`
       );
@@ -286,44 +385,95 @@ export async function getFactById({ id, scope, directory, project }, ctx = {}) {
     .join("\n\n");
 }
 
-export async function forgetFacts({ query, scope, force, directory, project }, ctx = {}) {
+function indicesForRange(entries, ref) {
+  const match = /^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(String(ref || ""));
+  if (!match) return null;
+  const from = parseInt(match[1], 10);
+  const requestedTo = parseInt(match[2], 10);
+  if (from <= 0 || requestedTo < from || from > entries.length) return [];
+  const to = Math.min(requestedTo, entries.length);
+  const indices = [];
+  for (let i = from - 1; i < to; i++) indices.push(i);
+  return indices;
+}
+
+function indexForStableRef(entries, ref) {
+  const trimmed = String(ref || "").trim();
+  if (!trimmed) return -1;
+  if (/^\d+$/.test(trimmed)) {
+    const num = parseInt(trimmed, 10);
+    return num >= 1 && num <= entries.length ? num - 1 : -1;
+  }
+  const idIndex = entries.findIndex((entry) => factMeta(entry).id === trimmed);
+  if (idIndex !== -1) return idIndex;
+  return resolveFactIndex(entries, trimmed);
+}
+
+function resolveForgetIndices(entries, query, refs) {
+  const indices = new Set();
+
+  if (Array.isArray(refs) && refs.length) {
+    for (const ref of refs) {
+      const range = indicesForRange(entries, ref);
+      if (range) {
+        for (const index of range) indices.add(index);
+        continue;
+      }
+      const index = indexForStableRef(entries, ref);
+      if (index !== -1) indices.add(index);
+    }
+    return [...indices];
+  }
+
+  const rawQuery = String(query || "").trim();
+  const range = indicesForRange(entries, rawQuery);
+  if (range) return range;
+
+  if (/^\d+$/.test(rawQuery)) {
+    const index = indexForStableRef(entries, rawQuery);
+    return index === -1 ? [] : [index];
+  }
+
+  const idIndex = entries.findIndex((entry) => factMeta(entry).id === rawQuery);
+  if (idIndex !== -1) return [idIndex];
+
+  const q = rawQuery.toLowerCase();
+  if (!q) return [];
+  return entries.reduce(
+    (acc, entry, index) => (entry.toLowerCase().includes(q) ? acc.concat(index) : acc),
+    []
+  );
+}
+
+export async function forgetFacts({ query, refs, scope, force, directory, project }, ctx = {}) {
   const key = requireProjectKey(await resolveScopeKey(scope, { directory, project }, ctx));
   const entries = await readMemory(key);
+  const hasRefs = Array.isArray(refs) && refs.some((ref) => String(ref || "").trim());
+  if (!hasRefs && !String(query || "").trim()) {
+    throw new Error("forget requires query or refs.");
+  }
 
-  const rangeMatch = /^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(query);
-  let indices = [];
-  if (rangeMatch) {
-    const from = parseInt(rangeMatch[1], 10);
-    const to = parseInt(rangeMatch[2], 10);
-    if (from > 0 && to >= from && to <= entries.length) {
-      for (let i = from - 1; i < to; i++) indices.push(i);
-    }
-  }
-  if (!indices.length && /^\s*\d+\s*$/.test(String(query))) {
-    const num = parseInt(query, 10);
-    if (num > 0 && num <= entries.length) indices.push(num - 1);
-  }
-  if (!indices.length) {
-    const q = String(query).toLowerCase();
-    indices = entries.reduce((acc, e, i) => (e.toLowerCase().includes(q) ? acc.concat(i) : acc), []);
-  }
+  const indices = resolveForgetIndices(entries, query, refs);
   if (!indices.length) return "Not found.";
 
   const removable = indices.filter((i) => force || !isKeepFact(entries[i]));
   const protectedCount = indices.length - removable.length;
+  let operationId = null;
   if (removable.length) {
+    const beforeSnapshot = await captureSnapshotBestEffort(key, entries);
     const removedBodies = removable.map((i) => factBody(entries[i]) || factText(entries[i]));
-    for (const i of removable.sort((a, b) => b - a)) entries.splice(i, 1);
+    for (const i of [...removable].sort((a, b) => b - a)) entries.splice(i, 1);
     await writeMemory(key, entries);
     try {
       const { getDatabase } = await import("../../db/database.js");
       const { deleteLinksForFacts } = await import("../../graph/knowledge_linker.js");
       await deleteLinksForFacts(await getDatabase(), key, removedBodies);
     } catch {}
+    operationId = await recordOperationBestEffort(key, "forget", beforeSnapshot, entries);
   }
-  let text = removable.length ? "Memory updated" : "Nothing removed.";
+  let text = removable.length ? `Memory updated (${removable.length} fact(s) removed)` : "Nothing removed.";
   if (protectedCount) text += ` (${protectedCount} protected fact(s) skipped; use force=true to override)`;
-  return text;
+  return text + operationBadge(operationId);
 }
 
 export async function updateFactText({ id, newText, title, scope, directory, project }, ctx = {}) {
@@ -331,6 +481,7 @@ export async function updateFactText({ id, newText, title, scope, directory, pro
   const entries = await readMemory(key);
   const idx = resolveFactIndex(entries, id);
   if (idx === -1) throw new Error(`Fact not found: ${id}`);
+  const beforeSnapshot = await captureSnapshotBestEffort(key, entries);
 
   const p = parseFactEntry(entries[idx]);
   const oldText = p ? p.text : entries[idx];
@@ -388,7 +539,24 @@ export async function updateFactText({ id, newText, title, scope, directory, pro
     }
   } catch {}
 
-  return `Fact updated${linksUpdated ? `, ${linksUpdated} doc link(s) updated` : ""}`;
+  const operationId = await recordOperationBestEffort(key, "update", beforeSnapshot, entries);
+  return `Fact updated${linksUpdated ? `, ${linksUpdated} doc link(s) updated` : ""}${operationBadge(operationId)}`;
+}
+
+export async function undoMemory({ scope, directory, project } = {}, ctx = {}) {
+  const key = requireProjectKey(await resolveScopeKey(scope, { directory, project }, ctx));
+  const result = await undoLastMemoryOperation(key);
+  if (result.ok) {
+    return `Undone ${result.operationType} operation [${result.operationId}]`;
+  }
+  if (result.reason === "empty") return "Nothing to undo.";
+  if (result.reason === "conflict") {
+    return `Undo refused for [${result.operationId}]: memory changed after that operation. Re-run recall before making another change.`;
+  }
+  if (result.reason === "corrupt") {
+    return `Undo journal entry [${result.operationId}] is corrupted and was not applied.`;
+  }
+  return "Undo could not be applied.";
 }
 
 export async function memoryInfo(_args = {}, ctx = {}) {
@@ -416,6 +584,7 @@ export async function memoryInfo(_args = {}, ctx = {}) {
     rag.chunks = await count("micro_chunks");
     rag.edges = await count("graph_edges");
     rag.links = await count("knowledge_links");
+    rag.operations = await count("memory_operations");
   } catch (e) {
     rag.error = e.message;
   }
@@ -457,9 +626,11 @@ export async function memoryInfo(_args = {}, ctx = {}) {
     ...identityLines,
   ];
   if (rag.error) lines.push(`RAG: unavailable (${rag.error})`);
-  else
+  else {
     lines.push(
-      `RAG: ${rag.documents} doc(s), ${rag.sections} section(s), ${rag.chunks} chunk(s), ${rag.edges} edge(s), ${rag.links} memory link(s)`
+      `RAG: ${rag.documents} doc(s), ${rag.sections} section(s), ${rag.chunks} chunk(s), ${rag.edges} edge(s), ${rag.links} memory link(s)`,
+      `Undo journal: ${rag.operations} operation(s)`
     );
+  }
   return lines.join("\n");
 }
