@@ -271,6 +271,8 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
             description: "\x27project\x27 (default) or \x27global\x27",
             default: "project",
           },
+          directory: { type: "string", description: "Optional workspace/project directory path to target when scope='project' (e.g. 'F:/projects/my-app')" },
+          project: { type: "string", description: "Alias for directory" },
           docId: { type: "string", description: "Optional document ID, title, or path to link this fact to" },
           startLine: { type: "number", description: "Optional starting line number in target document" },
           endLine: { type: "number", description: "Optional ending line number in target document" },
@@ -291,11 +293,11 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
         },
       },
 
-"recall": {
+      "recall": {
         description:
           "Show saved facts with any Agent-linked Knowledge Base documents/lines. " +
           "scope: \x27project\x27, \x27global\x27, \x27all\x27 (default), or \x27list_projects\x27. " +
-          "Use project: \x27<directory path>\x27 to read facts of a specific project from any working directory. " +
+          "Use directory: \x27<directory path>\x27 to read facts of a specific project from any working directory. " +
           "query filters by keyword, tags by comma-separated tags, since/until by date (YYYY-MM-DD). " +
           "The response includes the store file paths.",
         args: {
@@ -304,7 +306,8 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
             description: "project, global, all (по умолчанию) или list_projects",
             default: "all",
           },
-          project: { type: "string", description: "Directory path of the project to read facts from (e.g. \x27F:/projects/plugins/memory\x27)" },
+          directory: { type: "string", description: "Directory path of the project to read facts from (e.g. \x27F:/projects/plugins/memory\x27)" },
+          project: { type: "string", description: "Alias for directory" },
           query: { type: "string", description: "Optional keyword filter; all space-separated terms must match" },
           tags: { type: "string", description: "Optional comma-separated tag filter (any match)" },
           since: { type: "string", description: "Optional start date filter, YYYY-MM-DD (inclusive)" },
@@ -319,11 +322,13 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
         },
       },
 
-"get_fact": {
+      "get_fact": {
         description: "Get the full text and metadata of a single fact by its metadata id.",
         args: {
           id: { type: "string", description: "The unique metadata id of the fact (e.g. \x278f3a2c\x27)" },
           scope: { type: "string", description: "\x27project\x27, \x27global\x27, or \x27all\x27 (default)", default: "all" },
+          directory: { type: "string", description: "Optional workspace/project directory path" },
+          project: { type: "string", description: "Alias for directory" },
         },
         async execute(args, { worktree, directory }) {
           return await getFactById(args, { worktree, directory });
@@ -338,6 +343,8 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
             description: "project (по умолчанию) или global",
             default: "project",
           },
+          directory: { type: "string", description: "Optional workspace/project directory path" },
+          project: { type: "string", description: "Alias for directory" },
           force: { type: "boolean", description: "Удалить также защищённые (keep) факты" },
         },
         async execute(args, { worktree, directory }) {
@@ -355,6 +362,8 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           newText: { type: "string", description: "New fact text" },
           title: { type: "string", description: "Optional new title for the fact" },
           scope: { type: "string", description: "\x27project\x27 (default) or \x27global\x27", default: "project" },
+          directory: { type: "string", description: "Optional workspace/project directory path" },
+          project: { type: "string", description: "Alias for directory" },
         },
         async execute(args, { worktree, directory }) {
           const result = await updateFactText(args, { worktree, directory });
@@ -363,11 +372,14 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
         },
       },
 
-"memory_info": {
+      "memory_info": {
         description: "Show memory storage paths (store files, MEMORY_DIR, SQLite DB), fact counts, and Knowledge Base stats.",
-        args: {},
-        async execute(_args, ctx = {}) {
-          return await memoryInfo({}, { worktree: ctx.worktree ?? worktree, directory: ctx.directory ?? directory });
+        args: {
+          directory: { type: "string", description: "Optional workspace/project directory path to inspect (default: current directory)" },
+          project: { type: "string", description: "Alias for directory" },
+        },
+        async execute(args, ctx = {}) {
+          return await memoryInfo(args, { worktree: ctx.worktree ?? worktree, directory: ctx.directory ?? directory });
         },
       },
       "link_knowledge": {
@@ -383,6 +395,8 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           factText: { type: "string", description: "Memory fact text or keyword" },
           docId: { type: "string", description: "Document ID, title, or file path" },
           scope: { type: "string", description: "'project' (default) or 'global'", default: "project" },
+          directory: { type: "string", description: "Optional workspace/project directory path" },
+          project: { type: "string", description: "Alias for directory" },
           startLine: { type: "number", description: "Starting line number in target document" },
           endLine: { type: "number", description: "Ending line number in target document" },
           relationType: {
@@ -391,9 +405,10 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
             default: "LINKS_TO",
           },
         },
-        async execute({ action, factText, docId, scope, startLine, endLine, relationType }, { worktree, directory }) {
+        async execute({ action, factText, docId, scope, directory, project, startLine, endLine, relationType }, { worktree, directory: ctxDir }) {
           const { linkFactToDocument, getLinksForDoc, listAllLinks } = await import("../mcp-server/graph/knowledge_linker.js");
-          const key = await scopeKey(scope || "project", worktree, directory);
+          const effectiveDir = directory || project || ctxDir;
+          const key = await scopeKey(scope || "project", worktree, effectiveDir);
           const act = action || "link";
 
           if (act === "link" || act === "list_links") {
@@ -452,11 +467,14 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           title: { type: "string", description: "Document title" },
           path: { type: "string", description: "Original document file path" },
           scope: { type: "string", description: "RAG visibility: current Git project (default) or global", default: "project" },
+          directory: { type: "string", description: "Optional workspace/project directory path to target" },
+          project: { type: "string", description: "Alias for directory" },
           generateEmbeddings: { type: "boolean", description: "Compute dense vector embeddings", default: true },
         },
-        async execute({ content, type, title, path, scope, generateEmbeddings }, { worktree, directory }) {
+        async execute({ content, type, title, path, scope, directory, project, generateEmbeddings }, { worktree, directory: ctxDir }) {
           const { ingestDocument } = await import("../mcp-server/ingest/pipeline.js");
-          const projectScope = await resolveRagScopeKey(scope || "project", { worktree, directory });
+          const effectiveDir = directory || project || ctxDir;
+          const projectScope = await resolveRagScopeKey(scope || "project", { worktree, directory: effectiveDir });
           const result = await ingestDocument({
             content,
             type: type || "text",
@@ -493,12 +511,15 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           },
           generateEmbeddings: { type: "boolean", description: "Use vector search alongside BM25", default: true },
           scope: { type: "string", description: "Search global + current project (default), project only, or global only", default: "all" },
+          directory: { type: "string", description: "Optional workspace/project directory path to target" },
+          project: { type: "string", description: "Alias for directory" },
         },
-        async execute({ query, limit, instruction, generateEmbeddings, scope }, { worktree, directory }) {
+        async execute({ query, limit, instruction, generateEmbeddings, scope, directory, project }, { worktree, directory: ctxDir }) {
           const { hybridQuery } = await import("../mcp-server/retrieval/retriever.js");
           const { getConfig } = await import("../mcp-server/config/config_manager.js");
           const activeConfig = getConfig();
-          const scopeKeys = await resolveRagScopeKeys(scope || "all", { worktree, directory });
+          const effectiveDir = directory || project || ctxDir;
+          const scopeKeys = await resolveRagScopeKeys(scope || "all", { worktree, directory: effectiveDir });
 
           const results = await hybridQuery({
             query,
@@ -541,12 +562,15 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           instruction: { type: "string", description: "Optional retrieval instruction applied to every query" },
           generateEmbeddings: { type: "boolean", description: "Use vector search alongside BM25", default: true },
           scope: { type: "string", description: "Search global + current project (default), project only, or global only", default: "all" },
+          directory: { type: "string", description: "Optional workspace/project directory path to target" },
+          project: { type: "string", description: "Alias for directory" },
         },
-        async execute({ queries, limit, instruction, generateEmbeddings, scope }, { worktree, directory }) {
+        async execute({ queries, limit, instruction, generateEmbeddings, scope, directory, project }, { worktree, directory: ctxDir }) {
           const { batchHybridQuery } = await import("../mcp-server/retrieval/retriever.js");
           const { getConfig } = await import("../mcp-server/config/config_manager.js");
           const activeConfig = getConfig();
-          const scopeKeys = await resolveRagScopeKeys(scope || "all", { worktree, directory });
+          const effectiveDir = directory || project || ctxDir;
+          const scopeKeys = await resolveRagScopeKeys(scope || "all", { worktree, directory: effectiveDir });
           const allResults = await batchHybridQuery(queries, {
             limit: limit || 5,
             generateEmbeddings: generateEmbeddings !== false,
@@ -587,12 +611,15 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           docId: { type: "string", description: "Document ID, title, or path (required for read_document and delete)" },
           snapshotPath: { type: "string", description: "File path for snapshot export/import" },
           scope: { type: "string", description: "For stats/list/read: global + current project by default. Delete defaults to the current project (or global outside Git); pass all/global explicitly for broader removal" },
+          directory: { type: "string", description: "Optional workspace/project directory path to target" },
+          project: { type: "string", description: "Alias for directory" },
         },
-        async execute({ action, docId, snapshotPath, scope }, { worktree, directory }) {
+        async execute({ action, docId, snapshotPath, scope, directory, project }, { worktree, directory: ctxDir }) {
           const { getDatabase } = await import("../mcp-server/db/database.js");
           const db = await getDatabase();
+          const effectiveDir = directory || project || ctxDir;
           const scopeKeys = ["stats", "list", "read_document", "delete"].includes(action)
-            ? await resolveManageRagScopeKeys(action, scope, { worktree, directory })
+            ? await resolveManageRagScopeKeys(action, scope, { worktree, directory: effectiveDir })
             : null;
           const placeholders = scopeKeys ? scopeKeys.map(() => "?").join(",") : "";
           const visibleDocWhere = scopeKeys

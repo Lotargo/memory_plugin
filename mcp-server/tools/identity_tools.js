@@ -16,14 +16,16 @@ export function registerIdentityTools(server) {
         factText: optStr().describe("Memory fact text or keyword"),
         docId: optStr().describe("Document ID, title, or file path"),
         scope: defStr("project").describe("'project' (default) or 'global'"),
+        directory: optStr().describe("Optional workspace/project directory path"),
+        project: optStr().describe("Alias for directory"),
         startLine: optNum().describe("Starting line number in target document"),
         endLine: optNum().describe("Ending line number in target document"),
         relationType: defStr("LINKS_TO").describe("Relation type (e.g. 'RULES_FOR', 'IMPLEMENTS', 'EXPLAINS')"),
       }),
     },
-    async ({ action, factText, docId, scope, startLine, endLine, relationType }) => {
+    async ({ action, factText, docId, scope, directory, project, startLine, endLine, relationType }) => {
       const { linkFactToDocument, getLinksForDoc, listAllLinks } = await import("../graph/knowledge_linker.js");
-      const key = await scopeKey(scope, null, null);
+      const key = await scopeKey(scope, null, directory || project || null);
 
       if (action === "link" || action === "list_links") {
         requireProjectKey(key);

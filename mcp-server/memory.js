@@ -48,8 +48,18 @@ export function ensureDirSync() {
   if (!existsSync(exportsDir)) mkdirSync(exportsDir, { recursive: true });
 }
 
+export function getActiveWorkspaceDir() {
+  return (
+    process.env.WORKSPACE_DIR ||
+    process.env.PROJECT_DIR ||
+    process.env.OPENCODE_WORKSPACE ||
+    process.env.IDE_WORKSPACE ||
+    null
+  );
+}
+
 export function canonicalPath(dir) {
-  let p = resolve(dir || process.cwd());
+  let p = resolve(dir || getActiveWorkspaceDir() || process.cwd());
   if (process.platform === "win32") {
     p = p.replace(/\\/g, "/").replace(/^([a-zA-Z]):/, (_, d) => `${d.toLowerCase()}:`);
   }
@@ -57,13 +67,13 @@ export function canonicalPath(dir) {
 }
 
 export async function projectKey(worktree, directory) {
-  const dir = worktree || directory || process.cwd();
+  const dir = worktree || directory || getActiveWorkspaceDir() || process.cwd();
   const identity = await resolveProjectIdentity(dir);
   return identity ? identity.key : null;
 }
 
 export async function projectName(worktree, directory) {
-  const dir = worktree || directory || process.cwd();
+  const dir = worktree || directory || getActiveWorkspaceDir() || process.cwd();
   const identity = await resolveProjectIdentity(dir);
   return identity ? identity.name : (dir ? basename(resolve(dir)) : "default");
 }

@@ -16,6 +16,7 @@ export function registerMemoryTools(server) {
       description:
         "Save an important, durable fact to memory. Only use for high-signal information " +
         "(name, goals, constraints, tech preferences, project conventions). " +
+        "directory: optional workspace/project directory path to target (ensures saving into the project store even from external cwd). " +
         "docId/startLine/endLine/relationType are OPTIONAL and only used to link the fact to a " +
         "Knowledge Base document or line range; omit them when no linking is needed. " +
         "ttl is OPTIONAL (e.g. '90d', '2w', '24h') — expired facts are shown with [EXPIRED] but not auto-deleted. " +
@@ -29,6 +30,8 @@ export function registerMemoryTools(server) {
         fact: z.string().describe("The fact to remember, written in English"),
         title: optStr().describe("Optional title for the fact. If not specified, one is auto-generated."),
         scope: defStr("project").describe("'project' (default) or 'global'"),
+        directory: optStr().describe("Optional workspace/project directory path to target when scope='project' (e.g. 'F:/projects/my-app')"),
+        project: optStr().describe("Alias for directory"),
         docId: optStr().describe("Optional document ID, title, or path to link this fact to"),
         startLine: optNum().describe("Optional starting line number in target document"),
         endLine: optNum().describe("Optional ending line number in target document"),
@@ -48,14 +51,15 @@ export function registerMemoryTools(server) {
       description:
         "Show saved facts with any Agent-linked Knowledge Base documents/lines. " +
         "scope: 'project', 'global', 'all' (default), or 'list_projects'. " +
-        "Use project: '<directory path>' with scope 'project'/'all' to read facts of a specific project from any working directory. " +
+        "Use directory: '<directory path>' with scope 'project'/'all' to read facts of a specific project from any working directory. " +
         "query filters by keyword (all space-separated terms must match). " +
         "tags filters by comma-separated tags. since/until filter by date (YYYY-MM-DD, inclusive). " +
         "Superseded facts are excluded by default; pass includeSuperseded=true to inspect history. " +
         "Expired facts are shown with [EXPIRED], protected ones with [KEEP]. The response includes the store file paths.",
       inputSchema: z.object({
         scope: defStr("all").describe("'project', 'global', 'all', or 'list_projects'"),
-        project: optStr().describe("Directory path of the project to read facts from (e.g. 'F:/projects/plugins/memory')"),
+        directory: optStr().describe("Directory path of the project to read facts from (e.g. 'F:/projects/plugins/memory')"),
+        project: optStr().describe("Alias for directory"),
         query: optStr().describe("Optional keyword filter; all space-separated terms must match"),
         tags: optStr().describe("Optional comma-separated tag filter (any match)"),
         since: optStr().describe("Optional start date filter, YYYY-MM-DD (inclusive)"),
@@ -76,6 +80,8 @@ export function registerMemoryTools(server) {
       inputSchema: z.object({
         id: z.string().describe("The unique metadata id of the fact (e.g. '8f3a2c')"),
         scope: defStr("all").describe("'project', 'global', or 'all' (default)"),
+        directory: optStr().describe("Optional workspace/project directory path"),
+        project: optStr().describe("Alias for directory"),
       }),
     },
     async (args) => ({ content: [{ type: "text", text: await getFactById(args) }] })
@@ -90,6 +96,8 @@ export function registerMemoryTools(server) {
       inputSchema: z.object({
         query: z.string().describe("Number, range like '3-30', or text to search for"),
         scope: defStr("project").describe("'project' (default) or 'global'"),
+        directory: optStr().describe("Optional workspace/project directory path"),
+        project: optStr().describe("Alias for directory"),
         force: defBool(false).describe("Also delete protected (keep) facts"),
       }),
     },
@@ -107,6 +115,8 @@ export function registerMemoryTools(server) {
         newText: z.string().describe("New fact text"),
         title: optStr().describe("Optional new title for the fact"),
         scope: defStr("project").describe("'project' (default) or 'global'"),
+        directory: optStr().describe("Optional workspace/project directory path"),
+        project: optStr().describe("Alias for directory"),
       }),
     },
     async (args) => ({ content: [{ type: "text", text: await updateFactText(args) }] })
@@ -118,8 +128,11 @@ export function registerMemoryTools(server) {
       description:
         "Show memory storage paths (store file locations, MEMORY_DIR, SQLite DB), fact counts, " +
         "Knowledge Base stats, and the installed package version.",
-      inputSchema: z.object({}),
+      inputSchema: z.object({
+        directory: optStr().describe("Optional workspace/project directory path to inspect (default: current directory)"),
+        project: optStr().describe("Alias for directory"),
+      }),
     },
-    async () => ({ content: [{ type: "text", text: await memoryInfo() }] })
+    async (args) => ({ content: [{ type: "text", text: await memoryInfo(args) }] })
   );
 }

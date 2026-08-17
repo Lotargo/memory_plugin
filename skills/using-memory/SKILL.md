@@ -17,24 +17,24 @@ You have access to a persistent dual-layer memory engine supercharged with an **
 
 | Scenario / Intent | Target Tool | Key Parameters |
 |-------------------|-------------|----------------|
-| User shares identity, tech stack preference, or workflow rule | `remember` | `fact` (English), `title` (concise 2-5 word headline), `scope`, optional `docId`, `startLine`, `endLine` |
-| User asks what you remember about them, the project, or linked docs | `recall` | `scope` ("all", "global", "project", "list_projects"), `mode` ("full", "headers"), `offset`, `limit`, optional `query`, `tags`, `since`, `until`, `project` (at session start, MUST fetch all memories with `scope: "all"` without restrictive query filters) |
-| Get a single fact's text and metadata by ID | `get_fact` | `id` (metadata id e.g. "8f3a2c"), `scope` |
-| User corrects/updates an old saved fact | `update_fact` | `id` (number/id/text), `newText`, `scope` |
-| Replace a fact but keep a version trail | `remember` | `fact`, `supersedes` (number/id/text) |
+| User shares identity, tech stack preference, or workflow rule | `remember` | `fact` (English), `title` (concise 2-5 word headline), `scope`, optional `directory` (workspace path), `docId`, `startLine`, `endLine` |
+| User asks what you remember about them, the project, or linked docs | `recall` | `scope` ("all", "global", "project", "list_projects"), `mode` ("full", "headers"), `offset`, `limit`, optional `query`, `tags`, `since`, `until`, `directory` / `project` (at session start, MUST fetch all memories with `scope: "all"` without restrictive query filters) |
+| Get a single fact's text and metadata by ID | `get_fact` | `id` (metadata id e.g. "8f3a2c"), `scope`, optional `directory` |
+| User corrects/updates an old saved fact | `update_fact` | `id` (number/id/text), `newText`, `scope`, optional `directory` |
+| Replace a fact but keep a version trail | `remember` | `fact`, `supersedes` (number/id/text), optional `directory` |
 | Protect a fact from accidental `forget` | `remember` | `keep: true` |
 | Set a time-to-live on a fact | `remember` | `ttl` ("90d", "2w", "24h", "12m") |
-| Filter facts by keyword / tags / date | `recall` | `query`, `tags`, `since`, `until` |
-| Show storage paths, versions, fact & RAG stats, git identity | `memory_info` | — |
-| Connect a Notebook fact to a document, section, or line range | `link_knowledge` | `action` ("link", "list_links", "get_doc_links"), `factText`, `docId`, `startLine`, `endLine`, `relationType` |
+| Filter facts by keyword / tags / date | `recall` | `query`, `tags`, `since`, `until`, optional `directory` |
+| Show storage paths, versions, fact & RAG stats, git identity | `memory_info` | optional `directory` |
+| Connect a Notebook fact to a document, section, or line range | `link_knowledge` | `action` ("link", "list_links", "get_doc_links"), `factText`, `docId`, `startLine`, `endLine`, `relationType`, optional `directory` |
 | Register current Git project identity / migrate legacy stores | `memory_info` then `link_project_memory` when `Registry: unlinked` | `directory`, optional `remote` |
 | Remove path alias or purge project identity | `unlink_project_memory` | `directory`, `purge` (boolean) |
 | Move or merge project memories to new target identity | `relink_project_memory` | `directory`, `remote` (target remote URL) |
-| User asks to index a documentation URL, file, or repository | `ingest_document` | `content` (text/file path/URL), `type` ("text", "file", "url"), `title`, `path`, `scope` (project default) |
-| User asks a complex question about indexed docs or code | `query_knowledge_base` | `query`, `scope` (all default), `limit`, `instruction`, `generateEmbeddings` |
-| User needs multiple queries executed in batch (comparisons, multi-topic) | `batch_query_knowledge_base` | `queries` (array), `scope` (all default), `limit`, `instruction`, `generateEmbeddings` |
+| User asks to index a documentation URL, file, or repository | `ingest_document` | `content` (text/file path/URL), `type` ("text", "file", "url"), `title`, `path`, `scope` (project default), optional `directory` |
+| User asks a complex question about indexed docs or code | `query_knowledge_base` | `query`, `scope` (all default), `limit`, `instruction`, `generateEmbeddings`, optional `directory` |
+| User needs multiple queries executed in batch (comparisons, multi-topic) | `batch_query_knowledge_base` | `queries` (array), `scope` (all default), `limit`, `instruction`, `generateEmbeddings`, optional `directory` |
 | Read full raw content of an ambiguous/abstract document | `manage_knowledge_base` | `action: "read_document"`, `docId` |
-| View DB stats, list indexed docs, read/delete docs, export/import snapshots | `manage_knowledge_base` | `action` ("stats", "list", "read_document", "delete", "export_snapshot", "import_snapshot"), `docId`, `snapshotPath` |
+| View DB stats, list indexed docs, read/delete docs, export/import snapshots | `manage_knowledge_base` | `action` ("stats", "list", "read_document", "delete", "export_snapshot", "import_snapshot"), `docId`, `snapshotPath`, optional `directory` |
 | Re-embed all documents after switching embedding model / dimension | `reindex_knowledge_base` | `model`, `dimension` (optional; defaults to active config) |
 | Discover available MCP servers and their specific purposes | `list-mcp-tools` | — |
 | Ask which MCP tool / server is suitable for a specific task | `mcp-reminder` | `task` (string, e.g., "db migration") |
@@ -54,6 +54,9 @@ When an ingested source supports a durable project decision or rule, link the co
   - Always translate the fact into clear, concise English before calling `remember`.
   - **Always specify a descriptive `title` parameter** (a 2-5 word headline, e.g., `title: "Backend Framework Preference"`).
   - Facts are stored in `**Title** — body` format. Initial session recall and auto-injected `<MEMORY>` blocks MUST include full fact bodies. Header-only recall was tested and rejected because it loses essential context. Use `mode: "headers"` only when the user explicitly asks for a compact inventory, never for session initialization.
+- **Targeting Project Directory (`directory`)**:
+  - Pass `directory: "<project directory path>"` (or `project`) when calling `remember` or `recall` to ensure the call routes to the target project store even when the MCP server runs in an external folder or outside Git.
+  - Example: `remember(title: "Backend Framework Preference", fact: "Use Fastify instead of Express for backend services", scope: "project", directory: "F:/projects/my-app")`
 - **Linking to Knowledge Base Documents**:
   - Pass `docId` (or document title/path) and optional `startLine` / `endLine` when calling `remember` or `link_knowledge`.
   - Example: `remember(title: "Backend Framework Preference", fact: "Use Fastify instead of Express for backend services", scope: "project", docId: "arch_specs.md", startLine: 5, endLine: 7)`
@@ -80,6 +83,7 @@ Supported metadata keys (set via `remember`, rendered as badges by `recall`):
 - `supersedes` / `supersededBy` — versioning: the old fact gets `[SUPERSEDED]` and is excluded from the injected memory block while staying in the store for history.
 
 ### Remember Options (`remember`)
+- `directory` / `project`: optional workspace/project directory path to target when saving project facts from outside cwd.
 - `ttl`: "90d", "2w", "24h", "12m" — mark the fact for expiry; it will show `[EXPIRED]` once past.
 - `keep: true`: protect the fact from `forget` (unless `force: true`).
 - `tags`: comma-separated tags for later filtering, e.g. `"pref,arch"`.
@@ -87,10 +91,10 @@ Supported metadata keys (set via `remember`, rendered as badges by `recall`):
 
 ### Filtering & Viewing Facts (`recall` & `get_fact`)
 - `scope`: `"all"` (default), `"global"`, `"project"`, or `"list_projects"` (lists all project stores, total facts, file paths, and git identity bindings).
+- `directory` / `project`: read a specific project's store from any working directory.
 - `query`: all space-separated terms must match (case-insensitive); searches text, id, tags, and date.
 - `tags`: comma-separated; returns facts with ANY matching tag.
 - `since` / `until`: "YYYY-MM-DD" (inclusive) to filter by fact date.
-- `project`: read a specific project's store from any working directory.
 - `mode`: `"full"` (default) or `"headers"` (returns title and badges only, omitting full text body).
 - `includeSuperseded`: `false` by default so obsolete history does not enter active context; set `true` only to inspect version history.
 - `offset` / `limit`: optional numeric pagination parameters.

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.5] - 2026-08-17
+
+### Added
+
+- Added explicit `directory` (and `project` alias) parameter support to Notebook/Memory tools (`remember`, `recall`, `get_fact`, `forget`, `update_fact`, `memory_info`, `link_knowledge`) and RAG tools (`ingest_document`, `query_knowledge_base`, `batch_query_knowledge_base`, `manage_knowledge_base`) across both the MCP server and native OpenCode plugin.
+
+### Fixed
+
+- Fixed cross-directory workspace routing and isolation so operations targeting external project paths work reliably without directory mismatch or leaking npm process `INIT_CWD`.
+- Fixed `batch_query_knowledge_base` query execution and result formatting in the MCP server.
+
 ## [1.6.4] - 2026-08-13
 
 ### Added

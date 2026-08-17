@@ -209,6 +209,35 @@ export async function runMcpToolsTests() {
     const neg = toolResult(await request("tools/call", { name: "remember", arguments: { scope: "project", fact: "must fail outside git" } }));
     assert.ok(!neg.includes("Memory updated") && /git/i.test(neg), neg);
     ok("remember: project scope errors outside a git repo (B2.4)");
+
+    // Test directory parameter routing when server is outside git repo
+    const withDir = toolResult(await request("tools/call", {
+      name: "remember",
+      arguments: { scope: "project", directory: temp, fact: "cross-directory project fact for temp" },
+    }));
+    assert.ok(withDir.includes("Memory updated"), withDir);
+    ok("remember: project scope succeeds with directory parameter from non-git cwd");
+
+    const recWithDir = toolResult(await request("tools/call", {
+      name: "recall",
+      arguments: { scope: "project", directory: temp },
+    }));
+    assert.ok(recWithDir.includes("cross-directory project fact for temp"), recWithDir);
+    ok("recall: scope='project' with directory retrieves target project facts");
+
+    const recAllWithDir = toolResult(await request("tools/call", {
+      name: "recall",
+      arguments: { scope: "all", directory: temp },
+    }));
+    assert.ok(recAllWithDir.includes("cross-directory project fact for temp"), recAllWithDir);
+    ok("recall: scope='all' with directory retrieves target project facts");
+
+    const miWithDir = toolResult(await request("tools/call", {
+      name: "memory_info",
+      arguments: { directory: temp },
+    }));
+    assert.ok(miWithDir.includes("Identity: git"), miWithDir);
+    ok("memory_info: directory parameter inspects target git identity");
   } finally {
     child.kill();
     try {
@@ -219,6 +248,7 @@ export async function runMcpToolsTests() {
     } catch (e) {}
     try {
       rmSync(temp, { recursive: true, force: true });
+      rmSync(nonGitDir, { recursive: true, force: true });
     } catch (e) {
       output.push(`[cleanup] ${e.message}`);
     }

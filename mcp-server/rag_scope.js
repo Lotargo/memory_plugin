@@ -2,7 +2,8 @@ import { GLOBAL_KEY, projectKey } from "./memory.js";
 
 export async function resolveRagScopeKey(scope = "project", ctx = {}) {
   if (scope === "global") return GLOBAL_KEY;
-  const key = await projectKey(ctx.worktree ?? null, ctx.directory ?? null);
+  const dir = ctx.directory || ctx.project || null;
+  const key = await projectKey(ctx.worktree ?? null, dir);
   if (!key) {
     if (scope === "project") {
       throw new Error("Project-scoped RAG requires a Git repository. Use scope='global' outside Git.");
@@ -14,7 +15,8 @@ export async function resolveRagScopeKey(scope = "project", ctx = {}) {
 
 export async function resolveRagScopeKeys(scope = "all", ctx = {}) {
   if (scope === "global") return [GLOBAL_KEY];
-  const project = await projectKey(ctx.worktree ?? null, ctx.directory ?? null);
+  const dir = ctx.directory || ctx.project || null;
+  const project = await projectKey(ctx.worktree ?? null, dir);
   if (scope === "project") {
     if (!project) {
       throw new Error("Project-scoped RAG requires a Git repository. Use scope='global' outside Git.");

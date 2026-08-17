@@ -34,12 +34,14 @@ export function registerRagTools(server) {
         title: optStr().describe("Document title"),
         path: optStr().describe("Original document file path"),
         scope: z.enum(["project", "global"]).nullish().transform((v) => v || "project").describe("RAG visibility: current Git project (default) or global"),
+        directory: optStr().describe("Optional workspace/project directory path to target"),
+        project: optStr().describe("Alias for directory"),
         generateEmbeddings: defBool(true).describe("Compute dense vector embeddings"),
       }),
     },
-    async ({ content, type, title, path, scope, generateEmbeddings }) => {
+    async ({ content, type, title, path, scope, directory, project, generateEmbeddings }) => {
       const { ingestDocument } = await import("../ingest/pipeline.js");
-      const projectScope = await resolveRagScopeKey(scope);
+      const projectScope = await resolveRagScopeKey(scope, { directory, project });
       const result = await ingestDocument({
         content,
         type,
@@ -86,13 +88,15 @@ export function registerRagTools(server) {
         ),
         generateEmbeddings: defBool(true).describe("Use vector search alongside BM25"),
         scope: z.enum(["all", "project", "global"]).nullish().transform((v) => v || "all").describe("Search global + current project (default), project only, or global only"),
+        directory: optStr().describe("Optional workspace/project directory path to target"),
+        project: optStr().describe("Alias for directory"),
       }),
     },
-    async ({ query, limit, instruction, generateEmbeddings, scope }) => {
+    async ({ query, limit, instruction, generateEmbeddings, scope, directory, project }) => {
       const { hybridQuery } = await import("../retrieval/retriever.js");
       const { getConfig } = await import("../config/config_manager.js");
       const activeConfig = getConfig();
-      const scopeKeys = await resolveRagScopeKeys(scope);
+      const scopeKeys = await resolveRagScopeKeys(scope, { directory, project });
 
       const results = await hybridQuery({
         query,
@@ -151,13 +155,15 @@ export function registerRagTools(server) {
         ),
         generateEmbeddings: defBool(true).describe("Use vector search alongside BM25"),
         scope: z.enum(["all", "project", "global"]).nullish().transform((v) => v || "all").describe("Search global + current project (default), project only, or global only"),
+        directory: optStr().describe("Optional workspace/project directory path to target"),
+        project: optStr().describe("Alias for directory"),
       }),
     },
-    async ({ queries, limit, instruction, generateEmbeddings, scope }) => {
+    async ({ queries, limit, instruction, generateEmbeddings, scope, directory, project }) => {
       const { batchHybridQuery } = await import("../retrieval/retriever.js");
       const { getConfig } = await import("../config/config_manager.js");
       const activeConfig = getConfig();
-      const scopeKeys = await resolveRagScopeKeys(scope);
+      const scopeKeys = await resolveRagScopeKeys(scope, { directory, project });
 
       const allResults = await batchHybridQuery(queries, {
         limit,
@@ -168,24 +174,21 @@ export function registerRagTools(server) {
 
       const formatted = allResults
         .map((results, qi) => {
-          const header = `## Query ${qi + 1}: "${queries[qi]}"\n`;
+          const header = `### Query [${qi + 1}]: "${queries[qi]}"\n\n`;
           if (!results || results.length === 0) {
-            return header + "_No results found._";
+            return header + "No matching knowledge found for this query.";
           }
           const items = results
-            .map((r, i) => {
-              let h = `### [${i + 1}] ${r.doc_title || "Untitled"}`;
-              if (r.heading) h += ` > ${r.heading}`;
-              if (r.breadcrumbs) h += ` (${r.breadcrumbs})`;
-              let body = `Score: ${(r.score || 0).toFixed(4)}`;
-              if (r.retrieval_policy && r.retrieval_policy !== "micro_chunk") {
-                body += ` [${r.retrieval_policy}]`;
+            .map((item, j) => {
+              let title = `#### [${j + 1}] ${item.doc_title || "Untitled"}`;
+              if (item.heading) title += ` > ${item.heading}`;
+              if (item.breadcrumbs) title += ` (${item.breadcrumbs})`;
+              let body = `Score: ${(item.score || 0).toFixed(4)}\n`;
+              if (item.defined_symbols && item.defined_symbols.length > 0) {
+                body += `Defined Symbols: ${item.defined_symbols.join(", ")}\n`;
               }
-              if (r.defined_symbols && r.defined_symbols.length > 0) {
-                body += `\nDefined Symbols: ${r.defined_symbols.join(", ")}`;
-              }
-              body += `\n\n${r.snippet || r.full_section_content || ""}`;
-              return `${h}\n${body}`;
+              body += `\n${item.snippet || item.full_section_content || ""}`;
+              return `${title}\n${body}`;
             })
             .join("\n\n---\n\n");
           return header + items;
@@ -249,13 +252,15 @@ export function registerRagTools(server) {
         docId: optStr().describe("Document ID, title, or path (required for read_document and delete)"),
         snapshotPath: optStr().describe("File path for snapshot export/import"),
         scope: z.enum(["all", "project", "global"]).nullish().describe("For stats/list/read: global + current project by default. Delete defaults to the current project (or global outside Git); pass all/global explicitly for broader removal"),
+        directory: optStr().describe("Optional workspace/project directory path to target"),
+        project: optStr().describe("Alias for directory"),
       }),
     },
-    async ({ action, docId, snapshotPath, scope }) => {
+    async ({ action, docId, snapshotPath, scope, directory, project }) => {
       const { getDatabase } = await import("../db/database.js");
       const db = await getDatabase();
       const scopeKeys = ["stats", "list", "read_document", "delete"].includes(action)
-        ? await resolveManageRagScopeKeys(action, scope)
+        ? await resolveManageRagScopeKeys(action, scope, { directory, project })
         : null;
       const placeholders = scopeKeys ? scopeKeys.map(() => "?").join(",") : "";
       const visibleDocWhere = scopeKeys

@@ -55,15 +55,26 @@ function splitTitle(rawText, explicitTitle) {
   return { finalTitle, finalFact };
 }
 
-async function resolveScopeKey(scope, ctx = {}) {
-  return await scopeKey(scope || "project", ctx.worktree ?? null, ctx.directory ?? null);
+function extractEffectiveDir(args = {}, ctx = {}) {
+  return (
+    args?.directory ||
+    args?.project ||
+    ctx?.directory ||
+    ctx?.worktree ||
+    null
+  );
+}
+
+async function resolveScopeKey(scope, args = {}, ctx = {}) {
+  const dir = extractEffectiveDir(args, ctx);
+  return await scopeKey(scope || "project", ctx?.worktree ?? null, dir);
 }
 
 export async function rememberFact(
-  { fact, title, scope, docId, startLine, endLine, relationType, ttl, keep, tags, supersedes },
+  { fact, title, scope, directory, project, docId, startLine, endLine, relationType, ttl, keep, tags, supersedes },
   ctx = {}
 ) {
-  const key = requireProjectKey(await resolveScopeKey(scope, ctx));
+  const key = requireProjectKey(await resolveScopeKey(scope, { directory, project }, ctx));
   const entries = await readMemory(key);
 
   let { finalTitle, finalFact } = splitTitle(fact, title);
@@ -124,6 +135,9 @@ export async function rememberFact(
 
 async function resolveTargetKey(projectPath) {
   if (!projectPath) return null;
+  if (typeof projectPath === "string" && (projectPath.startsWith("git:") || projectPath.startsWith("git_") || projectPath === GLOBAL_KEY)) {
+    return projectPath;
+  }
   try {
     const { resolveProjectIdentity } = await import("../../identity.js");
     const identity = await resolveProjectIdentity(projectPath);
@@ -133,13 +147,14 @@ async function resolveTargetKey(projectPath) {
 }
 
 export async function recallFacts(
-  { scope, project, query, tags, since, until, mode, offset, limit, includeSuperseded = false },
+  { scope, directory, project, query, tags, since, until, mode, offset, limit, includeSuperseded = false },
   ctx = {}
 ) {
   const results = [];
   const now = Date.now();
   const targetMode = mode || "full";
   const targetOffset = offset !== undefined && offset !== null ? offset : 0;
+  const targetProjectInput = directory || project || ctx.directory || ctx.worktree || null;
 
   if (scope === "list_projects") {
     const stores = await listProjectStores();
@@ -152,7 +167,7 @@ export async function recallFacts(
     );
     return `Project Memory Stores:\n${lines.join(
       "\n"
-    )}\n\nUse recall(scope: "project", project: "<path>") to read a specific store.\n\nMemory dir: ${MEMORY_DIR}`;
+    )}\n\nUse recall(scope: "project", directory: "<path>") to read a specific store.\n\nMemory dir: ${MEMORY_DIR}`;
   }
 
   let getLinksForFact = null;
@@ -161,8 +176,8 @@ export async function recallFacts(
   } catch {}
 
   const target =
-    (await resolveTargetKey(project)) ?? (await projectKey(ctx.worktree ?? null, ctx.directory ?? null));
-  const label = project ? target : await projectName(ctx.worktree ?? null, ctx.directory ?? null);
+    (await resolveTargetKey(targetProjectInput)) ?? (await projectKey(ctx.worktree ?? null, targetProjectInput));
+  const label = targetProjectInput ? target : await projectName(ctx.worktree ?? null, targetProjectInput);
 
   const formatFactWithLinks = async (factLine, index, key) => {
     const p = parseFactEntry(factLine);
@@ -230,17 +245,18 @@ export async function recallFacts(
   };
 
   if (scope !== "project") await collect(await readMemory(GLOBAL_KEY), GLOBAL_KEY);
-  if (scope !== "global") await collect(await readMemory(target), target);
+  if (scope !== "global" && target) await collect(await readMemory(target), target);
 
   const filtered = Boolean(query || tags || since || until);
   if (!results.length) return filtered ? "No facts match the search." : "Memory is empty.";
   return `${results.join("\n")}\n\nMemory dir: ${MEMORY_DIR}`;
 }
 
-export async function getFactById({ id, scope }, ctx = {}) {
+export async function getFactById({ id, scope, directory, project }, ctx = {}) {
   const targetId = String(id || "").trim();
   if (!targetId) throw new Error("ID parameter is required.");
 
+  const targetDir = extractEffectiveDir({ directory, project }, ctx);
   const results = [];
   const check = async (key) => {
     const entries = await readMemory(key);
@@ -251,7 +267,10 @@ export async function getFactById({ id, scope }, ctx = {}) {
   };
 
   if (scope !== "project") await check(GLOBAL_KEY);
-  if (scope !== "global") await check(await projectKey(ctx.worktree ?? null, ctx.directory ?? null));
+  if (scope !== "global") {
+    const projKey = await projectKey(ctx.worktree ?? null, targetDir);
+    if (projKey) await check(projKey);
+  }
 
   if (!results.length) return `Fact with ID "${targetId}" not found.`;
 
@@ -267,8 +286,8 @@ export async function getFactById({ id, scope }, ctx = {}) {
     .join("\n\n");
 }
 
-export async function forgetFacts({ query, scope, force }, ctx = {}) {
-  const key = requireProjectKey(await resolveScopeKey(scope, ctx));
+export async function forgetFacts({ query, scope, force, directory, project }, ctx = {}) {
+  const key = requireProjectKey(await resolveScopeKey(scope, { directory, project }, ctx));
   const entries = await readMemory(key);
 
   const rangeMatch = /^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(query);
@@ -307,8 +326,8 @@ export async function forgetFacts({ query, scope, force }, ctx = {}) {
   return text;
 }
 
-export async function updateFactText({ id, newText, title, scope }, ctx = {}) {
-  const key = requireProjectKey(await resolveScopeKey(scope, ctx));
+export async function updateFactText({ id, newText, title, scope, directory, project }, ctx = {}) {
+  const key = requireProjectKey(await resolveScopeKey(scope, { directory, project }, ctx));
   const entries = await readMemory(key);
   const idx = resolveFactIndex(entries, id);
   if (idx === -1) throw new Error(`Fact not found: ${id}`);
@@ -373,8 +392,9 @@ export async function updateFactText({ id, newText, title, scope }, ctx = {}) {
 }
 
 export async function memoryInfo(_args = {}, ctx = {}) {
+  const effectiveDir = extractEffectiveDir(_args, ctx) || process.cwd();
   const dbPath = join(MEMORY_DIR, "storage", "memory.sqlite");
-  const activeKey = await projectKey(ctx.worktree ?? null, ctx.directory ?? null);
+  const activeKey = await projectKey(ctx.worktree ?? null, effectiveDir);
   const globalFile = storeFilePath(GLOBAL_KEY);
   const projectFile = activeKey ? storeFilePath(activeKey) : null;
 
@@ -407,7 +427,7 @@ export async function memoryInfo(_args = {}, ctx = {}) {
     const { getDatabase } = await import("../../db/database.js");
     const { resolveProjectIdentity, listIdentities } = await import("../../identity.js");
     const db = await getDatabase();
-    const identity = await resolveProjectIdentity(ctx.worktree || ctx.directory || process.cwd());
+    const identity = await resolveProjectIdentity(effectiveDir);
     const all = await listIdentities(db);
     const registered = identity ? all.find((item) => item.key === identity.key) : null;
     identityLines.push(
@@ -433,7 +453,7 @@ export async function memoryInfo(_args = {}, ctx = {}) {
     `Project store: ${projectFile || "not applicable (outside Git)"}`,
     `Project stores: ${stores.length}`,
     `Facts (global): ${(await readMemoryRaw(GLOBAL_KEY)).length}`,
-    `Facts (project): ${(await readMemoryRaw(activeKey)).length}`,
+    `Facts (project): ${(activeKey ? await readMemoryRaw(activeKey) : []).length}`,
     ...identityLines,
   ];
   if (rag.error) lines.push(`RAG: unavailable (${rag.error})`);
