@@ -6,6 +6,7 @@ import {
   getFactById,
   forgetFacts,
   updateFactText,
+  undoMemory,
   memoryInfo,
 } from "./core/memory_core.js";
 
@@ -24,6 +25,7 @@ export function registerMemoryTools(server) {
         "tags is OPTIONAL comma-separated text for filtering. " +
         "supersedes is OPTIONAL: a number (from recall), id, or text of a fact this one replaces; " +
         "the target is then marked [SUPERSEDED]. " +
+        "Successful mutations are journaled so the latest change can be reverted with undo. " +
         "Translate the fact into English and keep it concise. " +
         "scope: 'project' (default) or 'global'",
       inputSchema: z.object({
@@ -51,6 +53,8 @@ export function registerMemoryTools(server) {
       description:
         "Show saved facts with any Agent-linked Knowledge Base documents/lines. " +
         "scope: 'project', 'global', 'all' (default), or 'list_projects'. " +
+        "Use recent=N for the N newest facts, or last=true for the newest single fact. " +
+        "order can be 'storage' (default), 'newest', or 'oldest'. groupBy='tag' groups the current page by each fact's primary (first) tag. " +
         "Use directory: '<directory path>' with scope 'project'/'all' to read facts of a specific project from any working directory. " +
         "query filters by keyword (all space-separated terms must match). " +
         "tags filters by comma-separated tags. since/until filter by date (YYYY-MM-DD, inclusive). " +
@@ -67,6 +71,10 @@ export function registerMemoryTools(server) {
         mode: z.enum(["headers", "full"]).nullish().transform((v) => v || "full").describe("Result mode: 'full' (with body, default) or 'headers' (title and badges only)"),
         offset: optNum().describe("Pagination offset (optional)"),
         limit: optNum().describe("Pagination limit (optional)"),
+        order: z.enum(["storage", "newest", "oldest"]).nullish().transform((v) => v || "storage").describe("Result order; storage preserves the notebook order"),
+        recent: optNum().describe("Return only the N newest matching facts; shorthand for order='newest' with limit=N"),
+        last: defBool(false).describe("Return only the newest matching fact"),
+        groupBy: z.enum(["none", "tag"]).nullish().transform((v) => v || "none").describe("Optionally group the current result page by primary tag"),
         includeSuperseded: defBool(false).describe("Include superseded historical facts (excluded by default)"),
       }),
     },
@@ -91,10 +99,13 @@ export function registerMemoryTools(server) {
     "forget",
     {
       description:
-        "Delete a fact by number (from recall), by range (e.g. '3-30', inclusive), or by text search. " +
-        "Protected facts (remember with keep=true) are skipped unless force=true.",
+        "Delete facts by query or by a stable batch of refs. query accepts a number (from recall), metadata short ID, range (e.g. '3-30', inclusive), or text search. " +
+        "refs accepts an array of recall numbers or metadata IDs and resolves the whole batch against one pre-delete snapshot, so numbering cannot shift mid-operation. " +
+        "Ranges whose upper bound is beyond the current notebook are safely clamped to the last existing fact. " +
+        "Protected facts (remember with keep=true) are skipped unless force=true. Successful deletion can be reverted with undo.",
       inputSchema: z.object({
-        query: z.string().describe("Number, range like '3-30', or text to search for"),
+        query: optStr().describe("Optional number, metadata ID, range like '3-30', or text to search for"),
+        refs: z.array(z.string()).optional().nullable().describe("Optional stable batch of fact numbers/IDs to delete together"),
         scope: defStr("project").describe("'project' (default) or 'global'"),
         directory: optStr().describe("Optional workspace/project directory path"),
         project: optStr().describe("Alias for directory"),
@@ -109,7 +120,8 @@ export function registerMemoryTools(server) {
     {
       description:
         "Update the text of an existing fact by number (from recall), id, or text match, " +
-        "preserving its original date and metadata. Linked Knowledge Base documents are re-pointed to the new text.",
+        "preserving its original date and metadata. Linked Knowledge Base documents are re-pointed to the new text. " +
+        "The latest update can be reverted with undo.",
       inputSchema: z.object({
         id: z.string().describe("Number (from recall), metadata id, or text of the fact to update"),
         newText: z.string().describe("New fact text"),
@@ -123,11 +135,26 @@ export function registerMemoryTools(server) {
   );
 
   server.registerTool(
+    "undo",
+    {
+      description:
+        "Revert the latest journaled remember, forget, or update_fact operation in the selected memory scope. " +
+        "Undo is refused if the notebook or its linked RAG state changed after that operation, preventing accidental overwrite of newer/manual edits.",
+      inputSchema: z.object({
+        scope: defStr("project").describe("'project' (default) or 'global'"),
+        directory: optStr().describe("Optional workspace/project directory path"),
+        project: optStr().describe("Alias for directory"),
+      }),
+    },
+    async (args) => ({ content: [{ type: "text", text: await undoMemory(args) }] })
+  );
+
+  server.registerTool(
     "memory_info",
     {
       description:
         "Show memory storage paths (store file locations, MEMORY_DIR, SQLite DB), fact counts, " +
-        "Knowledge Base stats, and the installed package version.",
+        "Knowledge Base stats, undo-journal count, and the installed package version.",
       inputSchema: z.object({
         directory: optStr().describe("Optional workspace/project directory path to inspect (default: current directory)"),
         project: optStr().describe("Alias for directory"),
