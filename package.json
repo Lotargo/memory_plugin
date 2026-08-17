@@ -3,7 +3,7 @@
   "version": "1.6.6",
   "description": "100% local hybrid RAG memory for AI coding agents (OpenCode, Claude Code, Codex, Antigravity). MCP server + plugin: persistent user facts, document ingestion, vector + SQLite FTS5 retrieval across sessions.",
   "type": "module",
-  "main": "opencode-plugin/index.js",
+  "main": "opencode-plugin/entry.js",
   "scripts": {
     "preinstall": "node mcp-server/preinstall.js || true",
     "test": "node tests/run_all.js",
