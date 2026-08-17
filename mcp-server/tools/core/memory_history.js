@@ -121,7 +121,7 @@ export async function undoLastMemoryOperation(factKey) {
     .prepare(
       `SELECT * FROM memory_operations
        WHERE fact_key = ? AND undone_at IS NULL
-       ORDER BY created_at DESC, id DESC
+       ORDER BY created_at DESC, rowid DESC
        LIMIT 1`
     )
     .get(factKey);
