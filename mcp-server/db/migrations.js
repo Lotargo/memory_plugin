@@ -174,6 +174,27 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 7,
+    name: "007_memory_operation_journal",
+    up: async (db) => {
+      await db.exec(`
+        CREATE TABLE IF NOT EXISTS memory_operations (
+          id             TEXT PRIMARY KEY,
+          fact_key       TEXT NOT NULL,
+          operation_type TEXT NOT NULL,
+          before_json    TEXT NOT NULL,
+          after_json     TEXT NOT NULL,
+          created_at     INTEGER NOT NULL,
+          undone_at      INTEGER
+        );
+      `);
+      await db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_memory_operations_scope_created
+        ON memory_operations(fact_key, created_at DESC);
+      `);
+    },
+  },
 ];
 
 export async function runMigrations(db) {
