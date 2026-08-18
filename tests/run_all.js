@@ -12,6 +12,7 @@ const testSuites = [
   { category: "Unit", name: "prompt_manager", file: "tests/unit/prompt_manager.test.js" },
   { category: "Unit", name: "opencode_memory_context", file: "tests/unit/opencode_memory_context.test.js" },
   { category: "Unit", name: "rag_integrity", file: "tests/unit/rag_integrity.test.js" },
+  { category: "Unit", name: "rag_memory_notes", file: "tests/unit/rag_memory_notes.test.js" },
   { category: "Unit", name: "project_identity", file: "tests/unit/project_identity.test.js" },
   { category: "Unit", name: "unit_audit_fixes", file: "tests/unit/unit_audit_fixes.test.js" },
   { category: "Unit", name: "benchmark_report", file: "tests/unit/benchmark_report.test.js" },
@@ -25,6 +26,9 @@ const testSuites = [
   { category: "Integration", name: "codex_mcp_smoke", file: "tests/integration/codex_mcp_smoke.test.js" },
   { category: "Integration", name: "reverse_sync", file: "tests/integration/reverse_sync.test.js" },
   { category: "Integration", name: "rag_mcp_tools", file: "tests/integration/rag_mcp_tools.test.js" },
+  { category: "Integration", name: "rag_memory_notes", file: "tests/integration/rag_memory_notes.test.js" },
+  { category: "Integration", name: "rag_memory_notes_mcp", file: "tests/integration/rag_memory_notes_mcp.test.js" },
+  { category: "Integration", name: "rag_cloud_portability", file: "tests/integration/rag_cloud_portability.test.js" },
 
   // --- 3. CLOUD TESTS ---
   { category: "Cloud", name: "phase1_cloud", file: "tests/cloud/phase1_cloud.test.js" },
