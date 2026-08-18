@@ -13,6 +13,12 @@ function normalizeTags(tags) {
   return [];
 }
 
+function normalizeScopes(scopes) {
+  if (Array.isArray(scopes)) return [...new Set(scopes.filter(Boolean))];
+  if (typeof scopes === "string") return [...new Set(scopes.split(",").map((scope) => scope.trim()).filter(Boolean))];
+  return [];
+}
+
 export function normalizeKnowledgeDocumentMetadata(doc) {
   const metadata = parseDocumentMetadata(doc?.metadata_json);
   const sourceType = metadata.source_type || (String(doc?.path || "").startsWith("memory://note/") ? "note" : null);
@@ -25,6 +31,54 @@ export function normalizeKnowledgeDocumentMetadata(doc) {
     noteKind,
     tags,
   };
+}
+
+function resolveEffectiveDirectory(directory, project, ctx) {
+  return directory || project || ctx.directory || null;
+}
+
+/**
+ * List scoped RAG documents/notes with normalized metadata.
+ */
+export async function listKnowledgeDocuments(
+  { scope = null, directory = null, project = null } = {},
+  ctx = {}
+) {
+  const db = await getDatabase();
+  const scopeKeys = await resolveManageRagScopeKeys("list", scope, {
+    worktree: ctx.worktree ?? null,
+    directory: resolveEffectiveDirectory(directory, project, ctx),
+  });
+  const placeholders = scopeKeys.map(() => "?").join(",");
+
+  const docs = await db.prepare(`
+    SELECT d.id, d.title, d.path, d.blob_hash, d.metadata_json,
+           d.created_at, d.updated_at,
+           GROUP_CONCAT(DISTINCT ds.scope_key) AS scopes
+    FROM documents d
+    JOIN document_scopes ds ON ds.doc_id = d.id
+    WHERE ds.scope_key IN (${placeholders})
+    GROUP BY d.id, d.title, d.path, d.blob_hash, d.metadata_json, d.created_at, d.updated_at
+    ORDER BY d.created_at DESC
+  `).all(...scopeKeys);
+
+  return docs.map((doc) => {
+    const { metadata, sourceType, noteKind, tags } = normalizeKnowledgeDocumentMetadata(doc);
+    return {
+      id: doc.id,
+      docId: doc.id,
+      title: doc.title,
+      path: doc.path,
+      blob_hash: doc.blob_hash,
+      source_type: sourceType,
+      note_kind: noteKind,
+      tags,
+      metadata,
+      scopes: normalizeScopes(doc.scopes),
+      created_at: doc.created_at ?? null,
+      updated_at: doc.updated_at ?? null,
+    };
+  });
 }
 
 /**
@@ -40,10 +94,9 @@ export async function readKnowledgeDocument(
   if (!docId) throw new Error("docId parameter is required for read_document action");
 
   const db = await getDatabase();
-  const effectiveDirectory = directory || project || ctx.directory || null;
   const scopeKeys = await resolveManageRagScopeKeys("read_document", scope, {
     worktree: ctx.worktree ?? null,
-    directory: effectiveDirectory,
+    directory: resolveEffectiveDirectory(directory, project, ctx),
   });
   const placeholders = scopeKeys.map(() => "?").join(",");
 
