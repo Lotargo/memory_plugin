@@ -10,6 +10,28 @@ export function sanitizeFtsQuery(query) {
   return words.join(" OR ");
 }
 
+export function parseDocumentMetadata(value) {
+  if (!value) return {};
+  if (typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value !== "string") return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function normalizeRetrievedTags(tags) {
+  if (Array.isArray(tags)) {
+    return [...new Set(tags.map((tag) => String(tag).trim().toLowerCase()).filter(Boolean))].sort();
+  }
+  if (typeof tags === "string") {
+    return [...new Set(tags.split(",").map((tag) => tag.trim().toLowerCase()).filter(Boolean))].sort();
+  }
+  return [];
+}
+
 export async function bm25Search(db, query, limit = 30, scopeKeys = null) {
   const ftsQuery = sanitizeFtsQuery(query);
   if (!ftsQuery) return [];
@@ -432,9 +454,11 @@ export async function hybridQuery({
     const topIds = topHits.map((h) => h.id);
     const placeholders = topIds.map(() => "?").join(",");
     const details = await db.prepare(`
-      SELECT m.id as micro_id, m.retrieval_policy, m.policy_source_id,
+      SELECT m.id as micro_id, m.doc_id as doc_id, m.retrieval_policy, m.policy_source_id,
              s.id as section_id, s.heading, s.breadcrumbs, s.content as section_content,
-             med.content as medium_content, d.title as doc_title, d.path as doc_path
+             med.content as medium_content,
+             d.title as doc_title, d.path as doc_path, d.metadata_json,
+             d.created_at as doc_created_at, d.updated_at as doc_updated_at
       FROM micro_chunks m
       JOIN sections s ON m.section_id = s.id
       JOIN documents d ON m.doc_id = d.id
@@ -476,6 +500,10 @@ export async function hybridQuery({
       if (!detail) continue;
 
       const symbols = symbolsBySection.get(detail.section_id) || [];
+      const metadata = parseDocumentMetadata(detail.metadata_json);
+      const sourceType = metadata.source_type || (String(detail.doc_path || "").startsWith("memory://note/") ? "note" : null);
+      const noteKind = sourceType === "note" ? (metadata.note_kind || "note") : null;
+      const tags = normalizeRetrievedTags(metadata.tags);
 
       let snippet = hit.content;
       let paragraphContext = detail.medium_content || hit.content;
@@ -490,8 +518,15 @@ export async function hybridQuery({
 
       results.push({
         chunk_id: hit.id,
+        doc_id: detail.doc_id,
         doc_title: detail.doc_title,
         doc_path: detail.doc_path,
+        source_type: sourceType,
+        note_kind: noteKind,
+        tags,
+        metadata,
+        doc_created_at: detail.doc_created_at ?? null,
+        doc_updated_at: detail.doc_updated_at ?? null,
         heading: detail.heading,
         breadcrumbs: detail.breadcrumbs,
         snippet,
