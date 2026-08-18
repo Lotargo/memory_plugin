@@ -1,6 +1,6 @@
 # PLAN: RAG Memory Notes — Cold/Episodic Memory & Semantic TOC Retrieval
 
-> **Status:** In progress — Phases 0–6 implementation complete; Phase 7 intentionally deferred to evaluation; Phase 8 complete; Phase 9 transport/sync implementation complete with runtime verification pending
+> **Status:** In progress — Phases 0–6 implementation complete; Phase 7 intentionally deferred to evaluation; Phase 8 complete; Phase 9 implementation complete; Phase 10 test coverage implemented, execution pending
 > **Target release:** `1.7.0` (provisional; bump only after implementation and tests)
 > **Branch strategy:** implement directly on `main`; release commits/tags remain the rollback checkpoints
 > **Goal:** Add an agent-driven cold/episodic memory layer on top of the existing RAG engine so agents can preserve long-form decisions, research notes, investigations, handoffs, and contextual records without polluting the always-injected Notebook memory.
@@ -176,6 +176,7 @@ The feature reuses the current architecture instead of adding a second storage/s
 | Local / cloud / hybrid DB modes | ✅ | SQLite + Turso/LibSQL modes |
 | Hybrid RAG reverse-sync | ✅ | document hierarchy + scopes + graph + links + raw blob materialization |
 | Legacy raw-blob cloud backfill | ✅ | content-addressed backfill on cloud/hybrid DB open |
+| Tombstone-aware legacy backfill | ✅ | stale machines do not re-upload deleted raw payloads |
 | MCP + native OpenCode surfaces | ✅ | shared core, separate presentation surfaces |
 
 The existing engine already uses the central pattern needed for cold memory:
@@ -326,7 +327,8 @@ Transport properties:
 - `saveBlobTransport()` decompresses and validates SHA-256 before materializing a file;
 - duplicate documents/notes sharing raw content reuse one cloud blob hash;
 - orphan cloud blobs are removed only when no document still references the hash;
-- documents created before this feature are backfilled when a cloud-backed database is opened and their local raw blob still exists.
+- documents created before this feature are backfilled when a cloud-backed database is opened and their local raw blob still exists;
+- a deletion tombstone newer than a stale local document blocks legacy backfill, preventing deleted raw payloads from being re-uploaded by another machine.
 
 The normal RAG hierarchy remains unchanged:
 
@@ -663,9 +665,9 @@ This avoids maintaining four subtly different agent policies.
 - [x] Scope checks
 - [x] Cloud fallback materializes a missing local blob with hash verification
 - [x] Hybrid query/list/read requests trigger throttled reverse-sync
-- [ ] Verify local restart behavior — Phase 10/runtime
-- [ ] Verify `only-cloud` raw read on a clean second environment — Phase 10/runtime
-- [ ] Verify hybrid cross-device raw restoration end to end — Phase 10/runtime
+- [x] Add automated cross-device/fresh-store raw restoration coverage in Phase 10
+- [x] Add automated `only-cloud` missing-local-cache restoration coverage in Phase 10
+- [ ] Verify these tests pass in the user's final local run
 - [x] No redundant `get_note` alias yet
 
 ### Phase 6 — Note Management
@@ -674,11 +676,12 @@ This avoids maintaining four subtly different agent policies.
 - [x] Existing scope unlink semantics reused
 - [x] Final deletion cleans FTS / links / graph / structures
 - [x] Orphan-aware local blob deletion
-- [x] Notebook facts survive linked-note deletion
+- [x] Notebook facts survive linked-note deletion by design
 - [x] `link_knowledge` supports notes by normal document ID
 - [x] Stable unique note IDs/paths protect unrelated links
 - [x] Cross-device delete transport implemented with tombstones
-- [ ] Runtime unlink/delete/link regression tests — Phase 10
+- [x] Add automated deletion/link/project-isolation coverage in Phase 10
+- [ ] Verify management regressions pass in the user's final local run
 
 ### Phase 7 — Optional Source Filtering
 
@@ -713,6 +716,7 @@ This avoids maintaining four subtly different agent policies.
 - [x] Upload raw blob before publishing a new cloud document version
 - [x] Support `only-cloud` raw blob upload without the hybrid queue
 - [x] Backfill legacy local blobs missing from `rag_blobs`
+- [x] Prevent tombstoned stale documents from re-uploading orphan raw blobs during backfill
 - [x] Materialize missing raw blob from Turso before `read_document`
 - [x] Implement hybrid reverse-sync for documents, scopes, sections, medium/micro chunks, vectors, FTS, graph edges, and knowledge links
 - [x] Rebuild FTS breadcrumbs during reverse-sync
@@ -721,9 +725,10 @@ This avoids maintaining four subtly different agent policies.
 - [x] Add migration 8: `rag_document_tombstones`
 - [x] Propagate deletes across devices and clear tombstones on newer re-ingestion
 - [x] Remove cloud blob only when no remote document references its hash
-- [ ] Runtime verify `only-local`
-- [ ] Runtime verify `only-cloud`
-- [ ] Runtime verify `hybrid-sync`
+- [x] Add deterministic file-backed LibSQL tests for hybrid forward sync, fresh-store reverse sync, raw restoration, stale-machine tombstones, and `only-cloud` materialization
+- [ ] Runtime verify `only-local` by running full suite
+- [ ] Runtime verify `only-cloud` by running new portability suite
+- [ ] Runtime verify `hybrid-sync` by running new portability suite
 - [ ] Runtime verify fresh-machine reverse-sync restores a note without duplicate document IDs
 - [ ] Runtime verify cross-device delete tombstone removes stale local note
 - [ ] Runtime verify snapshot round trip with RAG Memory Notes
@@ -762,34 +767,73 @@ local delete
 
 ### Phase 10 — Tests
 
-- [ ] Unit: note metadata normalization
-- [ ] Unit: unique virtual note path
-- [ ] Unit: invalid note validation
-- [ ] Unit: retrieval result contains `doc_id`
-- [ ] Unit: malformed metadata is safe
-- [ ] Unit: index formatter excludes bodies
-- [ ] Unit: snippet backward compatibility
-- [ ] Unit: batch index parity
-- [ ] Unit: read/list metadata normalization
-- [ ] Unit: transported blob rejects wrong hash/corrupt gzip
-- [ ] Unit: tombstone timestamp conflict behavior
-- [ ] Integration: short note → retrieve → raw read
-- [ ] Integration: long note → interior passage retrieval → whole raw read
-- [ ] Integration: project isolation
-- [ ] Integration: global note visible in `scope=all`
-- [ ] Integration: mixed note + document corpus
-- [ ] Integration: delete cleans index/blob while preserving Notebook fact
-- [ ] Integration: Notebook fact ↔ note link
-- [ ] Integration: MCP tool surface
-- [ ] Integration: native OpenCode package surface
-- [ ] Integration: hybrid reverse RAG restore
-- [ ] Integration: cloud blob materialization
-- [ ] Integration: deletion tombstone propagation
-- [ ] Regression: current document ingestion unchanged
-- [ ] Regression: table/code policy retrieval unchanged
-- [ ] Regression: existing Notebook injection unchanged
-- [ ] Smoke: real ONNX semantic retrieval
-- [ ] Run complete existing test suite
+> **Coverage status:** the four new suites below are registered in `tests/run_all.js`. The unified runner now contains **22 suites** (12 unit, 9 integration, 1 cloud). These checkboxes mean the coverage/code exists; they do **not** claim that the suite has been executed successfully yet.
+
+New suites:
+
+```text
+tests/unit/rag_memory_notes.test.js
+  -> note schema/normalization
+  -> metadata safety
+  -> index-vs-snippet presentation
+  -> blob transport integrity
+  -> routing policy contract
+
+tests/integration/rag_memory_notes.test.js
+  -> remember_note -> index -> raw expansion
+  -> same-body/different-note identity
+  -> Notebook fact -> note linking
+  -> delete without deleting Notebook fact
+  -> project-scope isolation
+  -> native OpenCode surface
+
+tests/integration/rag_memory_notes_mcp.test.js
+  -> real stdio MCP tools/list
+  -> remember_note
+  -> resultMode=index
+  -> read/list/delete via manage_knowledge_base
+
+tests/integration/rag_cloud_portability.test.js
+  -> hybrid forward sync
+  -> fresh local-store reverse sync
+  -> raw blob restoration
+  -> deletion tombstone propagation
+  -> stale-machine resurrection prevention
+  -> only-cloud raw materialization
+```
+
+Coverage checklist:
+
+- [x] Unit: note metadata normalization
+- [x] Unit: unique virtual note path
+- [x] Unit: invalid/empty note validation
+- [x] Unit: retrieval identity/output contains `doc_id`
+- [x] Unit: malformed/null/non-object metadata is safe
+- [x] Unit: index formatter excludes snippet/paragraph/full-section/GraphRAG bodies
+- [x] Unit: snippet formatter remains content-rich/backward compatible
+- [x] Unit: batch index parity is covered in integration flow
+- [x] Unit: read/list metadata normalization
+- [x] Unit: transported blob rejects wrong SHA-256 payload and corrupt gzip
+- [ ] Unit: isolated tombstone timestamp conflict test for a newer local rewrite (integration path already covers stale-tombstone deletion)
+- [x] Integration: create short note → lexical retrieve → index → raw read
+- [ ] Integration: deliberately large multi-chunk note → retrieve an interior passage → raw-read entire note
+- [x] Integration: project note does not leak into unrelated project scope
+- [ ] Integration: global note visible from a real Git project under `scope=all`
+- [ ] Integration: external document and RAG Memory Note compete in the same mixed corpus
+- [x] Integration: deletion removes note from retrieval while preserving another note sharing the same raw blob
+- [x] Integration: Notebook fact links to note and survives note deletion as an unlinked hot fact
+- [x] Integration: MCP `remember_note` / index / raw read / list / delete surface
+- [x] Integration: native OpenCode package exposes and executes new note/query primitives
+- [x] Integration: hybrid reverse RAG restore from a clean local store
+- [x] Integration: cloud raw blob materialization
+- [x] Integration: deletion tombstone propagation to a stale local store
+- [x] Integration: stale-machine startup does not backfill tombstoned raw content
+- [x] Regression suite already exists for current document ingestion/RAG tools
+- [x] Regression suite already exists for table/code policy retrieval
+- [x] Regression suite already exists for Notebook/OpenCode injected memory context
+- [ ] Snapshot round-trip specifically containing a RAG Memory Note
+- [ ] Smoke: real ONNX embeddings retrieve a semantically phrased note
+- [ ] Run all 22 suites locally
 
 ### Phase 11 — Retrieval Quality Evaluation
 
@@ -863,7 +907,7 @@ mcp-server/
   db/
     migrations.js               migrations 7/8: rag_blobs + tombstones
     database.js                 cloud schema + legacy blob backfill
-    rag_blob_transport.js       content-addressed Turso blob transport
+    rag_blob_transport.js       content-addressed Turso blob transport + tombstone-aware backfill
     rag_sync.js                 hybrid RAG reverse-sync + tombstones
     sync_queue.js               forward sync + reverse Notebook/RAG orchestration
   tools/
@@ -881,13 +925,20 @@ opencode-plugin/
   index.js                      existing native plugin preserved
   main.js                       package wrapper: notes/query/read/list/routing parity
 
+tests/
+  unit/rag_memory_notes.test.js
+  integration/rag_memory_notes.test.js
+  integration/rag_memory_notes_mcp.test.js
+  integration/rag_cloud_portability.test.js
+  run_all.js                    22 registered suites
+
 package.json                    version still 1.6.6 during development
 docs/PLAN_RAG_MEMORY_NOTES.md   this plan
 README.md                       Phase 12
 CHANGELOG.md                    Phase 13
 ```
 
-Schema changes are now justified transport primitives rather than note-specific duplication:
+Schema changes are justified transport primitives rather than note-specific duplication:
 
 ```text
 migration 7: rag_blobs
@@ -958,13 +1009,17 @@ Raw blob is uploaded before publishing a new cloud document structure. A failed 
 
 ### 16.8 Stale deleted memory resurrecting on another machine
 
-Deletion tombstones carry `deleted_at`. An older local document is removed; a genuinely newer local rewrite wins and can later clear the tombstone when synchronized.
+Deletion tombstones carry `deleted_at`. An older local document is removed; a genuinely newer local rewrite wins and can later clear the tombstone when synchronized. Legacy backfill also checks tombstones before uploading a local raw blob, preventing orphan raw data from being resurrected by stale startup state.
 
-### 16.9 Hidden background intelligence
+### 16.9 Flaky synchronization tests hiding race conditions
+
+Cloud portability tests poll observable LibSQL state with a deadline instead of relying on fixed sleeps for forward/delete synchronization completion.
+
+### 16.10 Hidden background intelligence
 
 No hidden summarizer/classifier LLM. Sync, storage, routing and retrieval remain deterministic infrastructure controlled by the host agent.
 
-### 16.10 Surface drift
+### 16.11 Surface drift
 
 MCP and native OpenCode share note creation, query formatting, list/raw read, and routing policy cores.
 
@@ -979,13 +1034,14 @@ MCP and native OpenCode share note creation, query formatting, list/raw read, an
 - [x] Selected local/cloud candidate has a deliberate raw expansion path.
 - [x] Cross-device raw transport and hybrid restore are implemented.
 - [x] Cross-device deletion propagation is implemented.
-- [ ] Cross-device restore/delete pass real runtime tests.
+- [x] Automated tests for core flow, MCP/OpenCode surfaces, hybrid restore, cloud materialization, and stale-machine tombstones are implemented.
+- [ ] New automated suites pass in the final local run.
 - [ ] Existing document RAG passes regressions.
 - [ ] Existing Notebook behavior passes regressions.
 - [x] Notes participate in existing graph/document-link architecture.
-- [ ] Snapshot/cloud modes pass end-to-end tests.
+- [ ] Snapshot/cloud modes pass all end-to-end tests.
 - [x] MCP/OpenCode share new query/list/read/routing semantics.
-- [ ] Project-isolation tests pass.
+- [ ] Project-isolation test passes at runtime.
 - [ ] User-facing documentation is complete.
 
 Context-efficiency target remains:
