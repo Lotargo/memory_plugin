@@ -1,5 +1,6 @@
 import BaseMemoryPlugin from "./index.js";
 import { rememberNote } from "../mcp-server/tools/core/note_core.js";
+import { runSingleRagQuery, runBatchRagQuery } from "../mcp-server/tools/core/rag_query_core.js";
 
 const REMEMBER_NOTE_DESCRIPTION =
   "Save high-value long-form or episodic context as a cold RAG Memory Note. " +
@@ -45,6 +46,29 @@ function addRoutingGuidance(plugin) {
   }
 
   plugin.tool.remember_note = buildRememberNoteTool();
+
+  if (plugin.tool.query_knowledge_base) {
+    plugin.tool.query_knowledge_base.description =
+      "Perform project-isolated hybrid search (RSF/RRF BM25 full-text + dense vector similarity). " +
+      "Returns ranked candidates with stable parent document IDs, source metadata, breadcrumbs, GraphRAG symbols, and relevance scores.";
+    plugin.tool.query_knowledge_base.execute = async (args, ctx = {}) =>
+      runSingleRagQuery(args, {
+        worktree: ctx.worktree ?? null,
+        directory: ctx.directory ?? null,
+      });
+  }
+
+  if (plugin.tool.batch_query_knowledge_base) {
+    plugin.tool.batch_query_knowledge_base.description =
+      "Execute multiple project-isolated hybrid searches in one call. " +
+      "All query embeddings are computed in one ONNX pass and each result exposes stable parent document IDs and source metadata.";
+    plugin.tool.batch_query_knowledge_base.execute = async (args, ctx = {}) =>
+      runBatchRagQuery(args, {
+        worktree: ctx.worktree ?? null,
+        directory: ctx.directory ?? null,
+      });
+  }
+
   return plugin;
 }
 
