@@ -2,6 +2,7 @@ import { getDatabase } from "../../db/database.js";
 import { resolveManageRagScopeKeys } from "../../rag_scope.js";
 import { readBlob } from "../../storage/blob_store.js";
 import { parseDocumentMetadata } from "../../retrieval/retriever.js";
+import { getConfig } from "../../config/config_manager.js";
 
 function normalizeTags(tags) {
   if (Array.isArray(tags)) {
@@ -37,6 +38,29 @@ function resolveEffectiveDirectory(directory, project, ctx) {
   return directory || project || ctx.directory || null;
 }
 
+async function ensureKnowledgeFresh() {
+  if (getConfig().mode !== "hybrid-sync") return;
+  const { ensureReverseSync } = await import("../../db/sync_queue.js");
+  await ensureReverseSync();
+}
+
+async function readRawWithCloudFallback(db, blobHash) {
+  try {
+    return await readBlob(blobHash);
+  } catch (localErr) {
+    if (getConfig().mode === "only-local") throw localErr;
+
+    const { materializeBlobFromCloud } = await import("../../db/rag_blob_transport.js");
+    const result = await materializeBlobFromCloud(db, blobHash);
+    if (!result.materialized && !result.existing) {
+      throw new Error(
+        `Raw blob ${blobHash} is unavailable locally and could not be restored from cloud (${result.reason || "unknown"})`
+      );
+    }
+    return await readBlob(blobHash);
+  }
+}
+
 /**
  * List scoped RAG documents/notes with normalized metadata.
  */
@@ -44,6 +68,7 @@ export async function listKnowledgeDocuments(
   { scope = null, directory = null, project = null } = {},
   ctx = {}
 ) {
+  await ensureKnowledgeFresh();
   const db = await getDatabase();
   const scopeKeys = await resolveManageRagScopeKeys("list", scope, {
     worktree: ctx.worktree ?? null,
@@ -84,8 +109,8 @@ export async function listKnowledgeDocuments(
 /**
  * Read the authoritative raw content for a scoped RAG document/note.
  *
- * This is shared by MCP and native OpenCode so `read_document` has identical
- * visibility and metadata semantics on both integration surfaces.
+ * In Turso-backed modes a missing local content-addressed blob is restored from
+ * the portable `rag_blobs` table and integrity-checked before use.
  */
 export async function readKnowledgeDocument(
   { docId, scope = null, directory = null, project = null },
@@ -93,6 +118,7 @@ export async function readKnowledgeDocument(
 ) {
   if (!docId) throw new Error("docId parameter is required for read_document action");
 
+  await ensureKnowledgeFresh();
   const db = await getDatabase();
   const scopeKeys = await resolveManageRagScopeKeys("read_document", scope, {
     worktree: ctx.worktree ?? null,
@@ -118,7 +144,7 @@ export async function readKnowledgeDocument(
     throw new Error(`Document not found in knowledge base for docId: ${docId}`);
   }
 
-  const rawContent = await readBlob(doc.blob_hash);
+  const rawContent = await readRawWithCloudFallback(db, doc.blob_hash);
   const { metadata, sourceType, noteKind, tags } = normalizeKnowledgeDocumentMetadata(doc);
 
   return {
