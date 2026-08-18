@@ -33,18 +33,46 @@ export async function pushBlobToCloud(db, hash, baseDir = BLOBS_DIR) {
 /**
  * Upgrade/backfill path for documents that existed before portable cloud blobs.
  * Existing cloud hashes are fetched once, then only missing local blobs are sent.
+ * A cloud deletion tombstone newer than the local document blocks backfill so a
+ * stale machine cannot re-upload an orphaned raw payload after another machine
+ * deliberately deleted the document/note.
  */
 export async function backfillCloudBlobsFromLocal(db, baseDir = BLOBS_DIR) {
   if (!db || db.mode === "only-local") return { skipped: true };
 
-  const docs = await db.prepare("SELECT DISTINCT blob_hash FROM documents WHERE blob_hash IS NOT NULL;").all();
-  const cloudRes = await executeCloud(db, "SELECT hash FROM rag_blobs;");
-  const existing = new Set((cloudRes?.rows || []).map((row) => row.hash));
-  const summary = { candidates: docs.length, pushed: 0, existing: 0, missingLocal: 0, errors: 0 };
+  const docs = await db.prepare(`
+    SELECT id, path, blob_hash, updated_at
+    FROM documents
+    WHERE blob_hash IS NOT NULL;
+  `).all();
+  const [cloudBlobRes, tombstoneRes] = await Promise.all([
+    executeCloud(db, "SELECT hash FROM rag_blobs;"),
+    executeCloud(db, "SELECT doc_id, path, deleted_at FROM rag_document_tombstones;"),
+  ]);
+  const existing = new Set((cloudBlobRes?.rows || []).map((row) => row.hash));
+  const tombById = new Map((tombstoneRes?.rows || []).map((row) => [row.doc_id, row]));
+  const tombByPath = new Map(
+    (tombstoneRes?.rows || []).filter((row) => row.path).map((row) => [row.path, row])
+  );
+  const summary = {
+    candidates: docs.length,
+    pushed: 0,
+    existing: 0,
+    tombstoned: 0,
+    missingLocal: 0,
+    errors: 0,
+  };
 
   for (const row of docs) {
     const hash = row.blob_hash;
     if (!hash) continue;
+
+    const tombstone = tombById.get(row.id) || tombByPath.get(row.path);
+    if (tombstone && Number(tombstone.deleted_at || 0) >= Number(row.updated_at || 0)) {
+      summary.tombstoned++;
+      continue;
+    }
+
     if (existing.has(hash)) {
       summary.existing++;
       continue;
