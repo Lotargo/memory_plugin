@@ -1,6 +1,7 @@
 import BaseMemoryPlugin from "./index.js";
 import { rememberNote } from "../mcp-server/tools/core/note_core.js";
 import { runSingleRagQuery, runBatchRagQuery } from "../mcp-server/tools/core/rag_query_core.js";
+import { readKnowledgeDocument } from "../mcp-server/tools/core/knowledge_read_core.js";
 
 const REMEMBER_NOTE_DESCRIPTION =
   "Save high-value long-form or episodic context as a cold RAG Memory Note. " +
@@ -77,6 +78,22 @@ function addRoutingGuidance(plugin) {
         worktree: ctx.worktree ?? null,
         directory: ctx.directory ?? null,
       });
+  }
+
+  if (plugin.tool.manage_knowledge_base) {
+    const baseManageExecute = plugin.tool.manage_knowledge_base.execute;
+    plugin.tool.manage_knowledge_base.description =
+      "Manage the project-isolated RAG knowledge base: inspect stats, list documents, read full raw document/note with source metadata, unlink/delete documents, or export/import complete snapshots.";
+    plugin.tool.manage_knowledge_base.execute = async (args, ctx = {}) => {
+      if (args?.action === "read_document") {
+        const result = await readKnowledgeDocument(args, {
+          worktree: ctx.worktree ?? null,
+          directory: ctx.directory ?? null,
+        });
+        return JSON.stringify(result, null, 2);
+      }
+      return baseManageExecute(args, ctx);
+    };
   }
 
   return plugin;
