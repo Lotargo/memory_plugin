@@ -102,35 +102,36 @@ export async function ingestDocument({
   const now = Date.now();
 
   if (existingDoc && existingDoc.checksum === blobHash) {
+    let assignedScope = projectScope || GLOBAL_KEY;
     await db.exec("BEGIN IMMEDIATE;");
     try {
       await db.prepare("UPDATE documents SET title = ?, metadata_json = ?, updated_at = ? WHERE id = ?;")
         .run(docTitle, JSON.stringify(metadata), now, docId);
-      const assignedScope = await addDocumentScope(db, docId, projectScope);
+      assignedScope = await addDocumentScope(db, docId, projectScope);
       await db.exec("COMMIT;");
-      await clearOnlyCloudTombstone(db, docId, docPath);
-
-      const sectionsRow = await db.prepare("SELECT COUNT(*) AS cnt FROM sections WHERE doc_id = ?").get(docId);
-      const chunksRow = await db.prepare("SELECT COUNT(*) AS cnt FROM micro_chunks WHERE doc_id = ?").get(docId);
-      if (getConfig().mode === "hybrid-sync") {
-        try {
-          const { exportDocumentData } = await import("./exporter.js");
-          const { enqueueSyncTask } = await import("../db/sync_queue.js");
-          await enqueueSyncTask("ingest_document", docId, await exportDocumentData(docId, db));
-        } catch (err) {
-          logger.error("Failed to queue document scope sync task:", err.message);
-        }
-      }
-      return {
-        docId, doc_id: docId, path: docPath, blobHash, blob_hash: blobHash, title: docTitle,
-        sectionsCount: sectionsRow?.cnt || 0, sections_count: sectionsRow?.cnt || 0,
-        microChunksCount: chunksRow?.cnt || 0, micro_chunks_count: chunksRow?.cnt || 0,
-        deduplicated: true, projectScope: assignedScope,
-      };
     } catch (err) {
       try { await db.exec("ROLLBACK;"); } catch {}
       throw new Error(`Ingestion scope transaction failed: ${err.message}`);
     }
+    await clearOnlyCloudTombstone(db, docId, docPath);
+
+    const sectionsRow = await db.prepare("SELECT COUNT(*) AS cnt FROM sections WHERE doc_id = ?").get(docId);
+    const chunksRow = await db.prepare("SELECT COUNT(*) AS cnt FROM micro_chunks WHERE doc_id = ?").get(docId);
+    if (getConfig().mode === "hybrid-sync") {
+      try {
+        const { exportDocumentData } = await import("./exporter.js");
+        const { enqueueSyncTask } = await import("../db/sync_queue.js");
+        await enqueueSyncTask("ingest_document", docId, await exportDocumentData(docId, db));
+      } catch (err) {
+        logger.error("Failed to queue document scope sync task:", err.message);
+      }
+    }
+    return {
+      docId, doc_id: docId, path: docPath, blobHash, blob_hash: blobHash, title: docTitle,
+      sectionsCount: sectionsRow?.cnt || 0, sections_count: sectionsRow?.cnt || 0,
+      microChunksCount: chunksRow?.cnt || 0, micro_chunks_count: chunksRow?.cnt || 0,
+      deduplicated: true, projectScope: assignedScope,
+    };
   }
 
   const hierarchy = buildTripleHierarchy(markdown, docId, docTitle);
@@ -155,6 +156,7 @@ export async function ingestDocument({
     for (const micro of hierarchy.microChunks) micro.vector = Buffer.alloc(0);
   }
 
+  let assignedScope = projectScope || GLOBAL_KEY;
   await db.exec("BEGIN IMMEDIATE;");
   try {
     if (existingDoc) {
@@ -182,7 +184,7 @@ export async function ingestDocument({
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`)
         .run(docId, docPath, blobHash, docTitle, blobHash, hierarchy.toc, JSON.stringify(metadata), now, now);
     }
-    const assignedScope = await addDocumentScope(db, docId, projectScope);
+    assignedScope = await addDocumentScope(db, docId, projectScope);
 
     const insertSectionStmt = db.prepare(`INSERT INTO sections
       (id, doc_id, heading, breadcrumbs, content, token_count) VALUES (?, ?, ?, ?, ?, ?);`);
@@ -220,11 +222,11 @@ export async function ingestDocument({
     }
 
     await db.exec("COMMIT;");
-    await clearOnlyCloudTombstone(db, docId, docPath);
   } catch (err) {
     try { await db.exec("ROLLBACK;"); } catch {}
     throw new Error(`Ingestion transaction failed: ${err.message}`);
   }
+  await clearOnlyCloudTombstone(db, docId, docPath);
 
   if (existingDoc?.blob_hash && existingDoc.blob_hash !== blobHash) {
     const refs = await db.prepare("SELECT COUNT(*) AS cnt FROM documents WHERE blob_hash = ?").get(existingDoc.blob_hash);
