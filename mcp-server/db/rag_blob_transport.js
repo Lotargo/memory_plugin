@@ -30,6 +30,42 @@ export async function pushBlobToCloud(db, hash, baseDir = BLOBS_DIR) {
   return { pushed: true, hash, rawSize: transport.rawSize };
 }
 
+/**
+ * Upgrade/backfill path for documents that existed before portable cloud blobs.
+ * Existing cloud hashes are fetched once, then only missing local blobs are sent.
+ */
+export async function backfillCloudBlobsFromLocal(db, baseDir = BLOBS_DIR) {
+  if (!db || db.mode === "only-local") return { skipped: true };
+
+  const docs = await db.prepare("SELECT DISTINCT blob_hash FROM documents WHERE blob_hash IS NOT NULL;").all();
+  const cloudRes = await executeCloud(db, "SELECT hash FROM rag_blobs;");
+  const existing = new Set((cloudRes?.rows || []).map((row) => row.hash));
+  const summary = { candidates: docs.length, pushed: 0, existing: 0, missingLocal: 0, errors: 0 };
+
+  for (const row of docs) {
+    const hash = row.blob_hash;
+    if (!hash) continue;
+    if (existing.has(hash)) {
+      summary.existing++;
+      continue;
+    }
+    if (!(await blobExists(hash, baseDir))) {
+      summary.missingLocal++;
+      continue;
+    }
+    try {
+      await pushBlobToCloud(db, hash, baseDir);
+      existing.add(hash);
+      summary.pushed++;
+    } catch (err) {
+      summary.errors++;
+      console.warn(`Failed to backfill RAG blob ${hash}: ${err.message}`);
+    }
+  }
+
+  return summary;
+}
+
 export async function materializeBlobFromCloud(db, hash, baseDir = BLOBS_DIR) {
   if (!hash) return { materialized: false, reason: "missing_hash" };
   if (await blobExists(hash, baseDir)) {
