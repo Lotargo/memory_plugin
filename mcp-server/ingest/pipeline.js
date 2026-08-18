@@ -13,6 +13,30 @@ import { logger } from "../logger.js";
 import { GLOBAL_KEY } from "../memory.js";
 import { addDocumentScope } from "../rag_scope.js";
 
+export const RAG_NOTE_KINDS = Object.freeze(["decision", "research", "context", "handoff", "note"]);
+const RAG_NOTE_KIND_SET = new Set(RAG_NOTE_KINDS);
+
+export function normalizeNoteKind(kind = "note") {
+  const normalized = String(kind || "note").trim().toLowerCase();
+  return RAG_NOTE_KIND_SET.has(normalized) ? normalized : "note";
+}
+
+export function normalizeNoteTags(tags) {
+  const values = Array.isArray(tags) ? tags : String(tags || "").split(",");
+  return [...new Set(values.map((tag) => String(tag).trim().toLowerCase()).filter(Boolean))].sort();
+}
+
+export function createNoteVirtualPath() {
+  return `memory://note/${randomUUID()}`;
+}
+
+function mergeMetadata(baseMetadata, metadataOverrides) {
+  if (!metadataOverrides || typeof metadataOverrides !== "object" || Array.isArray(metadataOverrides)) {
+    return baseMetadata;
+  }
+  return { ...baseMetadata, ...metadataOverrides };
+}
+
 export async function ingestDocument({
   content,
   type = "text",
@@ -22,6 +46,7 @@ export async function ingestDocument({
   customBlobDir = BLOBS_DIR,
   generateEmbeddings = true,
   projectScope = GLOBAL_KEY,
+  metadataOverrides = null,
 }) {
   const db = customDb || await getDatabase();
 
@@ -47,8 +72,16 @@ export async function ingestDocument({
     }
   }
 
-  const { markdown, title: docTitle, metadata } = await normalizeContent({ content, type: effectiveType, path: effectivePath, title: effectiveTitle });
-  if (type === "url") metadata.source_type = "url";
+  const normalized = await normalizeContent({
+    content,
+    type: effectiveType,
+    path: effectivePath,
+    title: effectiveTitle,
+  });
+  const markdown = normalized.markdown;
+  const docTitle = normalized.title;
+  if (type === "url") normalized.metadata.source_type = "url";
+  const metadata = mergeMetadata(normalized.metadata, metadataOverrides);
 
   const blobRes = await saveBlob(markdown, customBlobDir);
   const blobHash = blobRes.hash;
@@ -275,6 +308,54 @@ export async function ingestDocument({
   };
 }
 
+export async function ingestNote({
+  title,
+  content,
+  kind = "note",
+  tags = null,
+  customDb = null,
+  customBlobDir = BLOBS_DIR,
+  generateEmbeddings = true,
+  projectScope = GLOBAL_KEY,
+}) {
+  const noteTitle = String(title ?? "").trim();
+  const noteContent = String(content ?? "");
+  if (!noteTitle) throw new Error("RAG Memory Note title must not be empty");
+  if (!noteContent.trim()) throw new Error("RAG Memory Note content must not be empty");
+
+  const noteKind = normalizeNoteKind(kind);
+  const normalizedTags = normalizeNoteTags(tags);
+  const notePath = createNoteVirtualPath();
+  const noteMetadata = {
+    source_type: "note",
+    note_kind: noteKind,
+    tags: normalizedTags,
+  };
+
+  const result = await ingestDocument({
+    content: noteContent,
+    type: "text",
+    path: notePath,
+    title: noteTitle,
+    customDb,
+    customBlobDir,
+    generateEmbeddings,
+    projectScope,
+    metadataOverrides: noteMetadata,
+  });
+
+  return {
+    ...result,
+    sourceType: "note",
+    source_type: "note",
+    kind: noteKind,
+    noteKind,
+    note_kind: noteKind,
+    tags: normalizedTags,
+    metadata: noteMetadata,
+  };
+}
+
 export async function deleteDocument(docIdOrPath, customDb = null, customBlobDir = BLOBS_DIR) {
   const db = customDb || await getDatabase();
   const doc = await db.prepare("SELECT * FROM documents WHERE id = ? OR path = ? OR title = ?").get(docIdOrPath, docIdOrPath, docIdOrPath);
@@ -306,7 +387,7 @@ export async function deleteDocument(docIdOrPath, customDb = null, customBlobDir
       ).run(id, id, `${id}*`, `${id}*`);
     }
 
-    await db.prepare("DELETE FROM documents WHERE id = ?").run(doc.id);
+    await db.prepare("DELETE FROM documents WHERE id = ?;").run(doc.id);
 
     await db.exec("COMMIT;");
   } catch (err) {
