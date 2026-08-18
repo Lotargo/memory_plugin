@@ -3,7 +3,8 @@ import { optStr, defBool, defNum, optNum } from "./helpers.js";
 import { MEMORY_DIR } from "../memory.js";
 import { registerSnapshotDir } from "../admin/snapshot.js";
 import { ensureExportsDir } from "../ingest/exporter.js";
-import { resolveRagScopeKey, resolveRagScopeKeys, resolveManageRagScopeKeys, removeDocumentScopes } from "../rag_scope.js";
+import { resolveRagScopeKey, resolveManageRagScopeKeys, removeDocumentScopes } from "../rag_scope.js";
+import { runSingleRagQuery, runBatchRagQuery } from "./core/rag_query_core.js";
 
 export function registerRagTools(server) {
   // Restrict snapshot export/import paths to the plugin's own data directories.
@@ -78,7 +79,7 @@ export function registerRagTools(server) {
     {
       description:
         "Perform project-isolated hybrid search (RSF/RRF BM25 full-text + dense vector similarity) across the RAG knowledge base. " +
-        "Returns top-ranked candidate document sections with breadcrumbs, GraphRAG defined code symbols, and relevance scores.",
+        "Returns ranked candidate sections with stable parent document IDs, source metadata, breadcrumbs, GraphRAG code symbols, and relevance scores.",
       inputSchema: z.object({
         query: z.string().describe("Search query in natural language or symbol name"),
         limit: defNum(5).describe("Maximum number of sections to return"),
@@ -92,49 +93,9 @@ export function registerRagTools(server) {
         project: optStr().describe("Alias for directory"),
       }),
     },
-    async ({ query, limit, instruction, generateEmbeddings, scope, directory, project }) => {
-      const { hybridQuery } = await import("../retrieval/retriever.js");
-      const { getConfig } = await import("../config/config_manager.js");
-      const activeConfig = getConfig();
-      const scopeKeys = await resolveRagScopeKeys(scope, { directory, project });
-
-      const results = await hybridQuery({
-        query,
-        limit,
-        generateEmbeddings,
-        instruction: instruction || null,
-        scopeKeys,
-      });
-
-      if (!results || results.length === 0) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `[Active Model: ${activeConfig.embeddingModel}]\nNo matching knowledge found for query.`,
-            },
-          ],
-        };
-      }
-
-      const headerNote = `[Active Model: ${activeConfig.embeddingModel} | Fusion: ${activeConfig.fusionAlgorithm.toUpperCase()}]\n\n`;
-
-      const formatted = results
-        .map((r, i) => {
-          let header = `### [${i + 1}] ${r.doc_title || "Untitled"}`;
-          if (r.heading) header += ` > ${r.heading}`;
-          if (r.breadcrumbs) header += ` (${r.breadcrumbs})`;
-          let body = `Score: ${(r.score || 0).toFixed(4)}\n`;
-          if (r.defined_symbols && r.defined_symbols.length > 0) {
-            body += `Defined Symbols: ${r.defined_symbols.join(", ")}\n`;
-          }
-          body += `\n${r.snippet || r.full_section_content || ""}`;
-          return `${header}\n${body}`;
-        })
-        .join("\n\n---\n\n");
-
-      return { content: [{ type: "text", text: headerNote + formatted }] };
-    }
+    async (args) => ({
+      content: [{ type: "text", text: await runSingleRagQuery(args) }],
+    })
   );
 
   server.registerTool(
@@ -144,7 +105,7 @@ export function registerRagTools(server) {
         "Execute multiple hybrid search queries in a single batch call. " +
         "Search is isolated to global plus the current project unless another scope is requested. " +
         "More efficient than separate query_knowledge_base calls: all query embeddings computed in one ONNX pass. " +
-        "Returns one result set per query, in the same order as input.",
+        "Returns one result set per query with stable parent document IDs and source metadata.",
       inputSchema: z.object({
         queries: z
           .array(z.string())
@@ -159,46 +120,9 @@ export function registerRagTools(server) {
         project: optStr().describe("Alias for directory"),
       }),
     },
-    async ({ queries, limit, instruction, generateEmbeddings, scope, directory, project }) => {
-      const { batchHybridQuery } = await import("../retrieval/retriever.js");
-      const { getConfig } = await import("../config/config_manager.js");
-      const activeConfig = getConfig();
-      const scopeKeys = await resolveRagScopeKeys(scope, { directory, project });
-
-      const allResults = await batchHybridQuery(queries, {
-        limit,
-        generateEmbeddings,
-        instruction: instruction || null,
-        scopeKeys,
-      });
-
-      const formatted = allResults
-        .map((results, qi) => {
-          const header = `### Query [${qi + 1}]: "${queries[qi]}"\n\n`;
-          if (!results || results.length === 0) {
-            return header + "No matching knowledge found for this query.";
-          }
-          const items = results
-            .map((item, j) => {
-              let title = `#### [${j + 1}] ${item.doc_title || "Untitled"}`;
-              if (item.heading) title += ` > ${item.heading}`;
-              if (item.breadcrumbs) title += ` (${item.breadcrumbs})`;
-              let body = `Score: ${(item.score || 0).toFixed(4)}\n`;
-              if (item.defined_symbols && item.defined_symbols.length > 0) {
-                body += `Defined Symbols: ${item.defined_symbols.join(", ")}\n`;
-              }
-              body += `\n${item.snippet || item.full_section_content || ""}`;
-              return `${title}\n${body}`;
-            })
-            .join("\n\n---\n\n");
-          return header + items;
-        })
-        .join("\n\n===\n\n");
-
-      const headerNote = `[Active Model: ${activeConfig.embeddingModel} | Fusion: ${activeConfig.fusionAlgorithm.toUpperCase()} | ${queries.length} queries]\n\n`;
-
-      return { content: [{ type: "text", text: headerNote + formatted }] };
-    }
+    async (args) => ({
+      content: [{ type: "text", text: await runBatchRagQuery(args) }],
+    })
   );
 
   server.registerTool(
