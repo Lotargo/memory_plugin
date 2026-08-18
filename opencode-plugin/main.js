@@ -1,4 +1,4 @@
-import BaseMemoryPlugin, { MemoryPlugin as BaseMemoryPluginNamed } from "./index.js";
+import BaseMemoryPlugin from "./index.js";
 import { rememberNote } from "../mcp-server/tools/core/note_core.js";
 
 const REMEMBER_NOTE_DESCRIPTION =
@@ -48,9 +48,6 @@ function addRoutingGuidance(plugin) {
   return plugin;
 }
 
-export const MemoryPlugin = async (ctx) => addRoutingGuidance(await BaseMemoryPluginNamed(ctx));
+export const MemoryPlugin = async (ctx) => addRoutingGuidance(await BaseMemoryPlugin(ctx));
 
 export default MemoryPlugin;
-
-// Keep an explicit reference so bundlers/static analyzers see the default base export as intentional.
-export const BasePlugin = BaseMemoryPlugin;
