@@ -16,7 +16,6 @@ const MIGRATIONS = [
             updated_at INTEGER NOT NULL
         );
       `);
-
       await db.exec(`
         CREATE TABLE IF NOT EXISTS sections (
             id TEXT PRIMARY KEY,
@@ -27,7 +26,6 @@ const MIGRATIONS = [
             token_count INTEGER NOT NULL
         );
       `);
-
       await db.exec(`
         CREATE TABLE IF NOT EXISTS micro_chunks (
             id TEXT PRIMARY KEY,
@@ -38,7 +36,6 @@ const MIGRATIONS = [
             token_count INTEGER NOT NULL
         );
       `);
-
       await db.exec(`
         CREATE VIRTUAL TABLE IF NOT EXISTS micro_chunks_fts USING fts5(
             id UNINDEXED,
@@ -46,7 +43,6 @@ const MIGRATIONS = [
             breadcrumbs
         );
       `);
-
       await db.exec(`
         CREATE TABLE IF NOT EXISTS graph_edges (
             source_id TEXT NOT NULL,
@@ -61,13 +57,8 @@ const MIGRATIONS = [
     version: 2,
     name: "002_agent_knowledge_graph",
     up: async (db) => {
-      try {
-        await db.exec(`ALTER TABLE graph_edges ADD COLUMN metadata_json TEXT;`);
-      } catch (e) {}
-      try {
-        await db.exec(`ALTER TABLE graph_edges ADD COLUMN created_at INTEGER;`);
-      } catch (e) {}
-
+      try { await db.exec(`ALTER TABLE graph_edges ADD COLUMN metadata_json TEXT;`); } catch (e) {}
+      try { await db.exec(`ALTER TABLE graph_edges ADD COLUMN created_at INTEGER;`); } catch (e) {}
       await db.exec(`
         CREATE TABLE IF NOT EXISTS knowledge_links (
             id TEXT PRIMARY KEY,
@@ -99,10 +90,7 @@ const MIGRATIONS = [
             created_at INTEGER
         );
       `);
-
-      try {
-        await db.exec(`ALTER TABLE micro_chunks ADD COLUMN medium_id TEXT REFERENCES medium_chunks(id) ON DELETE CASCADE;`);
-      } catch (e) {}
+      try { await db.exec(`ALTER TABLE micro_chunks ADD COLUMN medium_id TEXT REFERENCES medium_chunks(id) ON DELETE CASCADE;`); } catch (e) {}
     },
   },
   {
@@ -111,41 +99,31 @@ const MIGRATIONS = [
     up: async (db) => {
       await db.exec(`
         CREATE TABLE IF NOT EXISTS project_identities (
-          key           TEXT PRIMARY KEY,
-          name          TEXT NOT NULL,
+          key TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
           primary_remote TEXT,
-          created_at    INTEGER NOT NULL,
-          updated_at    INTEGER NOT NULL
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
         );
       `);
-
       await db.exec(`
         CREATE TABLE IF NOT EXISTS project_aliases (
-          alias        TEXT PRIMARY KEY,
+          alias TEXT PRIMARY KEY,
           identity_key TEXT NOT NULL REFERENCES project_identities(key) ON DELETE CASCADE,
-          kind         TEXT NOT NULL,
-          created_at   INTEGER NOT NULL
+          kind TEXT NOT NULL,
+          created_at INTEGER NOT NULL
         );
       `);
-
-      await db.exec(`
-        CREATE INDEX IF NOT EXISTS idx_project_aliases_identity ON project_aliases(identity_key);
-      `);
+      await db.exec(`CREATE INDEX IF NOT EXISTS idx_project_aliases_identity ON project_aliases(identity_key);`);
     },
   },
   {
     version: 5,
     name: "005_retrieval_policy",
     up: async (db) => {
-      try {
-        await db.exec(`ALTER TABLE micro_chunks ADD COLUMN retrieval_policy TEXT DEFAULT 'micro_chunk';`);
-      } catch (e) {}
-      try {
-        await db.exec(`ALTER TABLE micro_chunks ADD COLUMN policy_source_id TEXT;`);
-      } catch (e) {}
-      await db.exec(`
-        CREATE INDEX IF NOT EXISTS idx_micro_chunks_retrieval_policy ON micro_chunks(retrieval_policy);
-      `);
+      try { await db.exec(`ALTER TABLE micro_chunks ADD COLUMN retrieval_policy TEXT DEFAULT 'micro_chunk';`); } catch (e) {}
+      try { await db.exec(`ALTER TABLE micro_chunks ADD COLUMN policy_source_id TEXT;`); } catch (e) {}
+      await db.exec(`CREATE INDEX IF NOT EXISTS idx_micro_chunks_retrieval_policy ON micro_chunks(retrieval_policy);`);
     },
   },
   {
@@ -154,15 +132,13 @@ const MIGRATIONS = [
     up: async (db) => {
       await db.exec(`
         CREATE TABLE IF NOT EXISTS document_scopes (
-          doc_id     TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-          scope_key  TEXT NOT NULL,
+          doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+          scope_key TEXT NOT NULL,
           created_at INTEGER NOT NULL,
           PRIMARY KEY (doc_id, scope_key)
         );
       `);
-      await db.exec(`
-        CREATE INDEX IF NOT EXISTS idx_document_scopes_scope ON document_scopes(scope_key, doc_id);
-      `);
+      await db.exec(`CREATE INDEX IF NOT EXISTS idx_document_scopes_scope ON document_scopes(scope_key, doc_id);`);
       await db.exec(`
         INSERT OR IGNORE INTO document_scopes (doc_id, scope_key, created_at)
         SELECT id, 'global', created_at FROM documents;
@@ -173,19 +149,28 @@ const MIGRATIONS = [
     version: 7,
     name: "007_rag_blob_transport",
     up: async (db) => {
-      // Raw RAG truth remains a content-addressed gzip file locally. This table
-      // is the portable transport/cache used by Turso-backed modes so another
-      // machine can materialize the exact raw source by blob_hash.
-      // Base64 TEXT is deliberate: it avoids driver-specific BLOB coercion while
-      // the payload itself stays gzip-compressed and deduplicated by SHA-256.
       await db.exec(`
         CREATE TABLE IF NOT EXISTS rag_blobs (
-          hash        TEXT PRIMARY KEY,
+          hash TEXT PRIMARY KEY,
           gzip_base64 TEXT NOT NULL,
-          raw_size    INTEGER NOT NULL DEFAULT 0,
-          created_at  INTEGER NOT NULL
+          raw_size INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL
         );
       `);
+    },
+  },
+  {
+    version: 8,
+    name: "008_rag_document_tombstones",
+    up: async (db) => {
+      await db.exec(`
+        CREATE TABLE IF NOT EXISTS rag_document_tombstones (
+          doc_id TEXT PRIMARY KEY,
+          path TEXT,
+          deleted_at INTEGER NOT NULL
+        );
+      `);
+      await db.exec(`CREATE INDEX IF NOT EXISTS idx_rag_tombstones_path ON rag_document_tombstones(path);`);
     },
   },
 ];
@@ -202,10 +187,7 @@ export async function runMigrations(db) {
     } catch (e2) {}
   }
 
-  try {
-    await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY);`);
-  } catch (e) {}
-
+  try { await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY);`); } catch (e) {}
   try {
     await db.exec(`
       CREATE TABLE IF NOT EXISTS notebooks (
@@ -223,13 +205,9 @@ export async function runMigrations(db) {
         await migration.up(db);
         await db.prepare("INSERT INTO schema_migrations (version) VALUES (?);").run(migration.version);
         await db.exec("COMMIT;");
-        try {
-          await db.exec(`PRAGMA user_version = ${migration.version};`);
-        } catch (e) {}
+        try { await db.exec(`PRAGMA user_version = ${migration.version};`); } catch (e) {}
       } catch (err) {
-        try {
-          await db.exec("ROLLBACK;");
-        } catch (e) {}
+        try { await db.exec("ROLLBACK;"); } catch (e) {}
         throw new Error(`Migration ${migration.name} failed: ${err.message}`);
       }
     }
