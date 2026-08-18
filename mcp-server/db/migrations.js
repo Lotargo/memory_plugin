@@ -3,7 +3,6 @@ const MIGRATIONS = [
     version: 1,
     name: "001_initial_rag_schema",
     up: async (db) => {
-      // 1. Documents Table
       await db.exec(`
         CREATE TABLE IF NOT EXISTS documents (
             id TEXT PRIMARY KEY,
@@ -18,7 +17,6 @@ const MIGRATIONS = [
         );
       `);
 
-      // 2. Sections Table
       await db.exec(`
         CREATE TABLE IF NOT EXISTS sections (
             id TEXT PRIMARY KEY,
@@ -30,7 +28,6 @@ const MIGRATIONS = [
         );
       `);
 
-      // 3. Micro-Chunks Table
       await db.exec(`
         CREATE TABLE IF NOT EXISTS micro_chunks (
             id TEXT PRIMARY KEY,
@@ -42,7 +39,6 @@ const MIGRATIONS = [
         );
       `);
 
-      // 4. Full-Text Search (BM25 Index via SQLite FTS5)
       await db.exec(`
         CREATE VIRTUAL TABLE IF NOT EXISTS micro_chunks_fts USING fts5(
             id UNINDEXED,
@@ -51,7 +47,6 @@ const MIGRATIONS = [
         );
       `);
 
-      // 5. GraphRAG Lite Edges Table
       await db.exec(`
         CREATE TABLE IF NOT EXISTS graph_edges (
             source_id TEXT NOT NULL,
@@ -174,6 +169,25 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 7,
+    name: "007_rag_blob_transport",
+    up: async (db) => {
+      // Raw RAG truth remains a content-addressed gzip file locally. This table
+      // is the portable transport/cache used by Turso-backed modes so another
+      // machine can materialize the exact raw source by blob_hash.
+      // Base64 TEXT is deliberate: it avoids driver-specific BLOB coercion while
+      // the payload itself stays gzip-compressed and deduplicated by SHA-256.
+      await db.exec(`
+        CREATE TABLE IF NOT EXISTS rag_blobs (
+          hash        TEXT PRIMARY KEY,
+          gzip_base64 TEXT NOT NULL,
+          raw_size    INTEGER NOT NULL DEFAULT 0,
+          created_at  INTEGER NOT NULL
+        );
+      `);
+    },
+  },
 ];
 
 export async function runMigrations(db) {
@@ -188,12 +202,10 @@ export async function runMigrations(db) {
     } catch (e2) {}
   }
 
-  // Ensure schema_migrations table exists for future
   try {
     await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY);`);
   } catch (e) {}
 
-  // Create notebooks table if not exists
   try {
     await db.exec(`
       CREATE TABLE IF NOT EXISTS notebooks (
@@ -223,7 +235,6 @@ export async function runMigrations(db) {
     }
   }
 
-  // Defensive table & column check for medium_chunks hierarchy
   try {
     await db.exec(`
       CREATE TABLE IF NOT EXISTS medium_chunks (
