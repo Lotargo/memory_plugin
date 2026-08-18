@@ -1,6 +1,6 @@
 # PLAN: RAG Memory Notes — Cold/Episodic Memory & Semantic TOC Retrieval
 
-> **Status:** In progress — Phases 0–2 complete
+> **Status:** In progress — Phases 0–4 complete
 > **Target release:** `1.7.0` (provisional; bump only after implementation and tests)
 > **Branch strategy:** implement directly on `main`; release commits/tags remain the rollback checkpoints
 > **Goal:** Add an agent-driven cold/episodic memory layer on top of the existing RAG engine so agents can preserve long-form decisions, research notes, investigations, handoffs, and contextual records without polluting the always-injected Notebook memory.
@@ -422,7 +422,7 @@ This routing distinction is part of the feature contract, not documentation poli
 
 ### 9.1 Stable `doc_id`
 
-Retrieval output must expose the parent document ID:
+Retrieval output now exposes the parent document ID:
 
 ```text
 doc_id: doc_a81f32
@@ -434,18 +434,18 @@ This creates a deterministic chain:
 query -> doc_id -> raw read
 ```
 
-The agent should never need to guess a title/path to expand a result.
+The agent no longer needs to guess a title/path to expand a result.
 
 ### 9.2 `resultMode`
 
-Initial modes:
+Implemented modes:
 
 | Mode | Behavior | Compatibility |
 |---|---|---|
-| `snippet` | current ranked result + retrieved content | default; preserves callers |
-| `index` | metadata/TOC only; no long body | new |
+| `snippet` | ranked result + retrieved content | default; preserves callers |
+| `index` | metadata/TOC only; no long body in tool output | opt-in |
 
-`index` should return:
+`index` returns:
 
 - rank;
 - `doc_id`;
@@ -456,9 +456,9 @@ Initial modes:
 - heading/breadcrumb when useful;
 - relevance score;
 - created/updated timestamps when available;
-- retrieval policy when relevant.
+- retrieval policy.
 
-`index` should **not** return:
+`index` does **not** format or return:
 
 - full section content;
 - paragraph context;
@@ -466,7 +466,7 @@ Initial modes:
 - raw note body;
 - large snippets.
 
-The ranking engine remains one engine. `resultMode` controls presentation/context cost, not ranking semantics.
+For `index`, GraphRAG symbol lookup and table/code policy expansion are disabled before result formatting. Ranking still uses the same hybrid retrieval engine.
 
 ---
 
@@ -604,25 +604,52 @@ rememberNote()
 
 ### Phase 3 — Retrieval Identity (`doc_id`)
 
-- [ ] Add parent `doc_id` to `hybridQuery()` result objects
-- [ ] Carry `doc_id` through snippet-mode formatting
-- [ ] Carry `doc_id` through batch-query results
-- [ ] Add document metadata (`metadata_json`) to retrieval detail lookup
-- [ ] Parse metadata defensively (invalid/legacy JSON must not break retrieval)
-- [ ] Expose source type / note kind / tags in normalized result objects
+- [x] Add parent `doc_id` to `hybridQuery()` result objects
+- [x] Carry `doc_id` through snippet-mode formatting
+- [x] Carry `doc_id` through batch-query results
+- [x] Add document metadata (`metadata_json`) to retrieval detail lookup
+- [x] Parse metadata defensively (invalid/legacy JSON must not break retrieval)
+- [x] Expose source type / note kind / tags in normalized result objects
+- [x] Expose document created/updated timestamps for later TOC presentation
+- [x] Keep BM25/vector/fusion ranking logic unchanged
+
+Implementation checkpoint:
+
+```text
+hybrid ranking
+    -> winning micro chunk
+    -> documents join
+    -> doc_id + metadata_json
+    -> normalized retrieval result
+```
 
 ### Phase 4 — Semantic TOC / `resultMode="index"`
 
-- [ ] Add `resultMode` schema to MCP `query_knowledge_base`
-- [ ] Add identical `resultMode` support to OpenCode `query_knowledge_base`
-- [ ] Preserve `snippet` as the default
-- [ ] Implement compact index formatter
-- [ ] Ensure `index` mode does not perform unnecessary large content formatting
-- [ ] Ensure `index` results always expose `doc_id`
-- [ ] Include note metadata without returning note body
-- [ ] Add `resultMode` support to `batch_query_knowledge_base`
-- [ ] Keep batch and single-query output semantics aligned
-- [ ] Verify table/code policy expansion does not leak large bodies in `index` mode
+- [x] Add `resultMode` schema to MCP `query_knowledge_base`
+- [x] Add identical `resultMode` support to OpenCode `query_knowledge_base`
+- [x] Preserve `snippet` as the default
+- [x] Implement compact index formatter
+- [x] Ensure `index` mode does not perform large body formatting
+- [x] Ensure `index` results always expose `doc_id`
+- [x] Include note source/kind/tags without returning note body
+- [x] Add `resultMode` support to `batch_query_knowledge_base`
+- [x] Keep batch and single-query output semantics aligned through shared query core
+- [x] Disable table/code policy expansion in `index` mode so expanded bodies cannot leak
+- [x] Disable GraphRAG symbol expansion in `index` mode because semantic navigation does not need it
+
+Implementation checkpoint:
+
+```text
+query(resultMode="snippet")
+    -> normal hybrid retrieval
+    -> content-rich response
+
+query(resultMode="index")
+    -> same ranking engine
+    -> no policy expansion / graph symbol expansion
+    -> doc_id + title + source/kind/tags + score + timestamps
+    -> no snippet/raw body in tool output
+```
 
 ### Phase 5 — Raw Expansion Workflow
 
@@ -775,17 +802,19 @@ Primary files:
 mcp-server/
   ingest/
     pipeline.js                 ingestNote(), metadata overrides, note normalization
+  retrieval/
+    retriever.js                doc_id + defensive document metadata normalization
   tools/
     core/
       note_core.js              shared rememberNote() implementation
+      rag_query_core.js         shared snippet/index single+batch query execution/formatting
     note_tools.js               MCP remember_note registration
+    rag_tools.js                MCP resultMode schemas + shared query core
     index.js                    MCP tool registry
-  retrieval/
-    retriever.js                Phase 3: doc_id + metadata
 
 opencode-plugin/
   index.js                      existing native plugin, intentionally preserved
-  main.js                       thin package-entry extension for remember_note
+  main.js                       thin package-entry extension for remember_note + shared query overrides
 
 package.json                    main -> opencode-plugin/main.js; version unchanged
 
@@ -809,7 +838,7 @@ tests/integration/*
 tests/smoke/*
 ```
 
-Avoid DB migrations unless a real schema requirement appears. `metadata_json` is sufficient for the initial architecture.
+Avoid DB migrations unless a real schema requirement appears. `metadata_json` remains sufficient for the initial architecture.
 
 ---
 
@@ -822,8 +851,8 @@ The feature must remain additive.
 - Existing Notebook injection remains unchanged until explicit routing-instruction work.
 - Existing `ingest_document` behavior remains unchanged.
 - Existing RAG documents require no re-indexing solely because notes exist.
-- Existing `query_knowledge_base` callers keep snippet behavior by default.
-- `resultMode=index` will be opt-in.
+- Existing `query_knowledge_base` callers keep `snippet` behavior by default.
+- `resultMode=index` is opt-in.
 - Existing `manage_knowledge_base` actions remain valid.
 - Existing document IDs and graph links remain valid.
 - Existing snapshots should continue to import.
@@ -865,11 +894,11 @@ remember("OCR + Vision is the chosen architecture")
 
 ### 16.3 `index` accidentally returns expanded policy bodies
 
-`resultMode=index` must never leak large table/code/note bodies even if ranking selected a policy-expanded hit.
+`resultMode=index` disables policy expansion before formatting and never formats snippet/section content.
 
 ### 16.4 Losing retrieval identity
 
-If a result lacks `doc_id`, the agent can re-search by title/path and expand the wrong object. `doc_id` is therefore a correctness requirement.
+Every normalized retrieval result now carries `doc_id`; agent expansion should use that ID instead of re-searching by title/path.
 
 ### 16.5 Scope leaks
 
@@ -887,7 +916,7 @@ Do not add an implicit summarizer/classifier LLM. The feature stays:
 
 ### 16.7 Surface drift
 
-MCP and native OpenCode must not grow separate note-storage logic. The shared `rememberNote()` core is now the compatibility boundary.
+MCP and native OpenCode share `rememberNote()` and the single/batch RAG query core rather than implementing note retrieval semantics twice.
 
 ---
 
@@ -898,13 +927,13 @@ The feature is complete when:
 - [ ] An agent can save a long decision without adding it to Notebook auto-injection.
 - [ ] The note survives restart and remains project/global scoped correctly.
 - [ ] A paraphrased semantic query can discover the note.
-- [ ] `resultMode=index` returns compact candidates with stable `doc_id` values.
-- [ ] The agent can expand exactly one selected candidate into full raw content.
-- [ ] Existing document RAG behaves as before in default mode.
-- [ ] Existing Notebook memory behaves as before.
+- [x] `resultMode=index` can return compact candidates with stable `doc_id` values at the tool layer.
+- [ ] The agent can expand exactly one selected candidate into full raw content with note metadata.
+- [ ] Existing document RAG behaves as before in default mode (final regression test pending).
+- [ ] Existing Notebook memory behaves as before (final regression test pending).
 - [ ] Notes participate in graph/document-link workflows.
 - [ ] Notes survive supported sync/export/import modes.
-- [ ] MCP and OpenCode expose equivalent core behavior.
+- [x] MCP and OpenCode share equivalent query formatting/execution semantics for the new modes.
 - [ ] Tests demonstrate project isolation and no accidental hot-context injection.
 - [ ] Documentation clearly teaches which memory layer to use.
 
@@ -916,7 +945,7 @@ search cheaply
         -> expand deliberately
 ```
 
-A navigation query should provide enough metadata to select the right memory without returning raw note bodies.
+A navigation query now has a metadata-only presentation path; empirical token reduction remains part of Phase 11 evaluation.
 
 ---
 
