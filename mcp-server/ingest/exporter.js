@@ -36,7 +36,13 @@ export async function exportDocumentData(docIdOrPath, customDb = null) {
 
   const sections = await db.prepare("SELECT id, heading, breadcrumbs, content, token_count FROM sections WHERE doc_id = ?").all(doc.id);
   const mediumChunks = await db.prepare("SELECT id, section_id, content, block_type, token_count, created_at FROM medium_chunks WHERE doc_id = ?").all(doc.id);
-  const rawMicroChunks = await db.prepare("SELECT id, medium_id, section_id, content, vector, token_count, retrieval_policy, policy_source_id FROM micro_chunks WHERE doc_id = ?").all(doc.id);
+  const rawMicroChunks = await db.prepare(`
+    SELECT m.id, m.medium_id, m.section_id, m.content, m.vector, m.token_count,
+           m.retrieval_policy, m.policy_source_id, s.breadcrumbs
+    FROM micro_chunks m
+    LEFT JOIN sections s ON s.id = m.section_id
+    WHERE m.doc_id = ?;
+  `).all(doc.id);
   const microChunks = rawMicroChunks.map((chunk) => {
     const bytes = toVectorBytes(chunk.vector);
     return {
