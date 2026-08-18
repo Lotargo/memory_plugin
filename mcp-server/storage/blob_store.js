@@ -5,7 +5,6 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { BLOBS_DIR } from "../db/database.js";
 
-// Hard cap on gunzip output to prevent zip-bomb style memory exhaustion.
 export const MAX_UNPACKED_BYTES = 512 * 1024 * 1024;
 
 export function safeGunzip(compressed, maxBytes = MAX_UNPACKED_BYTES) {
@@ -63,6 +62,59 @@ export async function readBlob(hash, baseDir = BLOBS_DIR) {
   const compressed = await readFile(blobPath);
   const decompressed = safeGunzip(compressed);
   return decompressed.toString("utf-8");
+}
+
+/**
+ * Return the exact gzip bytes used by the local content-addressed blob store as
+ * base64 text for portable SQLite/Turso transport. The raw content is validated
+ * against the requested SHA-256 before leaving the machine.
+ */
+export async function readBlobTransport(hash, baseDir = BLOBS_DIR) {
+  const blobPath = getBlobPath(hash, baseDir);
+  if (!existsSync(blobPath)) {
+    throw new Error(`Blob not found for hash: ${hash}`);
+  }
+  const compressed = await readFile(blobPath);
+  const decompressed = safeGunzip(compressed);
+  const actualHash = hashContent(decompressed);
+  if (actualHash !== hash) {
+    throw new Error(`Blob integrity check failed: expected ${hash}, received ${actualHash}`);
+  }
+  return {
+    hash,
+    gzipBase64: compressed.toString("base64"),
+    rawSize: decompressed.length,
+  };
+}
+
+/**
+ * Materialize a transported gzip blob into the local filesystem only after
+ * decompression and SHA-256 verification. This prevents a corrupt/cloud payload
+ * from poisoning the local content-addressed store.
+ */
+export async function saveBlobTransport(hash, gzipBase64, baseDir = BLOBS_DIR) {
+  if (!/^[a-f0-9]{64}$/i.test(String(hash || ""))) {
+    throw new Error(`Invalid blob hash: ${hash}`);
+  }
+  if (typeof gzipBase64 !== "string" || !gzipBase64) {
+    throw new Error(`Missing transported blob content for hash: ${hash}`);
+  }
+
+  const compressed = Buffer.from(gzipBase64, "base64");
+  const decompressed = safeGunzip(compressed);
+  const actualHash = hashContent(decompressed);
+  if (actualHash !== hash) {
+    throw new Error(`Transported blob integrity check failed: expected ${hash}, received ${actualHash}`);
+  }
+
+  const blobPath = getBlobPath(hash, baseDir);
+  if (existsSync(blobPath)) {
+    return { hash, size: decompressed.length, path: blobPath, deduplicated: true };
+  }
+  const parentDir = join(blobPath, "..");
+  if (!existsSync(parentDir)) await mkdir(parentDir, { recursive: true });
+  await writeFile(blobPath, compressed);
+  return { hash, size: decompressed.length, path: blobPath, deduplicated: false };
 }
 
 export async function deleteBlob(hash, baseDir = BLOBS_DIR) {
