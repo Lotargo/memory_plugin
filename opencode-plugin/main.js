@@ -50,7 +50,12 @@ function addRoutingGuidance(plugin) {
   if (plugin.tool.query_knowledge_base) {
     plugin.tool.query_knowledge_base.description =
       "Perform project-isolated hybrid search (RSF/RRF BM25 full-text + dense vector similarity). " +
-      "Returns ranked candidates with stable parent document IDs, source metadata, breadcrumbs, GraphRAG symbols, and relevance scores.";
+      "Returns ranked candidates with stable parent document IDs and source metadata. Use resultMode='index' for a compact semantic table of contents without retrieved bodies.";
+    plugin.tool.query_knowledge_base.args.resultMode = {
+      type: "string",
+      description: "Result presentation: 'snippet' (default) or compact metadata-only semantic TOC 'index'",
+      default: "snippet",
+    };
     plugin.tool.query_knowledge_base.execute = async (args, ctx = {}) =>
       runSingleRagQuery(args, {
         worktree: ctx.worktree ?? null,
@@ -61,7 +66,12 @@ function addRoutingGuidance(plugin) {
   if (plugin.tool.batch_query_knowledge_base) {
     plugin.tool.batch_query_knowledge_base.description =
       "Execute multiple project-isolated hybrid searches in one call. " +
-      "All query embeddings are computed in one ONNX pass and each result exposes stable parent document IDs and source metadata.";
+      "All query embeddings are computed in one ONNX pass. Use resultMode='index' for compact candidate metadata without retrieved bodies.";
+    plugin.tool.batch_query_knowledge_base.args.resultMode = {
+      type: "string",
+      description: "Result presentation for every query: 'snippet' (default) or compact metadata-only semantic TOC 'index'",
+      default: "snippet",
+    };
     plugin.tool.batch_query_knowledge_base.execute = async (args, ctx = {}) =>
       runBatchRagQuery(args, {
         worktree: ctx.worktree ?? null,
