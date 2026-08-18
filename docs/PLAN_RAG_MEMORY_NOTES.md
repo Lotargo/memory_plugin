@@ -1,6 +1,6 @@
 # PLAN: RAG Memory Notes — Cold/Episodic Memory & Semantic TOC Retrieval
 
-> **Status:** In progress — Phases 0–4 complete
+> **Status:** In progress — Phases 0–4 complete; Phase 5 core and Phase 6 implementation complete, runtime/cloud transport checks pending
 > **Target release:** `1.7.0` (provisional; bump only after implementation and tests)
 > **Branch strategy:** implement directly on `main`; release commits/tags remain the rollback checkpoints
 > **Goal:** Add an agent-driven cold/episodic memory layer on top of the existing RAG engine so agents can preserve long-form decisions, research notes, investigations, handoffs, and contextual records without polluting the always-injected Notebook memory.
@@ -153,7 +153,7 @@ The feature reuses the current architecture instead of adding a second storage/s
 |---|:---:|---|
 | Raw text ingestion | ✅ | `ingest_document(type="text")` |
 | Stable document IDs | ✅ | `documents.id` (`doc_*`) |
-| Raw truth storage | ✅ | content-addressed blob store via `blob_hash` |
+| Raw truth storage | ✅ | content-addressed local blob store via `blob_hash` |
 | Document metadata | ✅ | `documents.metadata_json` |
 | Project/global RAG scopes | ✅ | `document_scopes` |
 | Git-based project identity | ✅ | project identities / aliases |
@@ -167,10 +167,12 @@ The feature reuses the current architecture instead of adding a second storage/s
 | Compact → full policy expansion | ✅ | `table_summary` / `code_signature` |
 | Graph edges | ✅ | `graph_edges` |
 | Notebook ↔ document links | ✅ | `knowledge_links` / `link_knowledge` |
-| Full raw document read | ✅ | `manage_knowledge_base(action="read_document")` |
+| Full raw document read | ✅ | shared `readKnowledgeDocument()` behind `manage_knowledge_base(read_document)` |
+| Metadata-aware document/note list | ✅ | shared `listKnowledgeDocuments()` |
 | Delete/unlink by scope | ✅ | existing RAG management |
-| Snapshot export/import | ✅ | existing RAG snapshot system |
-| Local / cloud / hybrid sync | ✅ | SQLite + Turso/LibSQL modes |
+| Snapshot export/import including blobs | ✅ | existing RAG snapshot system |
+| Local / cloud / hybrid DB modes | ✅ | SQLite + Turso/LibSQL modes |
+| Cross-device raw blob cloud transport | ⚠️ | not yet implemented; required in Phase 9 |
 | MCP + native OpenCode surfaces | ✅ | shared core, separate presentation surfaces |
 
 The existing engine already uses the central pattern needed for cold memory:
@@ -263,7 +265,7 @@ manage_knowledge_base(
 )
 ```
 
-Only then is the full raw note loaded into context.
+Only then is the full raw note loaded into context together with normalized source metadata.
 
 Key token-efficiency property:
 
@@ -301,7 +303,7 @@ documents
     }
 ```
 
-Raw note body remains in the existing blob store.
+Raw note body remains in the existing local blob store.
 
 The normal RAG hierarchy remains unchanged:
 
@@ -318,13 +320,15 @@ Why reuse `documents`:
 - no duplicate vector index;
 - no duplicate FTS implementation;
 - scopes work automatically;
-- snapshots can reuse existing payloads;
-- Turso synchronization can reuse document sync;
+- snapshots reuse existing payloads and already include raw blobs;
+- Turso document/chunk synchronization can be reused;
 - deletion/unlink semantics already exist;
 - graph infrastructure already points at document IDs;
 - long notes benefit from existing chunking;
 - raw content already has a content-addressed truth store;
 - internal notes and external documents can participate in one retrieval query.
+
+Important remaining transport gap: the current Turso document sync copies document/chunk metadata and vectors but does **not** transport the local raw gzip blob to another machine. Cross-device raw expansion therefore remains a Phase 9 requirement before release.
 
 ---
 
@@ -653,22 +657,50 @@ query(resultMode="index")
 
 ### Phase 5 — Raw Expansion Workflow
 
-- [ ] Verify `manage_knowledge_base(read_document)` works with `memory://note/*`
-- [ ] Return note metadata from `read_document` in addition to raw content
-- [ ] Verify raw read respects project/global visibility
-- [ ] Verify raw read works after local restart
-- [ ] Verify raw read works in cloud-only mode
-- [ ] Verify raw read works after hybrid reverse-sync
-- [ ] Decide whether an ergonomic `read_knowledge` / `get_note` alias is actually necessary; do not add one unless UX proves awkward
+- [x] Route `manage_knowledge_base(read_document)` through a shared MCP/OpenCode raw-reader that accepts note IDs/titles/`memory://note/*` paths
+- [x] Return `source_type`, `note_kind`, tags, full metadata, timestamps, and raw content from `read_document`
+- [x] Enforce project/global visibility in the shared raw-reader using the existing RAG scope resolver
+- [ ] Verify raw read works after local restart — final runtime test
+- [ ] Verify raw read works in `only-cloud` on the same machine — final runtime test
+- [ ] Implement/verify cross-device raw blob restoration for hybrid/cloud sync — **Phase 9 dependency; current DB sync does not transport local blobs**
+- [x] Keep `read_document` as the single expansion primitive for now; do not add redundant `get_note` / `read_knowledge` aliases before UX proves a need
+
+Implementation checkpoint:
+
+```text
+query(resultMode="index")
+    -> doc_id
+    -> manage_knowledge_base(read_document)
+    -> shared readKnowledgeDocument()
+    -> scope check
+    -> metadata normalization
+    -> raw blob
+```
 
 ### Phase 6 — Note Management
 
-- [ ] Make `manage_knowledge_base(list)` expose source type and note metadata
-- [ ] Verify scope unlink/delete works for notes shared across scopes
-- [ ] Verify deleting a note removes chunks, FTS rows, graph edges, and orphaned blob when appropriate
-- [ ] Verify no Notebook fact is deleted when a linked note is deleted
-- [ ] Verify `link_knowledge` can link a Notebook fact to a RAG Memory Note
-- [ ] Verify re-ingesting unrelated documents does not invalidate note links
+- [x] Make `manage_knowledge_base(list)` expose source type, note kind, tags, metadata, scopes, and timestamps
+- [x] Reuse existing scope unlink/delete behavior for notes; a note remains alive while another scope still references it
+- [x] Confirm by code path that final document deletion removes FTS rows, knowledge links, graph edges, structural rows, and only deletes the blob when no document still references it
+- [x] Confirm Notebook facts themselves are not deleted when a linked note is deleted; only `knowledge_links` / graph projections are removed
+- [x] Confirm `link_knowledge` can target RAG Memory Notes because notes use ordinary stable document IDs and document scopes
+- [x] Confirm unrelated document re-ingestion cannot invalidate a note link; note paths are unique and existing document links are preserved by stable IDs
+- [ ] Runtime regression tests for unlink/delete/link behavior remain in Phase 10
+
+Implementation checkpoint:
+
+```text
+manage(list)
+    -> shared listKnowledgeDocuments()
+    -> notes and documents with normalized metadata
+
+manage(delete)
+    -> remove selected scope
+    -> if scopes remain: unlink only
+    -> else deleteDocument()
+       -> FTS/chunks/graph/links cleanup
+       -> orphan-aware blob deletion
+```
 
 ### Phase 7 — Optional Source Filtering
 
@@ -699,11 +731,13 @@ query(resultMode="index")
 - [ ] Verify raw note blob survives snapshot export/import
 - [ ] Verify note scopes survive snapshot export/import
 - [ ] Verify note graph links survive snapshot export/import
+- [ ] Design and implement cross-device raw blob transport for Turso-backed document sync
+- [ ] Ensure hybrid/cloud restoration materializes raw blobs before `read_document`
 - [ ] Verify `only-local`
 - [ ] Verify `only-cloud`
 - [ ] Verify `hybrid-sync`
 - [ ] Verify reverse-sync restores notes without duplicate document IDs
-- [ ] Add migration only if implementation requires schema changes; prefer metadata-only design
+- [ ] Add migration only if implementation requires schema changes; prefer the smallest compatible transport design
 
 ### Phase 10 — Tests
 
@@ -715,13 +749,14 @@ query(resultMode="index")
 - [ ] Unit: `index` formatting excludes large body fields
 - [ ] Unit: `snippet` mode remains backward compatible
 - [ ] Unit: batch index mode mirrors single-query semantics
+- [ ] Unit: read/list metadata normalization
 - [ ] Integration: create short note → retrieve → raw read
 - [ ] Integration: create long note → chunk → retrieve relevant interior passage → raw read entire note
 - [ ] Integration: project note does not leak to unrelated project
 - [ ] Integration: global note is visible from project `scope=all`
 - [ ] Integration: note and external document coexist in one result set
 - [ ] Integration: delete note cleans index and blob references correctly
-- [ ] Integration: Notebook fact links to note and survives retrieval
+- [ ] Integration: Notebook fact links to note and survives note deletion as an unlinked fact
 - [ ] Integration: MCP tool surface
 - [ ] Integration: native OpenCode package surface
 - [ ] Regression: current document ingestion unchanged
@@ -771,6 +806,7 @@ Checklist:
 - [ ] Document `resultMode=index`
 - [ ] Document note kinds/tags
 - [ ] Document privacy/local-first behavior for notes
+- [ ] Document current cloud raw-blob transport behavior accurately
 - [ ] Update skills/prompts that enumerate available tools
 
 ### Phase 13 — Release Preparation
@@ -801,20 +837,21 @@ Primary files:
 ```text
 mcp-server/
   ingest/
-    pipeline.js                 ingestNote(), metadata overrides, note normalization
+    pipeline.js                 ingestNote(), metadata overrides, note normalization, deletion lifecycle
   retrieval/
     retriever.js                doc_id + defensive document metadata normalization
   tools/
     core/
       note_core.js              shared rememberNote() implementation
       rag_query_core.js         shared snippet/index single+batch query execution/formatting
+      knowledge_read_core.js    shared metadata-aware list + raw read with scope checks
     note_tools.js               MCP remember_note registration
-    rag_tools.js                MCP resultMode schemas + shared query core
+    rag_tools.js                MCP resultMode + metadata-aware list/read management
     index.js                    MCP tool registry
 
 opencode-plugin/
   index.js                      existing native plugin, intentionally preserved
-  main.js                       thin package-entry extension for remember_note + shared query overrides
+  main.js                       thin package-entry extension for remember_note + shared query/list/read overrides
 
 package.json                    main -> opencode-plugin/main.js; version unchanged
 
@@ -838,7 +875,7 @@ tests/integration/*
 tests/smoke/*
 ```
 
-Avoid DB migrations unless a real schema requirement appears. `metadata_json` remains sufficient for the initial architecture.
+Avoid DB migrations unless a real schema requirement appears. `metadata_json` remains sufficient for note classification; Phase 9 may still require a transport mechanism for raw blobs.
 
 ---
 
@@ -853,7 +890,7 @@ The feature must remain additive.
 - Existing RAG documents require no re-indexing solely because notes exist.
 - Existing `query_knowledge_base` callers keep `snippet` behavior by default.
 - `resultMode=index` is opt-in.
-- Existing `manage_knowledge_base` actions remain valid.
+- Existing `manage_knowledge_base` actions remain valid; `list` and `read_document` only gain additive metadata fields.
 - Existing document IDs and graph links remain valid.
 - Existing snapshots should continue to import.
 - No external LLM/API dependency may be introduced for note creation/classification.
@@ -904,7 +941,11 @@ Every normalized retrieval result now carries `doc_id`; agent expansion should u
 
 A note created inside repository A must never appear in repository B under project-only retrieval. Global notes remain intentionally cross-project.
 
-### 16.6 Hidden background intelligence
+### 16.6 Missing raw blob after cloud synchronization
+
+Searchable chunks may exist remotely while the authoritative raw blob still exists only on the machine that ingested the document. `read_document` must not pretend that a missing blob is equivalent to an empty note. Phase 9 must transport/materialize raw blobs across supported cloud synchronization flows.
+
+### 16.7 Hidden background intelligence
 
 Do not add an implicit summarizer/classifier LLM. The feature stays:
 
@@ -914,9 +955,9 @@ Do not add an implicit summarizer/classifier LLM. The feature stays:
 - agent-driven;
 - usable without a hidden network inference call.
 
-### 16.7 Surface drift
+### 16.8 Surface drift
 
-MCP and native OpenCode share `rememberNote()` and the single/batch RAG query core rather than implementing note retrieval semantics twice.
+MCP and native OpenCode share `rememberNote()`, single/batch RAG query core, and metadata-aware list/raw-read helpers rather than implementing note semantics twice.
 
 ---
 
@@ -928,12 +969,13 @@ The feature is complete when:
 - [ ] The note survives restart and remains project/global scoped correctly.
 - [ ] A paraphrased semantic query can discover the note.
 - [x] `resultMode=index` can return compact candidates with stable `doc_id` values at the tool layer.
-- [ ] The agent can expand exactly one selected candidate into full raw content with note metadata.
+- [x] The tool layer can expand exactly one selected local candidate into full raw content with note metadata.
+- [ ] Cross-device/cloud raw expansion succeeds after synchronization.
 - [ ] Existing document RAG behaves as before in default mode (final regression test pending).
 - [ ] Existing Notebook memory behaves as before (final regression test pending).
-- [ ] Notes participate in graph/document-link workflows.
-- [ ] Notes survive supported sync/export/import modes.
-- [x] MCP and OpenCode share equivalent query formatting/execution semantics for the new modes.
+- [x] Notes participate in the existing graph/document-link architecture by ordinary document ID.
+- [ ] Notes survive supported sync/export/import modes end to end.
+- [x] MCP and OpenCode share equivalent query/list/read semantics for the new modes.
 - [ ] Tests demonstrate project isolation and no accidental hot-context injection.
 - [ ] Documentation clearly teaches which memory layer to use.
 
