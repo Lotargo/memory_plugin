@@ -5,7 +5,7 @@ import { registerSnapshotDir } from "../admin/snapshot.js";
 import { ensureExportsDir } from "../ingest/exporter.js";
 import { resolveRagScopeKey, resolveManageRagScopeKeys, removeDocumentScopes } from "../rag_scope.js";
 import { runSingleRagQuery, runBatchRagQuery } from "./core/rag_query_core.js";
-import { readKnowledgeDocument } from "./core/knowledge_read_core.js";
+import { readKnowledgeDocument, listKnowledgeDocuments } from "./core/knowledge_read_core.js";
 
 export function registerRagTools(server) {
   registerSnapshotDir(ensureExportsDir());
@@ -142,7 +142,7 @@ export function registerRagTools(server) {
     "manage_knowledge_base",
     {
       description:
-        "Manage the project-isolated RAG knowledge base: inspect stats, list documents, read full raw document/note with source metadata, unlink/delete documents, or export/import complete snapshots.",
+        "Manage the project-isolated RAG knowledge base: inspect stats, list documents/notes with source metadata, read full raw document/note, unlink/delete documents, or export/import complete snapshots.",
       inputSchema: z.object({
         action: z.enum(["stats", "list", "read_document", "delete", "export_snapshot", "import_snapshot"]).describe("Management action"),
         docId: optStr().describe("Document ID, title, or path (required for read_document and delete)"),
@@ -162,9 +162,18 @@ export function registerRagTools(server) {
         };
       }
 
+      if (action === "list") {
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(await listKnowledgeDocuments({ scope, directory, project }), null, 2),
+          }],
+        };
+      }
+
       const { getDatabase } = await import("../db/database.js");
       const db = await getDatabase();
-      const scopeKeys = ["stats", "list", "delete"].includes(action)
+      const scopeKeys = ["stats", "delete"].includes(action)
         ? await resolveManageRagScopeKeys(action, scope, { directory, project })
         : null;
       const placeholders = scopeKeys ? scopeKeys.map(() => "?").join(",") : "";
@@ -197,18 +206,6 @@ export function registerRagTools(server) {
         return {
           content: [{ type: "text", text: JSON.stringify({ documents: docCount, sections: secCount, micro_chunks: chunkCount, graph_edges: edgeCount }, null, 2) }],
         };
-      }
-
-      if (action === "list") {
-        const docs = await db.prepare(`
-          SELECT d.id, d.title, d.path, d.blob_hash, d.created_at,
-                 GROUP_CONCAT(ds.scope_key) AS scopes
-          FROM documents d
-          JOIN document_scopes ds ON ds.doc_id = d.id AND ds.scope_key IN (${placeholders})
-          GROUP BY d.id, d.title, d.path, d.blob_hash, d.created_at
-          ORDER BY d.created_at DESC
-        `).all(...scopeKeys);
-        return { content: [{ type: "text", text: JSON.stringify(docs, null, 2) }] };
       }
 
       if (action === "delete") {
