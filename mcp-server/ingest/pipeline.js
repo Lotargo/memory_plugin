@@ -86,14 +86,20 @@ export async function ingestDocument({
   const blobRes = await saveBlob(markdown, customBlobDir);
   const blobHash = blobRes.hash;
 
+  // only-cloud bypasses the hybrid sync queue, so publish the raw truth before
+  // writing any document/chunk rows. Hybrid mode uploads the same hash from its
+  // queued ingest task; only-local never touches cloud transport.
+  if (getConfig().mode === "only-cloud") {
+    const { pushBlobToCloud } = await import("../db/rag_blob_transport.js");
+    await pushBlobToCloud(db, blobHash, customBlobDir);
+  }
+
   const generatedDocId = `doc_${randomUUID().replace(/-/g, "").substring(0, 12)}`;
   const docPath = effectivePath || `virtual://${type}/${generatedDocId}`;
   const existingDoc = await db.prepare("SELECT * FROM documents WHERE path = ?").get(docPath);
   const docId = existingDoc?.id || generatedDocId;
   const now = Date.now();
 
-  // Identical re-ingestion only adds the new project/global scope. Keeping the
-  // existing document id preserves every Notebook link and avoids recomputing vectors.
   if (existingDoc && existingDoc.checksum === blobHash) {
     await db.exec("BEGIN IMMEDIATE;");
     try {
@@ -138,8 +144,6 @@ export async function ingestDocument({
 
   if (generateEmbeddings && hierarchy.microChunks.length > 0) {
     const BATCH_SIZE = getConfig().batchSize || 12;
-
-    // Smart Batching: Sort micro-chunks by character/token length to minimize ONNX zero-padding overhead
     const indexedItems = hierarchy.microChunks.map((micro, idx) => ({
       index: idx,
       text: micro.breadcrumbs
@@ -243,9 +247,6 @@ export async function ingestDocument({
     const edges = buildGraphEdges(docId, hierarchy);
     await saveGraphEdges(db, edges);
 
-    // Recreate graph projections for preserved Notebook links after replacing
-    // the document's structural chunks. The knowledge_links rows themselves
-    // remain stable because the document id remains stable.
     if (existingDoc) {
       const links = await db.prepare("SELECT * FROM knowledge_links WHERE doc_id = ?").all(docId);
       const insertLinkEdge = db.prepare(`
@@ -278,6 +279,14 @@ export async function ingestDocument({
       try {
         await deleteBlob(existingDoc.blob_hash, customBlobDir);
       } catch {}
+      if (getConfig().mode === "only-cloud") {
+        try {
+          const { deleteCloudBlobIfUnreferenced } = await import("../db/rag_blob_transport.js");
+          await deleteCloudBlobIfUnreferenced(db, existingDoc.blob_hash);
+        } catch (err) {
+          logger.error("Failed to clean replaced cloud RAG blob:", err.message);
+        }
+      }
     }
   }
 
@@ -363,8 +372,6 @@ export async function deleteDocument(docIdOrPath, customDb = null, customBlobDir
     return { deleted: false, reason: "Document not found" };
   }
 
-  // Collect every id owned by this document so we can purge dangling graph edges
-  // (graph_edges has no FK constraints, so section/chunk/doc references would otherwise leak).
   const ownedIds = [doc.id];
   for (const table of ["sections", "medium_chunks", "micro_chunks"]) {
     const rows = await db.prepare(`SELECT id FROM ${table} WHERE doc_id = ?`).all(doc.id);
@@ -377,18 +384,15 @@ export async function deleteDocument(docIdOrPath, customDb = null, customBlobDir
       await db.prepare("DELETE FROM micro_chunks_fts WHERE id IN (SELECT id FROM micro_chunks WHERE doc_id = ?);").run(doc.id);
     } catch {}
 
-    // Auto-clean Agent knowledge graph links pointing at this document.
     await db.prepare("DELETE FROM knowledge_links WHERE doc_id = ?").run(doc.id);
 
     for (const id of ownedIds) {
-      // GLOB: '*' suffix is exact (unlike LIKE, '_' stays literal in ids like doc_xxx).
       await db.prepare(
         "DELETE FROM graph_edges WHERE source_id = ? OR target_id = ? OR source_id GLOB ? OR target_id GLOB ?"
       ).run(id, id, `${id}*`, `${id}*`);
     }
 
     await db.prepare("DELETE FROM documents WHERE id = ?;").run(doc.id);
-
     await db.exec("COMMIT;");
   } catch (err) {
     await db.exec("ROLLBACK;");
@@ -400,6 +404,14 @@ export async function deleteDocument(docIdOrPath, customDb = null, customBlobDir
     const refCount = refCountRow ? refCountRow.cnt : 0;
     if (refCount === 0) {
       await deleteBlob(doc.blob_hash, customBlobDir);
+      if (getConfig().mode === "only-cloud") {
+        try {
+          const { deleteCloudBlobIfUnreferenced } = await import("../db/rag_blob_transport.js");
+          await deleteCloudBlobIfUnreferenced(db, doc.blob_hash);
+        } catch (err) {
+          logger.error("Failed to delete orphaned cloud RAG blob:", err.message);
+        }
+      }
     }
   }
 
