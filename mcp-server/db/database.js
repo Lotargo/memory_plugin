@@ -10,7 +10,7 @@ import { createClient } from "@libsql/client";
 let dbInstance = null;
 let dbInitPromise = null;
 let dbLastFailAt = 0;
-const DB_FAIL_COOLDOWN_MS = 5_000;  // don't retry cloud init within 5s of a failure
+const DB_FAIL_COOLDOWN_MS = 5_000;
 
 export const STORAGE_DIR = join(MEMORY_DIR, "storage");
 export const BLOBS_DIR = join(STORAGE_DIR, "blobs");
@@ -34,8 +34,6 @@ class DatabaseWrapper {
 
     while (attempts < maxAttempts) {
       attempts++;
-      // A plain timer is enough here; an AbortController per attempt leaked its
-      // "abort" listener because it was never removed.
       let timeoutId = null;
       const timeoutPromise = new Promise((_, reject) => {
         timeoutId = setTimeout(
@@ -48,7 +46,6 @@ class DatabaseWrapper {
         const client = (this.usingFailover && this.failoverClient) ? this.failoverClient : this.cloudClient;
         const result = await Promise.race([fn(client), timeoutPromise]);
         clearTimeout(timeoutId);
-        // Successful operation, reset consecutive failures
         this.consecutiveFailures = 0;
         return result;
       } catch (err) {
@@ -58,12 +55,10 @@ class DatabaseWrapper {
           if (this.consecutiveFailures >= 3 && this.failoverClient && !this.usingFailover) {
             console.warn("[WARN] Turso is temporarily unreachable. Switching to LiteFS failover replica...");
             this.usingFailover = true;
-            // Retry the operation on the failover client
             return this.runWithRetry(fn);
           }
           throw err;
         }
-        // Small delay before retrying (exponential backoff / fixed delay)
         await new Promise((resolve) => setTimeout(resolve, 200));
       }
     }
@@ -156,16 +151,12 @@ async function openDatabase(customPath, mode) {
     localDb = new DatabaseSync(dbPath);
     localDb.exec("PRAGMA foreign_keys = ON;");
     localDb.exec("PRAGMA journal_mode = WAL;");
-    // Default busy_timeout is 0 => an immediate SQLITE_BUSY ("database is
-    // locked") whenever background sync, ingestion and MCP calls overlap.
     localDb.exec("PRAGMA busy_timeout = 5000;");
   }
 
   let cloudClient = null;
   let failoverClient = null;
   if (mode === "only-cloud" || mode === "hybrid-sync") {
-    // Resolve working cloud credentials. An env TURSO_API_TOKEN (which can only
-    // call the Platform API) is lazily minted into a per-database JWT here.
     const secrets = await resolveCloudSecrets();
     const tursoUrl = customPath && customPath.startsWith("libsql:") ? customPath : (secrets?.dbUrl || config.tursoUrl);
     const failoverUrl = config.failoverUrl || "";
@@ -182,8 +173,6 @@ async function openDatabase(customPath, mode) {
           authToken: token || undefined,
         });
       }
-      // In hybrid-sync mode, ensure remote schema is also fully migrated and up to date.
-      // Use a dedicated short-lived client so closing it doesn't kill the shared one.
       if (mode === "hybrid-sync") {
         const remoteClient = createClient({
           url: tursoUrl,
@@ -199,13 +188,22 @@ async function openDatabase(customPath, mode) {
   }
 
   const wrappedDb = new DatabaseWrapper(localDb, cloudClient, mode, failoverClient);
-
-  // Initialize/run migrations
   await runMigrations(wrappedDb);
 
+  // Upgrade path for RAG content ingested before portable cloud blobs existed.
+  // The backfill is content-addressed and uploads only hashes absent in Turso.
+  // Missing local files are simply reported/skipped; database availability must
+  // never depend on a legacy raw blob still being present on this machine.
+  if ((mode === "only-cloud" || mode === "hybrid-sync") && cloudClient) {
+    try {
+      const { backfillCloudBlobsFromLocal } = await import("./rag_blob_transport.js");
+      await backfillCloudBlobsFromLocal(wrappedDb);
+    } catch (err) {
+      console.warn("[WARN] RAG cloud blob backfill skipped:", err.message);
+    }
+  }
+
   if (!customPath) {
-    // Closing the previous instance before replacing it: otherwise a mode switch
-    // leaked the old DatabaseSync handle and Turso client.
     if (dbInstance && dbInstance !== wrappedDb) {
       try {
         dbInstance.close();
@@ -225,15 +223,10 @@ export async function getDatabase(customPath = null, forceMode = null) {
     if (dbInstance && dbInstance.mode === mode) {
       return dbInstance;
     }
-    // After a failed init, wait before retrying to avoid hammering cloud auth.
-    // Only cloud modes are throttled — reopening a local SQLite file is cheap
-    // and must never be blocked by an unrelated cloud failure.
     const isCloudMode = mode === "only-cloud" || mode === "hybrid-sync";
     if (isCloudMode && !dbInitPromise && dbLastFailAt && (Date.now() - dbLastFailAt) < DB_FAIL_COOLDOWN_MS) {
       throw new Error("Database initialization failed recently. Retrying in a few seconds...");
     }
-    // Deduplicate concurrent default-DB initialization so migrations never run
-    // on multiple connections at once (avoids "database is locked" crashes).
     if (!dbInitPromise) {
       dbInitPromise = openDatabase(null, mode).then((result) => {
         dbLastFailAt = 0;
