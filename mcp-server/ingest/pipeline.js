@@ -31,10 +31,14 @@ export function createNoteVirtualPath() {
 }
 
 function mergeMetadata(baseMetadata, metadataOverrides) {
-  if (!metadataOverrides || typeof metadataOverrides !== "object" || Array.isArray(metadataOverrides)) {
-    return baseMetadata;
-  }
+  if (!metadataOverrides || typeof metadataOverrides !== "object" || Array.isArray(metadataOverrides)) return baseMetadata;
   return { ...baseMetadata, ...metadataOverrides };
+}
+
+async function clearOnlyCloudTombstone(db, docId, path) {
+  if (getConfig().mode !== "only-cloud") return;
+  const { clearCloudDocumentTombstone } = await import("../db/rag_sync.js");
+  await clearCloudDocumentTombstone(db, { docId, path });
 }
 
 export async function ingestDocument({
@@ -86,9 +90,6 @@ export async function ingestDocument({
   const blobRes = await saveBlob(markdown, customBlobDir);
   const blobHash = blobRes.hash;
 
-  // only-cloud bypasses the hybrid sync queue, so publish the raw truth before
-  // writing any document/chunk rows. Hybrid mode uploads the same hash from its
-  // queued ingest task; only-local never touches cloud transport.
   if (getConfig().mode === "only-cloud") {
     const { pushBlobToCloud } = await import("../db/rag_blob_transport.js");
     await pushBlobToCloud(db, blobHash, customBlobDir);
@@ -103,11 +104,11 @@ export async function ingestDocument({
   if (existingDoc && existingDoc.checksum === blobHash) {
     await db.exec("BEGIN IMMEDIATE;");
     try {
-      await db
-        .prepare("UPDATE documents SET title = ?, metadata_json = ?, updated_at = ? WHERE id = ?;")
+      await db.prepare("UPDATE documents SET title = ?, metadata_json = ?, updated_at = ? WHERE id = ?;")
         .run(docTitle, JSON.stringify(metadata), now, docId);
       const assignedScope = await addDocumentScope(db, docId, projectScope);
       await db.exec("COMMIT;");
+      await clearOnlyCloudTombstone(db, docId, docPath);
 
       const sectionsRow = await db.prepare("SELECT COUNT(*) AS cnt FROM sections WHERE doc_id = ?").get(docId);
       const chunksRow = await db.prepare("SELECT COUNT(*) AS cnt FROM micro_chunks WHERE doc_id = ?").get(docId);
@@ -121,21 +122,13 @@ export async function ingestDocument({
         }
       }
       return {
-        docId,
-        doc_id: docId,
-        path: docPath,
-        blobHash,
-        blob_hash: blobHash,
-        title: docTitle,
-        sectionsCount: sectionsRow?.cnt || 0,
-        sections_count: sectionsRow?.cnt || 0,
-        microChunksCount: chunksRow?.cnt || 0,
-        micro_chunks_count: chunksRow?.cnt || 0,
-        deduplicated: true,
-        projectScope: assignedScope,
+        docId, doc_id: docId, path: docPath, blobHash, blob_hash: blobHash, title: docTitle,
+        sectionsCount: sectionsRow?.cnt || 0, sections_count: sectionsRow?.cnt || 0,
+        microChunksCount: chunksRow?.cnt || 0, micro_chunks_count: chunksRow?.cnt || 0,
+        deduplicated: true, projectScope: assignedScope,
       };
     } catch (err) {
-      await db.exec("ROLLBACK;");
+      try { await db.exec("ROLLBACK;"); } catch {}
       throw new Error(`Ingestion scope transaction failed: ${err.message}`);
     }
   }
@@ -150,22 +143,16 @@ export async function ingestDocument({
         ? `${micro.content}\n\nContext: ${docTitle} > ${micro.breadcrumbs}`
         : `${micro.content}\n\nContext: ${docTitle}`,
     }));
-
     indexedItems.sort((a, b) => a.text.length - b.text.length);
-
     for (let i = 0; i < indexedItems.length; i += BATCH_SIZE) {
       const batch = indexedItems.slice(i, i + BATCH_SIZE);
-      const batchTexts = batch.map((item) => item.text);
-      const batchVecs = await embedBatch(batchTexts, false);
+      const batchVecs = await embedBatch(batch.map((item) => item.text), false);
       for (let j = 0; j < batchVecs.length; j++) {
-        const origIdx = batch[j].index;
-        hierarchy.microChunks[origIdx].vector = vectorToBuffer(batchVecs[j]);
+        hierarchy.microChunks[batch[j].index].vector = vectorToBuffer(batchVecs[j]);
       }
     }
   } else {
-    for (const micro of hierarchy.microChunks) {
-      micro.vector = Buffer.alloc(0);
-    }
+    for (const micro of hierarchy.microChunks) micro.vector = Buffer.alloc(0);
   }
 
   await db.exec("BEGIN IMMEDIATE;");
@@ -177,108 +164,72 @@ export async function ingestDocument({
         UNION SELECT id FROM micro_chunks WHERE doc_id = ?;
       `).all(docId, docId, docId);
       const ownedIds = [docId, ...ownedRows.map((row) => row.id)];
-      try {
-        await db.prepare("DELETE FROM micro_chunks_fts WHERE id IN (SELECT id FROM micro_chunks WHERE doc_id = ?);").run(docId);
-      } catch {}
+      try { await db.prepare("DELETE FROM micro_chunks_fts WHERE id IN (SELECT id FROM micro_chunks WHERE doc_id = ?);").run(docId); } catch {}
       if (ownedIds.length > 0) {
         const placeholders = ownedIds.map(() => "?").join(",");
-        await db
-          .prepare(`DELETE FROM graph_edges WHERE source_id IN (${placeholders}) OR target_id IN (${placeholders});`)
+        await db.prepare(`DELETE FROM graph_edges WHERE source_id IN (${placeholders}) OR target_id IN (${placeholders});`)
           .run(...ownedIds, ...ownedIds);
       }
       await db.prepare("DELETE FROM micro_chunks WHERE doc_id = ?;").run(docId);
       await db.prepare("DELETE FROM medium_chunks WHERE doc_id = ?;").run(docId);
       await db.prepare("DELETE FROM sections WHERE doc_id = ?;").run(docId);
-      await db.prepare(`
-        UPDATE documents
+      await db.prepare(`UPDATE documents
         SET blob_hash = ?, title = ?, checksum = ?, toc_json = ?, metadata_json = ?, updated_at = ?
-        WHERE id = ?;
-      `).run(blobHash, docTitle, blobHash, hierarchy.toc, JSON.stringify(metadata), now, docId);
+        WHERE id = ?;`).run(blobHash, docTitle, blobHash, hierarchy.toc, JSON.stringify(metadata), now, docId);
     } else {
-      await db.prepare(`
-        INSERT INTO documents (id, path, blob_hash, title, checksum, toc_json, metadata_json, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-      `).run(
-        docId,
-        docPath,
-        blobHash,
-        docTitle,
-        blobHash,
-        hierarchy.toc,
-        JSON.stringify(metadata),
-        now,
-        now
-      );
+      await db.prepare(`INSERT INTO documents
+        (id, path, blob_hash, title, checksum, toc_json, metadata_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`)
+        .run(docId, docPath, blobHash, docTitle, blobHash, hierarchy.toc, JSON.stringify(metadata), now, now);
     }
     const assignedScope = await addDocumentScope(db, docId, projectScope);
 
-    const insertSectionStmt = db.prepare(`
-      INSERT INTO sections (id, doc_id, heading, breadcrumbs, content, token_count)
-      VALUES (?, ?, ?, ?, ?, ?);
-    `);
+    const insertSectionStmt = db.prepare(`INSERT INTO sections
+      (id, doc_id, heading, breadcrumbs, content, token_count) VALUES (?, ?, ?, ?, ?, ?);`);
     for (const sec of hierarchy.sections) {
       await insertSectionStmt.run(sec.id, sec.doc_id, sec.heading, sec.breadcrumbs, sec.content, sec.token_count);
     }
 
-    if (hierarchy.mediumChunks && hierarchy.mediumChunks.length > 0) {
-      const insertMediumStmt = db.prepare(`
-        INSERT INTO medium_chunks (id, section_id, doc_id, content, block_type, token_count, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?);
-      `);
+    if (hierarchy.mediumChunks?.length) {
+      const insertMediumStmt = db.prepare(`INSERT INTO medium_chunks
+        (id, section_id, doc_id, content, block_type, token_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?);`);
       for (const med of hierarchy.mediumChunks) {
         await insertMediumStmt.run(med.id, med.section_id, med.doc_id, med.content, med.block_type, med.token_count, now);
       }
     }
 
-    const insertMicroStmt = db.prepare(`
-      INSERT INTO micro_chunks (id, section_id, doc_id, content, vector, token_count, medium_id, retrieval_policy, policy_source_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-    `);
-    const insertFtsStmt = db.prepare(`
-      INSERT INTO micro_chunks_fts (id, content, breadcrumbs)
-      VALUES (?, ?, ?);
-    `);
-
+    const insertMicroStmt = db.prepare(`INSERT INTO micro_chunks
+      (id, section_id, doc_id, content, vector, token_count, medium_id, retrieval_policy, policy_source_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`);
+    const insertFtsStmt = db.prepare(`INSERT INTO micro_chunks_fts (id, content, breadcrumbs) VALUES (?, ?, ?);`);
     for (const micro of hierarchy.microChunks) {
       await insertMicroStmt.run(micro.id, micro.section_id, micro.doc_id, micro.content, micro.vector, micro.token_count, micro.medium_id || null, micro.retrieval_policy || "micro_chunk", micro.policy_source_id || null);
       await insertFtsStmt.run(micro.id, micro.content, micro.breadcrumbs);
     }
 
-    const edges = buildGraphEdges(docId, hierarchy);
-    await saveGraphEdges(db, edges);
+    await saveGraphEdges(db, buildGraphEdges(docId, hierarchy));
 
     if (existingDoc) {
       const links = await db.prepare("SELECT * FROM knowledge_links WHERE doc_id = ?").all(docId);
-      const insertLinkEdge = db.prepare(`
-        INSERT OR IGNORE INTO graph_edges (source_id, target_id, relation_type, metadata_json, created_at)
-        VALUES (?, ?, ?, ?, ?);
-      `);
+      const insertLinkEdge = db.prepare(`INSERT OR IGNORE INTO graph_edges
+        (source_id, target_id, relation_type, metadata_json, created_at) VALUES (?, ?, ?, ?, ?);`);
       for (const link of links) {
-        const targetSpec = link.start_line
-          ? `${docId}:L${link.start_line}-${link.end_line || link.start_line}`
-          : docId;
-        await insertLinkEdge.run(
-          `fact:${link.fact_key}:${link.fact_text.substring(0, 30)}`,
-          targetSpec,
-          link.relation_type || "LINKS_TO",
-          JSON.stringify({ linkId: link.id }),
-          link.created_at || now
-        );
+        const targetSpec = link.start_line ? `${docId}:L${link.start_line}-${link.end_line || link.start_line}` : docId;
+        await insertLinkEdge.run(`fact:${link.fact_key}:${link.fact_text.substring(0, 30)}`, targetSpec, link.relation_type || "LINKS_TO", JSON.stringify({ linkId: link.id }), link.created_at || now);
       }
     }
 
     await db.exec("COMMIT;");
+    await clearOnlyCloudTombstone(db, docId, docPath);
   } catch (err) {
-    await db.exec("ROLLBACK;");
+    try { await db.exec("ROLLBACK;"); } catch {}
     throw new Error(`Ingestion transaction failed: ${err.message}`);
   }
 
   if (existingDoc?.blob_hash && existingDoc.blob_hash !== blobHash) {
     const refs = await db.prepare("SELECT COUNT(*) AS cnt FROM documents WHERE blob_hash = ?").get(existingDoc.blob_hash);
     if (!refs?.cnt) {
-      try {
-        await deleteBlob(existingDoc.blob_hash, customBlobDir);
-      } catch {}
+      try { await deleteBlob(existingDoc.blob_hash, customBlobDir); } catch {}
       if (getConfig().mode === "only-cloud") {
         try {
           const { deleteCloudBlobIfUnreferenced } = await import("../db/rag_blob_transport.js");
@@ -294,26 +245,17 @@ export async function ingestDocument({
     try {
       const { exportDocumentData } = await import("./exporter.js");
       const { enqueueSyncTask } = await import("../db/sync_queue.js");
-      const exportedData = await exportDocumentData(docId, db);
-      await enqueueSyncTask("ingest_document", docId, exportedData);
+      await enqueueSyncTask("ingest_document", docId, await exportDocumentData(docId, db));
     } catch (err) {
       logger.error("Failed to queue document ingest sync task:", err.message);
     }
   }
 
   return {
-    docId,
-    doc_id: docId,
-    path: docPath,
-    blobHash,
-    blob_hash: blobHash,
-    title: docTitle,
-    sectionsCount: hierarchy.sections.length,
-    sections_count: hierarchy.sections.length,
-    microChunksCount: hierarchy.microChunks.length,
-    micro_chunks_count: hierarchy.microChunks.length,
-    deduplicated: blobRes.deduplicated,
-    projectScope: projectScope || GLOBAL_KEY,
+    docId, doc_id: docId, path: docPath, blobHash, blob_hash: blobHash, title: docTitle,
+    sectionsCount: hierarchy.sections.length, sections_count: hierarchy.sections.length,
+    microChunksCount: hierarchy.microChunks.length, micro_chunks_count: hierarchy.microChunks.length,
+    deduplicated: blobRes.deduplicated, projectScope: assignedScope,
   };
 }
 
@@ -335,11 +277,7 @@ export async function ingestNote({
   const noteKind = normalizeNoteKind(kind);
   const normalizedTags = normalizeNoteTags(tags);
   const notePath = createNoteVirtualPath();
-  const noteMetadata = {
-    source_type: "note",
-    note_kind: noteKind,
-    tags: normalizedTags,
-  };
+  const noteMetadata = { source_type: "note", note_kind: noteKind, tags: normalizedTags };
 
   const result = await ingestDocument({
     content: noteContent,
@@ -355,54 +293,51 @@ export async function ingestNote({
 
   return {
     ...result,
-    sourceType: "note",
-    source_type: "note",
-    kind: noteKind,
-    noteKind,
-    note_kind: noteKind,
-    tags: normalizedTags,
-    metadata: noteMetadata,
+    sourceType: "note", source_type: "note", kind: noteKind, noteKind, note_kind: noteKind,
+    tags: normalizedTags, metadata: noteMetadata,
   };
 }
 
 export async function deleteDocument(docIdOrPath, customDb = null, customBlobDir = BLOBS_DIR) {
   const db = customDb || await getDatabase();
-  const doc = await db.prepare("SELECT * FROM documents WHERE id = ? OR path = ? OR title = ?").get(docIdOrPath, docIdOrPath, docIdOrPath);
-  if (!doc) {
-    return { deleted: false, reason: "Document not found" };
-  }
+  const doc = await db.prepare("SELECT * FROM documents WHERE id = ? OR path = ? OR title = ?")
+    .get(docIdOrPath, docIdOrPath, docIdOrPath);
+  if (!doc) return { deleted: false, reason: "Document not found" };
 
+  const deletedAt = Date.now();
   const ownedIds = [doc.id];
   for (const table of ["sections", "medium_chunks", "micro_chunks"]) {
     const rows = await db.prepare(`SELECT id FROM ${table} WHERE doc_id = ?`).all(doc.id);
-    for (const r of rows) ownedIds.push(r.id);
+    for (const row of rows) ownedIds.push(row.id);
   }
 
   await db.exec("BEGIN IMMEDIATE;");
   try {
-    try {
-      await db.prepare("DELETE FROM micro_chunks_fts WHERE id IN (SELECT id FROM micro_chunks WHERE doc_id = ?);").run(doc.id);
-    } catch {}
-
+    try { await db.prepare("DELETE FROM micro_chunks_fts WHERE id IN (SELECT id FROM micro_chunks WHERE doc_id = ?);").run(doc.id); } catch {}
     await db.prepare("DELETE FROM knowledge_links WHERE doc_id = ?").run(doc.id);
-
     for (const id of ownedIds) {
-      await db.prepare(
-        "DELETE FROM graph_edges WHERE source_id = ? OR target_id = ? OR source_id GLOB ? OR target_id GLOB ?"
-      ).run(id, id, `${id}*`, `${id}*`);
+      await db.prepare("DELETE FROM graph_edges WHERE source_id = ? OR target_id = ? OR source_id GLOB ? OR target_id GLOB ?")
+        .run(id, id, `${id}*`, `${id}*`);
     }
-
     await db.prepare("DELETE FROM documents WHERE id = ?;").run(doc.id);
     await db.exec("COMMIT;");
   } catch (err) {
-    await db.exec("ROLLBACK;");
+    try { await db.exec("ROLLBACK;"); } catch {}
     throw err;
+  }
+
+  if (getConfig().mode === "only-cloud") {
+    try {
+      const { recordCloudDocumentTombstone } = await import("../db/rag_sync.js");
+      await recordCloudDocumentTombstone(db, { docId: doc.id, path: doc.path, deletedAt });
+    } catch (err) {
+      logger.error("Failed to record cloud RAG deletion tombstone:", err.message);
+    }
   }
 
   if (doc.blob_hash) {
     const refCountRow = await db.prepare("SELECT COUNT(*) as cnt FROM documents WHERE blob_hash = ?").get(doc.blob_hash);
-    const refCount = refCountRow ? refCountRow.cnt : 0;
-    if (refCount === 0) {
+    if (Number(refCountRow?.cnt || 0) === 0) {
       await deleteBlob(doc.blob_hash, customBlobDir);
       if (getConfig().mode === "only-cloud") {
         try {
@@ -418,7 +353,7 @@ export async function deleteDocument(docIdOrPath, customDb = null, customBlobDir
   if (getConfig().mode === "hybrid-sync") {
     try {
       const { enqueueSyncTask } = await import("../db/sync_queue.js");
-      await enqueueSyncTask("delete_document", docIdOrPath);
+      await enqueueSyncTask("delete_document", doc.id, { path: doc.path, deletedAt });
     } catch (err) {
       logger.error("Failed to queue document delete sync task:", err.message);
     }
@@ -443,71 +378,53 @@ export async function reindexEmbeddings({
   const total = countRow ? countRow.cnt : 0;
   if (total === 0) return { reindexed: 0, documentsAffected: 0, model: targetModel, dimension: targetDim };
 
-  const rows = await db.prepare(`
-    SELECT m.id, m.doc_id, m.content, s.breadcrumbs, d.title as doc_title
+  const rows = await db.prepare(`SELECT m.id, m.doc_id, m.content, s.breadcrumbs, d.title as doc_title
     FROM micro_chunks m
     LEFT JOIN sections s ON m.section_id = s.id
     LEFT JOIN documents d ON m.doc_id = d.id
-    ORDER BY m.doc_id, m.id
-  `).all();
-
-  const items = rows.map((r) => ({
-    id: r.id,
-    doc_id: r.doc_id,
-    text: r.breadcrumbs
-      ? `${r.content}\n\nContext: ${r.doc_title || ""} > ${r.breadcrumbs}`
-      : `${r.content}\n\nContext: ${r.doc_title || ""}`,
+    ORDER BY m.doc_id, m.id`).all();
+  const items = rows.map((row) => ({
+    id: row.id,
+    doc_id: row.doc_id,
+    text: row.breadcrumbs
+      ? `${row.content}\n\nContext: ${row.doc_title || ""} > ${row.breadcrumbs}`
+      : `${row.content}\n\nContext: ${row.doc_title || ""}`,
   }));
 
-  const defaultEmbed = async (texts) =>
-    embedBatch(texts, false, targetModel, progressCallback, null, {}, targetDim || null);
+  const defaultEmbed = async (texts) => embedBatch(texts, false, targetModel, progressCallback, null, {}, targetDim || null);
   const embed = embedFn || defaultEmbed;
-
   const BATCH_SIZE = config.batchSize || 12;
   const vectors = [];
   for (let i = 0; i < items.length; i += BATCH_SIZE) {
     const batch = items.slice(i, i + BATCH_SIZE);
-    const batchVecs = await embed(batch.map((b) => b.text));
+    const batchVecs = await embed(batch.map((item) => item.text));
     if (!batchVecs || batchVecs.length !== batch.length) {
       throw new Error(`Embedding batch returned ${batchVecs ? batchVecs.length : 0} vectors, expected ${batch.length}`);
     }
-    for (let j = 0; j < batch.length; j++) {
-      vectors.push({ id: batch[j].id, doc_id: batch[j].doc_id, vector: vectorToBuffer(batchVecs[j]) });
-    }
+    for (let j = 0; j < batch.length; j++) vectors.push({ id: batch[j].id, doc_id: batch[j].doc_id, vector: vectorToBuffer(batchVecs[j]) });
     if (progressCallback) progressCallback({ done: vectors.length, total });
   }
 
   await db.exec("BEGIN IMMEDIATE;");
   try {
     const stmt = db.prepare("UPDATE micro_chunks SET vector = ? WHERE id = ?;");
-    for (const v of vectors) {
-      await stmt.run(v.vector, v.id);
-    }
+    for (const vector of vectors) await stmt.run(vector.vector, vector.id);
     await db.exec("COMMIT;");
   } catch (err) {
-    await db.exec("ROLLBACK;");
+    try { await db.exec("ROLLBACK;"); } catch {}
     throw new Error(`Re-index transaction failed: ${err.message}`);
   }
 
-  const affectedDocIds = [...new Set(items.map((i) => i.doc_id).filter(Boolean))];
-
+  const affectedDocIds = [...new Set(items.map((item) => item.doc_id).filter(Boolean))];
   if (config.mode === "hybrid-sync") {
     try {
       const { enqueueSyncTask } = await import("../db/sync_queue.js");
       const { exportDocumentData } = await import("./exporter.js");
-      for (const docId of affectedDocIds) {
-        const exportedData = await exportDocumentData(docId, db);
-        await enqueueSyncTask("ingest_document", docId, exportedData);
-      }
+      for (const docId of affectedDocIds) await enqueueSyncTask("ingest_document", docId, await exportDocumentData(docId, db));
     } catch (err) {
       logger.error("Failed to queue document re-index sync tasks:", err.message);
     }
   }
 
-  return {
-    reindexed: vectors.length,
-    documentsAffected: affectedDocIds.length,
-    model: targetModel,
-    dimension: targetDim,
-  };
+  return { reindexed: vectors.length, documentsAffected: affectedDocIds.length, model: targetModel, dimension: targetDim };
 }
