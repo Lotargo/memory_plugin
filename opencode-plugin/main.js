@@ -2,6 +2,7 @@ import BaseMemoryPlugin from "./index.js";
 import { rememberNote } from "../mcp-server/tools/core/note_core.js";
 import { runSingleRagQuery, runBatchRagQuery } from "../mcp-server/tools/core/rag_query_core.js";
 import { readKnowledgeDocument, listKnowledgeDocuments } from "../mcp-server/tools/core/knowledge_read_core.js";
+import { MEMORY_ROUTING_POLICY } from "../mcp-server/tools/core/memory_routing.js";
 
 const REMEMBER_NOTE_DESCRIPTION =
   "Save high-value long-form or episodic context as a cold RAG Memory Note. " +
@@ -33,8 +34,36 @@ function buildRememberNoteTool() {
   };
 }
 
+function injectRoutingPolicyIntoMemory(output) {
+  const firstUser = output?.messages?.find((message) => message?.info?.role === "user");
+  if (!firstUser?.parts?.length) return;
+
+  const memoryPart = firstUser.parts.find(
+    (part) => part?.type === "text" && typeof part.text === "string" && part.text.includes("<MEMORY>")
+  );
+  if (!memoryPart || memoryPart.text.includes("MEMORY ROUTING DIRECTIVE:")) return;
+
+  if (memoryPart.text.includes("</MEMORY>")) {
+    memoryPart.text = memoryPart.text.replace(
+      "</MEMORY>",
+      `\n\n${MEMORY_ROUTING_POLICY}\n</MEMORY>`
+    );
+  } else {
+    memoryPart.text += `\n\n${MEMORY_ROUTING_POLICY}`;
+  }
+}
+
 function addRoutingGuidance(plugin) {
   if (!plugin?.tool) return plugin;
+
+  const transformKey = "experimental.chat.messages.transform";
+  if (typeof plugin[transformKey] === "function") {
+    const baseTransform = plugin[transformKey];
+    plugin[transformKey] = async (input, output) => {
+      await baseTransform(input, output);
+      injectRoutingPolicyIntoMemory(output);
+    };
+  }
 
   if (plugin.tool.remember?.description && !plugin.tool.remember.description.includes("remember_note")) {
     plugin.tool.remember.description +=
