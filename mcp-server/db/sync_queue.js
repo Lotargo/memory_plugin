@@ -2,12 +2,14 @@ import { readFile, readdir } from "fs/promises";
 import { join } from "path";
 import { MEMORY_DIR, GLOBAL_KEY, buildMemoryContent, extractFacts, writeMemoryFile } from "../memory.js";
 import { toVectorBytes } from "../retrieval/retriever.js";
+import { pushBlobToCloud, deleteCloudBlobIfUnreferenced } from "./rag_blob_transport.js";
+import { pullRagFromCloud } from "./rag_sync.js";
 
 let isSyncing = false;
 let syncRequested = false;
 
 // Reverse sync (cloud -> local) throttling: only pull at most once per window
-// even if readMemory triggers it frequently (recall hits every keystroke).
+// even if readMemory/retrieval triggers it frequently.
 let lastReverseSync = 0;
 let isReverseSyncing = false;
 const REVERSE_SYNC_INTERVAL_MS = 5000;
@@ -28,11 +30,12 @@ async function processSyncTask(db, task) {
   if (task.action === "delete_document") {
     const docId = task.key_or_id;
     const docRow = await db.cloudClient.execute({
-      sql: "SELECT id FROM documents WHERE id = ? OR path = ?;",
+      sql: "SELECT id, blob_hash FROM documents WHERE id = ? OR path = ?;",
       args: [docId, docId],
     });
     if (docRow.rows.length > 0) {
       const realDocId = docRow.rows[0].id;
+      const blobHash = docRow.rows[0].blob_hash || null;
       await db.cloudClient.execute({
         sql: `DELETE FROM graph_edges
               WHERE source_id = ? OR target_id = ?
@@ -51,6 +54,7 @@ async function processSyncTask(db, task) {
       await db.cloudClient.execute({ sql: "DELETE FROM sections WHERE doc_id = ?;", args: [realDocId] });
       await db.cloudClient.execute({ sql: "DELETE FROM knowledge_links WHERE doc_id = ?;", args: [realDocId] });
       await db.cloudClient.execute({ sql: "DELETE FROM documents WHERE id = ?;", args: [realDocId] });
+      if (blobHash) await deleteCloudBlobIfUnreferenced(db, blobHash);
     }
     return;
   }
@@ -59,13 +63,20 @@ async function processSyncTask(db, task) {
     const data = JSON.parse(task.payload);
     const doc = data.document;
 
+    // Upload the content-addressed raw truth before publishing the document
+    // structure. If blob transport fails, the task remains queued and the
+    // remote side never receives a half-readable new document version.
+    await pushBlobToCloud(db, doc.blob_hash);
+
     // 1. Delete existing doc from cloud if any
     const existingDocRow = await db.cloudClient.execute({
-      sql: "SELECT id FROM documents WHERE id = ? OR path = ?;",
+      sql: "SELECT id, blob_hash FROM documents WHERE id = ? OR path = ?;",
       args: [doc.id, doc.path],
     });
+    let previousBlobHash = null;
     if (existingDocRow.rows.length > 0) {
       const realDocId = existingDocRow.rows[0].id;
+      previousBlobHash = existingDocRow.rows[0].blob_hash || null;
       await db.cloudClient.execute({
         sql: `DELETE FROM graph_edges
               WHERE source_id = ? OR target_id = ?
@@ -138,8 +149,6 @@ async function processSyncTask(db, task) {
     // 5. Insert micro_chunks & FTS
     if (Array.isArray(data.micro_chunks)) {
       for (const mc of data.micro_chunks) {
-        // node:sqlite hands back Uint8Array, which matched none of the old
-        // branches — hybrid-sync silently pushed EMPTY vectors to the cloud.
         const vecBytes = toVectorBytes(mc.vector);
         const vecBuf = vecBytes
           ? Buffer.from(vecBytes.buffer, vecBytes.byteOffset, vecBytes.byteLength)
@@ -159,7 +168,6 @@ async function processSyncTask(db, task) {
           ],
         });
 
-        // Insert into remote FTS
         try {
           await db.cloudClient.execute({
             sql: "INSERT INTO micro_chunks_fts (id, content, breadcrumbs) VALUES (?, ?, ?);",
@@ -202,15 +210,18 @@ async function processSyncTask(db, task) {
         });
       }
     }
+
+    if (previousBlobHash && previousBlobHash !== doc.blob_hash) {
+      await deleteCloudBlobIfUnreferenced(db, previousBlobHash);
+    }
   }
 }
 
 export async function enqueueSyncTask(action, keyOrId, payload = null) {
   const { getDatabase } = await import("./database.js");
   const db = await getDatabase();
-  if (db.mode === "only-cloud") return; // No need to queue in only-cloud mode
+  if (db.mode === "only-cloud") return;
 
-  // Ensure queue table exists
   await db.exec(`
     CREATE TABLE IF NOT EXISTS sync_queue (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -226,13 +237,11 @@ export async function enqueueSyncTask(action, keyOrId, payload = null) {
     VALUES (?, ?, ?, ?);
   `).run(action, keyOrId, payload ? (typeof payload === "string" ? payload : JSON.stringify(payload)) : null, Date.now());
 
-  // Trigger background sync worker asynchronously
   triggerBackgroundSync().catch((err) => {
     console.error("Background sync trigger error:", err.message);
   });
 }
 
-// Enumerate local store files as { key, path }.
 async function enumerateLocalStores() {
   const files = await readdir(MEMORY_DIR).catch(() => []);
   const stores = [];
@@ -252,10 +261,8 @@ async function enumerateLocalStores() {
   return stores;
 }
 
-// Reverse sync: pull cloud state down to local stores, resolving conflicts
-// according to config.conflictStrategy ("merge" | "cloud-wins" | "local-wins").
-//
-// Returns a summary of what happened for diagnostics.
+// Reverse sync: pull cloud Notebook state down to local stores, resolving
+// conflicts according to config.conflictStrategy.
 async function pullFromCloud(db) {
   const { getConfig } = await import("../config/config_manager.js");
   const config = getConfig();
@@ -263,13 +270,10 @@ async function pullFromCloud(db) {
 
   const summary = { pulled: 0, pushed: 0, merged: 0, cloudWins: 0, localWins: 0, unchanged: 0, conflicts: 0 };
 
-  // 1. Enumerate cloud notebooks. In hybrid-sync the wrapper's prepare() routes
-  // to the LOCAL sqlite, so cloud reads/writes must go through cloudClient directly.
   const cloudRes = await db.cloudClient.execute("SELECT key, content FROM notebooks;");
   const cloudRows = cloudRes.rows || [];
   const cloudByKey = new Map(cloudRows.map((r) => [r.key, r.content || ""]));
 
-  // 2. Enumerate local store files.
   const localStores = await enumerateLocalStores();
   const localByKey = new Map(localStores.map((s) => [s.key, s.path]));
   const localContentByKey = new Map();
@@ -281,7 +285,6 @@ async function pullFromCloud(db) {
 
   const allKeys = new Set([...cloudByKey.keys(), ...localByKey.keys()]);
 
-  // Upsert a notebook row directly on the cloud client.
   const upsertCloud = async (key, content) => {
     await db.cloudClient.execute({
       sql: `
@@ -293,7 +296,6 @@ async function pullFromCloud(db) {
     });
   };
 
-  // 3. Reconcile each key.
   for (const key of allKeys) {
     const cloudContent = cloudByKey.get(key);
     const localPath = localByKey.get(key);
@@ -305,7 +307,6 @@ async function pullFromCloud(db) {
     const localHas = localFacts.length > 0;
 
     if (cloudFacts === null) {
-      // Store exists only locally -> push up.
       if (localHas) {
         await upsertCloud(key, localContent);
         summary.pushed++;
@@ -314,7 +315,6 @@ async function pullFromCloud(db) {
     }
 
     if (!localHas) {
-      // Store exists only in cloud -> pull down.
       if (cloudHas) {
         await writeMemoryFile(key, cloudContent);
         summary.pulled++;
@@ -322,7 +322,6 @@ async function pullFromCloud(db) {
       continue;
     }
 
-    // Both exist.
     if (localContent === cloudContent) {
       summary.unchanged++;
       continue;
@@ -336,7 +335,6 @@ async function pullFromCloud(db) {
       await upsertCloud(key, localContent);
       summary.localWins++;
     } else {
-      // merge: union of fact lines, deduped, local order first then cloud-only.
       const seen = new Set();
       const mergedFacts = [];
       for (const l of [...localFacts, ...cloudFacts]) {
@@ -355,8 +353,9 @@ async function pullFromCloud(db) {
   return summary;
 }
 
-// Trigger a reverse sync now (regardless of throttle). Used after the push queue
-// drains so both directions stay in sync.
+// Trigger a reverse sync now (regardless of throttle). Notebook memory and the
+// normalized RAG corpus are restored together; RAG uses merge-style semantics
+// and does not treat cloud absence as a deletion tombstone.
 export async function syncFromCloud() {
   if (isReverseSyncing) return { skipped: true };
   isReverseSyncing = true;
@@ -365,19 +364,19 @@ export async function syncFromCloud() {
     const db = await getDatabase();
     if (db.mode !== "hybrid-sync" || !db.cloudClient) return { skipped: true };
     lastReverseSync = Date.now();
-    return await pullFromCloud(db);
+    const notebook = await pullFromCloud(db);
+    const rag = await pullRagFromCloud(db);
+    return { ...notebook, rag };
   } finally {
     isReverseSyncing = false;
   }
 }
 
-// Throttled reverse sync, safe to call on every recall/read.
 export async function ensureReverseSync() {
   if (Date.now() - lastReverseSync < REVERSE_SYNC_INTERVAL_MS) return { throttled: true };
   return syncFromCloud();
 }
 
-// Reset the reverse-sync throttle (used by tests and manual syncs).
 export function resetReverseSyncThrottle() {
   lastReverseSync = 0;
 }
@@ -398,7 +397,6 @@ export async function triggerBackgroundSync() {
       return;
     }
 
-    // Ensure table exists
     await db.exec(`
       CREATE TABLE IF NOT EXISTS sync_queue (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -409,9 +407,6 @@ export async function triggerBackgroundSync() {
       );
     `);
 
-    // Drain until empty. New tasks can be enqueued while a batch is running;
-    // stopping after one snapshot of the queue left those tasks stranded until
-    // an unrelated future write happened to wake the worker again.
     let syncFailed = false;
     while (!syncFailed) {
       const tasks = await db.prepare("SELECT * FROM sync_queue ORDER BY id ASC LIMIT 50;").all();
@@ -429,7 +424,6 @@ export async function triggerBackgroundSync() {
       }
     }
 
-    // Push queue drained — now pull cloud state back down (reverse sync).
     await syncFromCloud();
   } catch (err) {
     console.error("Error during background sync execution:", err.message);
