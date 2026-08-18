@@ -79,7 +79,7 @@ export function registerRagTools(server) {
     {
       description:
         "Perform project-isolated hybrid search (RSF/RRF BM25 full-text + dense vector similarity) across the RAG knowledge base. " +
-        "Returns ranked candidate sections with stable parent document IDs, source metadata, breadcrumbs, GraphRAG code symbols, and relevance scores.",
+        "Returns ranked candidates with stable parent document IDs and source metadata. Use resultMode='index' for a compact semantic table of contents without retrieved bodies.",
       inputSchema: z.object({
         query: z.string().describe("Search query in natural language or symbol name"),
         limit: defNum(5).describe("Maximum number of sections to return"),
@@ -88,6 +88,7 @@ export function registerRagTools(server) {
             "Recommended when using E5/BGE models for domain-specific queries."
         ),
         generateEmbeddings: defBool(true).describe("Use vector search alongside BM25"),
+        resultMode: z.enum(["snippet", "index"]).nullish().transform((v) => v || "snippet").describe("Result presentation: snippet (default) or compact metadata-only semantic TOC index"),
         scope: z.enum(["all", "project", "global"]).nullish().transform((v) => v || "all").describe("Search global + current project (default), project only, or global only"),
         directory: optStr().describe("Optional workspace/project directory path to target"),
         project: optStr().describe("Alias for directory"),
@@ -104,8 +105,7 @@ export function registerRagTools(server) {
       description:
         "Execute multiple hybrid search queries in a single batch call. " +
         "Search is isolated to global plus the current project unless another scope is requested. " +
-        "More efficient than separate query_knowledge_base calls: all query embeddings computed in one ONNX pass. " +
-        "Returns one result set per query with stable parent document IDs and source metadata.",
+        "All query embeddings are computed in one ONNX pass. Use resultMode='index' to return compact candidate metadata without retrieved bodies.",
       inputSchema: z.object({
         queries: z
           .array(z.string())
@@ -115,6 +115,7 @@ export function registerRagTools(server) {
           "Optional task-specific retrieval instruction shaping embedding focus. Applied to all queries."
         ),
         generateEmbeddings: defBool(true).describe("Use vector search alongside BM25"),
+        resultMode: z.enum(["snippet", "index"]).nullish().transform((v) => v || "snippet").describe("Result presentation for every query: snippet (default) or compact metadata-only semantic TOC index"),
         scope: z.enum(["all", "project", "global"]).nullish().transform((v) => v || "all").describe("Search global + current project (default), project only, or global only"),
         directory: optStr().describe("Optional workspace/project directory path to target"),
         project: optStr().describe("Alias for directory"),
