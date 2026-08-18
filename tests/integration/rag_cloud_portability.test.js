@@ -20,6 +20,24 @@ const { blobExists, deleteBlob } = await import("../../mcp-server/storage/blob_s
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+async function waitForRemote(label, predicate, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    const remote = createClient({ url: cloudUrl });
+    try {
+      const value = await predicate(remote);
+      if (value) return value;
+    } catch (err) {
+      lastError = err;
+    } finally {
+      remote.close();
+    }
+    await sleep(50);
+  }
+  throw new Error(`Timed out waiting for ${label}${lastError ? `: ${lastError.message}` : ""}`);
+}
+
 async function resetRemoteSchema() {
   const remote = createClient({ url: cloudUrl });
   await remote.executeMultiple(`
@@ -67,23 +85,21 @@ export async function runRagCloudPortabilityTests() {
       generateEmbeddings: false,
     });
     await triggerBackgroundSync();
-    await sleep(250);
 
-    const remote1 = createClient({ url: cloudUrl });
-    const remoteDoc = (await remote1.execute({
-      sql: "SELECT id, path, blob_hash, metadata_json FROM documents WHERE id = ?;",
-      args: [note.docId],
-    })).rows[0];
-    assert.ok(remoteDoc, "hybrid forward sync publishes document structure");
-    assert.strictEqual(remoteDoc.blob_hash, note.blobHash);
-    const remoteBlob = (await remote1.execute({
-      sql: "SELECT hash, raw_size, LENGTH(gzip_base64) AS encoded_size FROM rag_blobs WHERE hash = ?;",
-      args: [note.blobHash],
-    })).rows[0];
-    assert.ok(remoteBlob, "hybrid forward sync publishes authoritative raw blob");
-    assert.ok(Number(remoteBlob.raw_size) > 0);
-    assert.ok(Number(remoteBlob.encoded_size) > 0);
-    remote1.close();
+    const published = await waitForRemote("hybrid RAG document + raw blob", async (remote) => {
+      const doc = (await remote.execute({
+        sql: "SELECT id, path, blob_hash, metadata_json FROM documents WHERE id = ?;",
+        args: [note.docId],
+      })).rows[0];
+      const blob = (await remote.execute({
+        sql: "SELECT hash, raw_size, LENGTH(gzip_base64) AS encoded_size FROM rag_blobs WHERE hash = ?;",
+        args: [note.blobHash],
+      })).rows[0];
+      return doc && blob ? { doc, blob } : null;
+    });
+    assert.strictEqual(published.doc.blob_hash, note.blobHash);
+    assert.ok(Number(published.blob.raw_size) > 0);
+    assert.ok(Number(published.blob.encoded_size) > 0);
 
     // Save a closed, consistent copy to represent a second machine that later becomes stale.
     closeDatabase();
@@ -113,25 +129,23 @@ export async function runRagCloudPortabilityTests() {
     const deleted = await deleteDocument(note.docId);
     assert.strictEqual(deleted.deleted, true);
     await triggerBackgroundSync();
-    await sleep(250);
 
-    const remote2 = createClient({ url: cloudUrl });
-    const remoteDocAfterDelete = (await remote2.execute({
-      sql: "SELECT id FROM documents WHERE id = ?;",
-      args: [note.docId],
-    })).rows[0];
-    assert.ok(!remoteDocAfterDelete, "cloud document structure is removed after delete");
-    const tombstone = (await remote2.execute({
-      sql: "SELECT doc_id, path, deleted_at FROM rag_document_tombstones WHERE doc_id = ?;",
-      args: [note.docId],
-    })).rows[0];
-    assert.ok(tombstone, "cloud deletion creates a tombstone");
-    const remoteBlobAfterDelete = (await remote2.execute({
-      sql: "SELECT hash FROM rag_blobs WHERE hash = ?;",
-      args: [note.blobHash],
-    })).rows[0];
-    assert.ok(!remoteBlobAfterDelete, "unreferenced cloud raw blob is removed");
-    remote2.close();
+    const deletedRemote = await waitForRemote("cloud RAG deletion tombstone", async (remote) => {
+      const doc = (await remote.execute({
+        sql: "SELECT id FROM documents WHERE id = ?;",
+        args: [note.docId],
+      })).rows[0];
+      const tombstone = (await remote.execute({
+        sql: "SELECT doc_id, path, deleted_at FROM rag_document_tombstones WHERE doc_id = ?;",
+        args: [note.docId],
+      })).rows[0];
+      const blob = (await remote.execute({
+        sql: "SELECT hash FROM rag_blobs WHERE hash = ?;",
+        args: [note.blobHash],
+      })).rows[0];
+      return !doc && tombstone && !blob ? tombstone : null;
+    });
+    assert.strictEqual(deletedRemote.doc_id, note.docId);
 
     closeDatabase();
     rmSync(join(memoryDir, "storage"), { recursive: true, force: true });
@@ -146,13 +160,14 @@ export async function runRagCloudPortabilityTests() {
     assert.ok(!staleDocAfterSync, "tombstone removes stale local document");
     assert.strictEqual(await blobExists(note.blobHash, BLOBS_DIR), false, "tombstone cleanup removes orphan stale raw blob");
 
-    const remote3 = createClient({ url: cloudUrl });
-    const resurrectedBlob = (await remote3.execute({
-      sql: "SELECT hash FROM rag_blobs WHERE hash = ?;",
-      args: [note.blobHash],
-    })).rows[0];
-    assert.ok(!resurrectedBlob, "stale-machine startup backfill must not resurrect tombstoned raw payload");
-    remote3.close();
+    const noResurrection = await waitForRemote("tombstoned blob to remain absent", async (remote) => {
+      const blob = (await remote.execute({
+        sql: "SELECT hash FROM rag_blobs WHERE hash = ?;",
+        args: [note.blobHash],
+      })).rows[0];
+      return blob ? null : true;
+    });
+    assert.strictEqual(noResurrection, true, "stale-machine startup backfill must not resurrect tombstoned raw payload");
 
     // 4. only-cloud: removing local cache still allows deliberate raw expansion from portable cloud blob.
     closeDatabase();
