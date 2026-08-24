@@ -1,7 +1,7 @@
 {
   "name": "@lotargo/memory_plugin",
-  "version": "1.6.7",
-  "description": "100% local hybrid RAG memory for AI coding agents (OpenCode, Claude Code, Codex, Gemini CLI, Antigravity). MCP server + plugin: persistent user facts, document ingestion, vector + SQLite FTS5 retrieval across sessions.",
+  "version": "1.6.8",
+  "description": "Local-first memory, hybrid RAG, and agent personalization for AI coding agents (OpenCode, Claude Code, Codex, Gemini CLI, Antigravity). MCP server + CLI with persistent context, document ingestion, vector + SQLite FTS5 retrieval, sync, setup, and safe uninstall.",
   "type": "module",
   "main": "opencode-plugin/main.js",
   "scripts": {
@@ -31,9 +31,19 @@
   "keywords": [
     "memory",
     "persistent-memory",
+    "long-term-memory",
     "ai-memory",
+    "agent-memory",
+    "memory-plugin",
     "ai-agent",
     "ai-agents",
+    "coding-agent",
+    "coding-agents",
+    "ai-coding-agents",
+    "agent-persona",
+    "ai-personalization",
+    "context-engineering",
+    "local-first",
     "rag",
     "knowledge-base",
     "llm",
@@ -46,7 +56,9 @@
     "codex",
     "gemini-cli",
     "antigravity",
+    "google-jules",
     "plugin",
+    "developer-tools",
     "vector-search",
     "hybrid-search",
     "semantic-search",
@@ -65,7 +77,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Lotargo/memory_pugin.git"
+    "url": "https://github.com/Lotargo/memory_plugin.git"
+  },
+  "homepage": "https://github.com/Lotargo/memory_plugin#readme",
+  "bugs": {
+    "url": "https://github.com/Lotargo/memory_plugin/issues"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.3.3",
