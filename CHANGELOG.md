@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Expanded package keywords for agent memory, coding agents, personalization, context engineering, local-first workflows, and Google Jules discovery.
 - Updated package repository, homepage, and issue metadata to the canonical `Lotargo/memory_plugin` repository after the GitHub rename.
 - Updated README hero asset URLs to the canonical repository and added a text H1 covering memory, hybrid RAG, and agent personalization.
+- Updated the spreadsheet parser import to the ESM-compatible SheetJS namespace form.
+
+### Security
+
+- Replaced the stale public-npm `xlsx@0.18.5` dependency with SheetJS CE `0.20.3` from the official SheetJS CDN, moving spreadsheet ingestion outside the affected ranges for the known prototype-pollution and ReDoS advisories.
+- Updated dependency-security documentation to distinguish the fixed direct SheetJS exposure from the remaining transitive `sharp` / libvips warning in `@huggingface/transformers`; the project disables the Transformers image-decoding path with `env.sharp = false`.
 
 ## [1.6.7] - 2026-08-24
 
