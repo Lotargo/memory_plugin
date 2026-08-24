@@ -3,7 +3,7 @@ import { isIP } from "node:net";
 import { lookup } from "node:dns/promises";
 import { PDFParse } from "pdf-parse";
 import mammoth from "mammoth";
-import xlsx from "xlsx";
+import * as xlsx from "xlsx";
 
 export function cleanHtml(html) {
   if (!html) return "";
