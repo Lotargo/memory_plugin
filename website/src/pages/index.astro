@@ -1,0 +1,66 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Header from '../components/Header.astro';
+import MemoryMatrix from '../components/MemoryMatrix.astro';
+---
+<BaseLayout>
+<main id="top">
+  <Header />
+
+  <section class="hero shell">
+    <div class="hero-copy">
+      <div class="hero-main">
+        <p class="kicker">LOCAL-FIRST AGENT MEMORY</p>
+        <h1>Memory for agents.<br /><span>In your hands.</span></h1>
+        <p class="hero-lead">Persistent memory, hybrid RAG, and personalization for AI coding agents.</p>
+        <div class="client-line"><span>OpenCode</span><span>Codex</span><span>Claude Code</span><span>Gemini CLI</span><span>Antigravity</span><span>MCP</span></div>
+      </div>
+      <aside class="hero-terminal" aria-label="Installation preview">
+        <div class="terminal-top"><span>QUICK START</span><span class="terminal-status">LOCAL</span></div>
+        <pre><code><span>$</span> npm install -g @lotargo/memory_plugin
+
+<span>$</span> memory_plugin setup
+
+<b>✓</b> Memory layer connected</code></pre>
+        <a href="https://github.com/Lotargo/memory_plugin" target="_blank" rel="noreferrer">View source <span>↗</span></a>
+      </aside>
+    </div>
+    <MemoryMatrix />
+  </section>
+
+  <section class="statement shell">
+    <p class="section-index">01 / WHY</p>
+    <h2>AI agents are temporary.<br /><span>Your context shouldn't be.</span></h2>
+    <p>Preferences, decisions, research, and project knowledge survive beyond a single session.</p>
+  </section>
+
+  <section id="features" class="memory-types shell">
+    <header class="section-heading">
+      <p class="section-index">02 / MEMORY LAYERS</p>
+      <h2>Store the right thing<br />in the right place.</h2>
+    </header>
+    <div class="layer-grid">
+      <article class="layer-card layer-hot">
+        <span class="layer-number">01</span>
+        <div><p class="eyebrow">HOT MEMORY</p><h3>Remember.</h3><p>Facts, preferences, constraints, conventions, and concise project context.</p></div>
+        <code>remember()</code>
+      </article>
+      <article class="layer-card layer-cold">
+        <span class="layer-number">02</span>
+        <div><p class="eyebrow">COLD KNOWLEDGE</p><h3>Retrieve.</h3><p>Research, documents, investigations, and detailed decisions — only when needed.</p></div>
+        <code>remember_note()</code>
+      </article>
+      <article class="layer-card layer-persona">
+        <span class="layer-number">03</span>
+        <div><p class="eyebrow">PERSONA</p><h3>Personalize.</h3><p>Behavior, tone, directives, and working conventions shared across agents.</p></div>
+        <code>kind: "directive"</code>
+      </article>
+    </div>
+  </section>
+
+  <section class="next-section shell" id="architecture">
+    <p class="section-index">03 / NEXT</p>
+    <h2>Remember what matters.<br /><span>Retrieve the rest.</span></h2>
+  </section>
+</main>
+</BaseLayout>
