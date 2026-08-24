@@ -1,10 +1,6 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/Lotargo/memory_plugin/main/assets/hero.jpg" alt="@lotargo/memory_plugin" width="800" style="max-width: 100%; border-radius: 12px; margin-bottom: 16px;">
-
-<br>
-
-<img src="https://raw.githubusercontent.com/Lotargo/memory_plugin/main/assets/title.svg" alt="@lotargo/memory_plugin" width="520" style="max-width: 100%; margin-bottom: 12px;">
+<img src="https://raw.githubusercontent.com/Lotargo/memory_plugin/main/assets/01_hero_banner.png" alt="memory_plugin architecture — persistent memory, RAG, persona and CLI runtime" width="100%">
 
 <br>
 
@@ -15,8 +11,6 @@
 [![mcp](https://img.shields.io/badge/MCP-Supported-8A2BE2)](https://modelcontextprotocol.io)
 [![storage](https://img.shields.io/badge/Storage-Local%20%2B%20Cloud%20Sync-success)](#storage-privacy-and-security)
 
-<br>
-
 **Local-first long-term memory, hybrid RAG, and agent personalization for AI coding agents**
 
 One memory system for OpenCode, Codex, Claude Code, Gemini CLI, Antigravity, Google Jules, and other MCP clients.
@@ -24,6 +18,16 @@ One memory system for OpenCode, Codex, Claude Code, Gemini CLI, Antigravity, Goo
 </div>
 
 # @lotargo/memory_plugin — Local-First Memory, Hybrid RAG & Agent Personalization
+
+<p align="center">
+  <a href="#quick-start">Quick Start</a> ·
+  <a href="#memory-architecture">Memory Architecture</a> ·
+  <a href="#persona-and-agent-personalization">Persona</a> ·
+  <a href="#retrieval-and-knowledge-graph">RAG & Retrieval</a> ·
+  <a href="#cloud-synchronization">Cloud Sync</a> ·
+  <a href="#client-integration">Clients</a> ·
+  <a href="#storage-privacy-and-security">Security</a>
+</p>
 
 ---
 
@@ -40,6 +44,10 @@ AI coding assistants forget user preferences, architectural decisions, investiga
 | Files, URLs, documentation, reports, specifications, and code | `ingest_document` | **Curated external knowledge** in the RAG index |
 
 The same engine adds Git-based project isolation, semantic search, full raw-source expansion, explicit fact-to-document links, optional Turso synchronization, and native OpenCode auto-injection.
+
+### Architecture at a Glance
+
+<img src="https://raw.githubusercontent.com/Lotargo/memory_plugin/main/assets/02_project_evolution.png" alt="Evolution of memory_plugin from notebook memory through RAG, persona and cross-client agent state" width="100%">
 
 ### Highlights
 
@@ -104,32 +112,30 @@ Setup also installs the bundled `using-memory` skill and managed memory instruct
 Remove the plugin from one or all clients without deleting Notebook/RAG data:
 
 ```bash
-memory_plugin uninstall --dry-run   # preview
-memory_plugin uninstall             # remove all clients, keep data
-memory_plugin uninstall --purge --yes  # also delete local data (MEMORY_DIR, prompt state)
-memory_plugin uninstall --opencode --purge-cache  # explicitly remove this plugin's OpenCode cache
-memory_plugin uninstall --opencode --claude  # only selected clients
+memory_plugin uninstall --dry-run      # preview
+memory_plugin uninstall                # remove all clients, keep data
+memory_plugin uninstall --purge --yes  # also delete local data
+memory_plugin uninstall --opencode --purge-cache
+memory_plugin uninstall --opencode --claude
 npx @lotargo/memory_plugin uninstall --dry-run
 memory_plugin setup --uninstall --purge  # alias
 ```
 
 What `uninstall` removes by default (without `--purge`):
 
-- `~/.config/opencode/opencode.json` — plugin entry (including `file://` dev link)
-- `~/.claude.json` — `mcpServers.memory-agent`
-- `~/.gemini/settings.json` — Gemini CLI `mcpServers.memory-agent`
-- `~/.gemini/config/mcp_config.json` and `.agents/mcp_config.json` — Antigravity `mcpServers.memory-agent`
-- `~/.codex/config.toml` — `[mcp_servers.memory-agent]` (only if owned by this plugin)
-- Managed prompt blocks from `~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`, `~/.gemini/GEMINI.md`, and `~/.gemini/config/AGENTS.md`
-- `using-memory` skill from each client's `skills/` directory
+- `~/.config/opencode/opencode.json` — plugin entry, including `file://` dev links.
+- `~/.claude.json` — `mcpServers.memory-agent`.
+- `~/.gemini/settings.json` — Gemini CLI `mcpServers.memory-agent`.
+- `~/.gemini/config/mcp_config.json` and `.agents/mcp_config.json` — Antigravity `mcpServers.memory-agent`.
+- `~/.codex/config.toml` — `[mcp_servers.memory-agent]` only when owned by this plugin.
+- Managed prompt blocks from Codex, Claude Code, Gemini CLI, and Antigravity instruction files.
+- The bundled `using-memory` skill from each client's managed `skills/` directory.
 
-Existing user content outside the managed prompt/persona markers is preserved. Foreign `memory-agent` registrations, modified/non-owned `using-memory` skills, unrelated file plugins, and other packages in the `@lotargo` OpenCode cache namespace are left untouched.
+Existing user content outside plugin-owned markers is preserved. Foreign `memory-agent` registrations, modified/non-owned skills, unrelated file plugins, and other packages in the `@lotargo` OpenCode cache namespace are left untouched.
 
-Normal uninstall keeps OpenCode's package cache, matching the host lifecycle. `--purge-cache` removes only exact cache directories owned by this package; unrelated packages, including other packages in the `@lotargo` namespace, remain untouched.
+Normal uninstall keeps OpenCode's package cache. `--purge-cache` removes only exact cache directories owned by this package. With `--purge`, the plugin also deletes `MEMORY_DIR` and its prompt state after resolving and validating every target, rejecting dangerous roots and broad parent paths, and displaying the targets before confirmation. The npm package itself is removed separately with `npm uninstall -g @lotargo/memory_plugin`.
 
-With `--purge` it also deletes `MEMORY_DIR` (`~/.config/opencode/memory` by default) and the memory-agent prompt state. Purge resolves and validates every target before changing client configuration, rejects filesystem roots, home/workspace/config roots and broad top-level paths, follows symlinks for validation, and prints the exact targets before interactive confirmation. The npm package itself is removed separately with `npm uninstall -g @lotargo/memory_plugin`. Restart clients after uninstall.
-
-On Linux/macOS, `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` are respected for OpenCode configuration, prompt state, and package-cache cleanup. `OPENCODE_CONFIG_DIR` and `MEMORY_DIR` remain explicit overrides on every platform.
+On Linux/macOS, `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` are respected. `OPENCODE_CONFIG_DIR` and `MEMORY_DIR` remain explicit overrides on every platform.
 
 ### Verify Codex
 
@@ -167,6 +173,10 @@ After code changes, restart OpenCode to reload the module. Codex, Claude Code, G
 ---
 
 ## Memory Architecture
+
+<img src="https://raw.githubusercontent.com/Lotargo/memory_plugin/main/assets/03_hot_memory_vs_cold_rag.png" alt="Hot persistent memory versus cold RAG retrieval architecture in memory_plugin" width="100%">
+
+The architecture deliberately separates **small, always-useful context** from **large, on-demand knowledge**. This keeps session initialization useful without turning persistent memory into an ever-growing prompt.
 
 ### 1. Hot Notebook Memory
 
@@ -238,14 +248,18 @@ This keeps startup context small while preserving the complete reasoning trail w
 
 ## Persona and Agent Personalization
 
+<img src="https://raw.githubusercontent.com/Lotargo/memory_plugin/main/assets/04_fact_vs_directive.png" alt="Fact versus directive semantics in memory_plugin" width="100%">
+
 Notebook entries have explicit semantics:
 
 ```text
-kind: "fact"       # descriptive context
-kind: "directive"  # active user-approved personality or working configuration
+kind: "fact"       # descriptive context — what the agent knows
+kind: "directive"  # active configuration — how the agent should behave
 ```
 
 Use `kind: "directive"` for personality, behavior, tone, communication style, preferences, or working conventions the agent should actively apply. Explicit `kind` is authoritative; persuasive wording alone does not turn a fact into an instruction.
+
+<img src="https://raw.githubusercontent.com/Lotargo/memory_plugin/main/assets/05_persona_as_runtime_state.png" alt="The same model with neutral, coding-focused and personalized runtime state" width="100%">
 
 ### OpenCode
 
@@ -539,7 +553,9 @@ Spreadsheet ingestion uses SheetJS CE `0.20.3` from the official SheetJS CDN rat
 
 ---
 
-## Testing and Benchmarks
+## Repository Testing and Benchmarks
+
+> These commands are intended for a **source checkout of the repository**. Test suites and benchmark harnesses are intentionally excluded from the published npm tarball.
 
 ```bash
 npm test                   # unified unit, integration, and simulated-cloud suites
@@ -551,7 +567,7 @@ npm run benchmark:table-code
 
 The fast suites use `generateEmbeddings: false` in retrieval paths for deterministic offline coverage. `npm run smoke` covers the dense-vector path with real cached/downloaded model weights and checks multilingual semantic retrieval. Both modes are needed: lexical-only tests cannot catch a broken vector serialization or ONNX execution path.
 
-The unified suites cover fact formatting, typed directives, persona migration/synchronization, client prompt safety, Codex launcher compatibility, Git identity isolation, RAG scopes, policy expansion, RAG Memory Notes, semantic index output, raw blob portability, reverse sync, tombstones, snapshots, MCP contracts, and cloud authentication workflows.
+The unified suites cover fact formatting, typed directives, persona migration/synchronization, client prompt safety, Codex launcher compatibility, Git identity isolation, RAG scopes, policy expansion, RAG Memory Notes, semantic index output, raw blob portability, reverse sync, tombstones, snapshots, MCP contracts, spreadsheet parsing, and cloud authentication workflows.
 
 See [`docs/BENCHMARKS.md`](./docs/BENCHMARKS.md) for methodology and detailed reports.
 
