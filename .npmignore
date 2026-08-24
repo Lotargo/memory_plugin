@@ -4,8 +4,7 @@
 mcp-server/package.json
 
 # Tests, benchmarks, and scratch scripts
-mcp-server/test*
-mcp-server/benchmarks/**
+# mcp-server/ has its own .npmignore because package.json explicitly publishes that directory.
 
 # Dev docs, assets, exports, and local databases
 dev_docs/
