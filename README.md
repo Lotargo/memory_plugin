@@ -1,10 +1,10 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/Lotargo/memory_pugin/main/assets/hero.jpg" alt="@lotargo/memory_plugin" width="800" style="max-width: 100%; border-radius: 12px; margin-bottom: 16px;">
+<img src="https://raw.githubusercontent.com/Lotargo/memory_plugin/main/assets/hero.jpg" alt="@lotargo/memory_plugin" width="800" style="max-width: 100%; border-radius: 12px; margin-bottom: 16px;">
 
 <br>
 
-<img src="https://raw.githubusercontent.com/Lotargo/memory_pugin/main/assets/title.svg" alt="@lotargo/memory_plugin" width="520" style="max-width: 100%; margin-bottom: 12px;">
+<img src="https://raw.githubusercontent.com/Lotargo/memory_plugin/main/assets/title.svg" alt="@lotargo/memory_plugin" width="520" style="max-width: 100%; margin-bottom: 12px;">
 
 <br>
 
@@ -17,11 +17,13 @@
 
 <br>
 
-**Local-first long-term memory, cold episodic notes, and hybrid RAG for AI coding agents**
+**Local-first long-term memory, hybrid RAG, and agent personalization for AI coding agents**
 
 One memory system for OpenCode, Codex, Claude Code, Gemini CLI, Antigravity, Google Jules, and other MCP clients.
 
 </div>
+
+# @lotargo/memory_plugin — Local-First Memory, Hybrid RAG & Agent Personalization
 
 ---
 
