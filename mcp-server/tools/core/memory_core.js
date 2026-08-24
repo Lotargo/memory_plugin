@@ -30,6 +30,7 @@ import {
   factTitle,
   factBody,
   autoGenerateTitle,
+  isDirectiveFact,
 } from "../../fact_format.js";
 import { requireProjectKey, resolveFactIndex } from "../helpers.js";
 
@@ -71,9 +72,10 @@ async function resolveScopeKey(scope, args = {}, ctx = {}) {
 }
 
 export async function rememberFact(
-  { fact, title, scope, directory, project, docId, startLine, endLine, relationType, ttl, keep, tags, supersedes },
+  { fact, title, kind = "fact", scope, directory, project, docId, startLine, endLine, relationType, ttl, keep, tags, supersedes },
   ctx = {}
 ) {
+  if (!['fact', 'directive'].includes(kind)) throw new Error("kind must be 'fact' or 'directive'.");
   const key = requireProjectKey(await resolveScopeKey(scope, { directory, project }, ctx));
   const entries = await readMemory(key);
 
@@ -87,7 +89,7 @@ export async function rememberFact(
   let supersededInfo = "";
   if (!duplicate) {
     const [date, time] = today().split(" ");
-    const meta = { ttl, tags };
+    const meta = { ttl, tags, kind };
     if (keep) meta.keep = "1";
     if (supersedes) {
       const targetIdx = resolveFactIndex(entries, supersedes);
@@ -109,6 +111,7 @@ export async function rememberFact(
     if (!meta.id) meta.id = nextFactId(entries);
     entries.push(formatFactEntry({ date, time, text, meta }));
     await writeMemory(key, entries);
+    if (key === GLOBAL_KEY && kind === "directive") await syncGlobalPersonaPrompts();
   }
 
   let linkInfo = "";
@@ -189,6 +192,7 @@ export async function recallFacts(
     if (isKeepFact(factLine)) badges.push("KEEP");
     if (isSuperseded(factLine)) badges.push("SUPERSEDED");
     if (meta.inject === "1") badges.push("INJECT");
+    if (isDirectiveFact(factLine)) badges.push("DIRECTIVE");
     if (meta.id) badges.push(`id:${meta.id}`);
     if (meta.tags) badges.push(`tags:${meta.tags}`);
     badges.push(`${p.date} ${p.time}`);
@@ -310,11 +314,13 @@ export async function forgetFacts({ query, scope, force, directory, project }, c
   if (!indices.length) return "Not found.";
 
   const removable = indices.filter((i) => force || !isKeepFact(entries[i]));
+  const removedGlobalDirective = key === GLOBAL_KEY && removable.some((i) => isDirectiveFact(entries[i]));
   const protectedCount = indices.length - removable.length;
   if (removable.length) {
     const removedBodies = removable.map((i) => factBody(entries[i]) || factText(entries[i]));
     for (const i of removable.sort((a, b) => b - a)) entries.splice(i, 1);
     await writeMemory(key, entries);
+    if (removedGlobalDirective) await syncGlobalPersonaPrompts();
     try {
       const { getDatabase } = await import("../../db/database.js");
       const { deleteLinksForFacts } = await import("../../graph/knowledge_linker.js");
@@ -326,7 +332,8 @@ export async function forgetFacts({ query, scope, force, directory, project }, c
   return text;
 }
 
-export async function updateFactText({ id, newText, title, scope, directory, project }, ctx = {}) {
+export async function updateFactText({ id, newText, title, kind, scope, directory, project }, ctx = {}) {
+  if (kind && !['fact', 'directive'].includes(kind)) throw new Error("kind must be 'fact' or 'directive'.");
   const key = requireProjectKey(await resolveScopeKey(scope, { directory, project }, ctx));
   const entries = await readMemory(key);
   const idx = resolveFactIndex(entries, id);
@@ -335,6 +342,7 @@ export async function updateFactText({ id, newText, title, scope, directory, pro
   const p = parseFactEntry(entries[idx]);
   const oldText = p ? p.text : entries[idx];
   const oldBody = factBody(entries[idx]) || oldText;
+  const wasDirective = isDirectiveFact(entries[idx]);
 
   let { finalTitle, finalFact } = splitTitle(newText, title);
   if (!finalTitle) finalTitle = factTitle(entries[idx]) || autoGenerateTitle(finalFact);
@@ -343,9 +351,10 @@ export async function updateFactText({ id, newText, title, scope, directory, pro
     date: p.date,
     time: p.time,
     text: `**${finalTitle}** — ${finalFact}`,
-    meta: p.meta,
+    meta: kind ? { ...p.meta, kind } : p.meta,
   });
   await writeMemory(key, entries);
+  if (key === GLOBAL_KEY && (wasDirective || isDirectiveFact(entries[idx]))) await syncGlobalPersonaPrompts();
 
   let linksUpdated = 0;
   try {
@@ -389,6 +398,17 @@ export async function updateFactText({ id, newText, title, scope, directory, pro
   } catch {}
 
   return `Fact updated${linksUpdated ? `, ${linksUpdated} doc link(s) updated` : ""}`;
+}
+
+async function syncGlobalPersonaPrompts() {
+  if (process.env.MEMORY_DISABLE_PERSONA_SYNC === "1") return;
+  try {
+    const { syncPersonaPrompts } = await import("../../prompt_manager.js");
+    await syncPersonaPrompts();
+  } catch {
+    // Memory persistence must not fail because an optional client config is
+    // unavailable or read-only. Explicit sync-persona surfaces such failures.
+  }
 }
 
 export async function memoryInfo(_args = {}, ctx = {}) {

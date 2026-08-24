@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- OpenCode's native auto-injection now explicitly suppresses redundant startup `recall` calls while preserving manual recall for inspection, filtering, history, and explicit scopes.
+- Added an OpenCode system-prompt overlay policy that treats user-approved personality, behavior, tone, style, preference, and working-convention memories as active personalization instructions rather than passive facts.
+- Updated shared prompts and the bundled memory skill to distinguish auto-injected clients from integrations that must initialize with `recall(scope: "all")`.
+- OpenCode now separates active `<PERSONAL_AGENT_OVERLAY>` entries from descriptive `<MEMORY_FACTS>` and injects the actual active directives into `experimental.chat.system.transform`.
+- `dev:link` now synchronizes managed prompts and bundled skills for non-OpenCode clients in addition to linking the OpenCode source and system CLI.
+
+### Added
+
+- Added `npm run dev:link` / `memory-cli dev-link` for local development. It globally links the repository CLI and points OpenCode at the working tree through a `file://` plugin entry, eliminating npm publication and reinstall cycles during testing.
+- Added explicit Notebook `kind: "fact" | "directive"` semantics across MCP and OpenCode `remember` / `update_fact` tools, with `[DIRECTIVE]` recall badges and compatibility for legacy persona/preference tags.
+- Added managed persona prompt synchronization for Codex, Claude Code, and Antigravity through `memory-cli sync-persona` / `npm run persona:sync`, including automatic refresh after global directive mutations and cloud pulls.
+- Added idempotent `memory-cli migrate-persona [--dry-run]` / `npm run persona:migrate` to permanently classify legacy global personalization entries as `kind:directive` and regenerate managed client prompts.
+
+### Fixed
+
+- Fixed `remember_note` omitting the ingestion `blobHash` from its public result, which broke cross-device raw-blob portability consumers and was previously masked by Windows temp-cleanup errors.
+- Fixed concurrent `triggerBackgroundSync()` callers returning before the active queue drain completed; callers now join one active promise that includes requested follow-up passes.
+
 ## [1.6.6] - 2026-08-17
 
 ### Fixed

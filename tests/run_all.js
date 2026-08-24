@@ -10,6 +10,8 @@ const testSuites = [
   { category: "Unit", name: "identity", file: "tests/unit/identity.test.js" },
   { category: "Unit", name: "codex_compat", file: "tests/unit/codex_compat.test.js" },
   { category: "Unit", name: "prompt_manager", file: "tests/unit/prompt_manager.test.js" },
+  { category: "Unit", name: "persona_migration", file: "tests/unit/persona_migration.test.js" },
+  { category: "Unit", name: "dev_link", file: "tests/unit/dev_link.test.js" },
   { category: "Unit", name: "opencode_memory_context", file: "tests/unit/opencode_memory_context.test.js" },
   { category: "Unit", name: "rag_integrity", file: "tests/unit/rag_integrity.test.js" },
   { category: "Unit", name: "rag_memory_notes", file: "tests/unit/rag_memory_notes.test.js" },
@@ -23,6 +25,7 @@ const testSuites = [
   { category: "Integration", name: "expanded_features", file: "tests/integration/expanded_features.test.js" },
   { category: "Integration", name: "memory_verification", file: "tests/integration/memory_verification.test.js" },
   { category: "Integration", name: "mcp_tools", file: "tests/integration/mcp_tools.test.js" },
+  { category: "Integration", name: "persona_sync", file: "tests/integration/persona_sync.test.js" },
   { category: "Integration", name: "codex_mcp_smoke", file: "tests/integration/codex_mcp_smoke.test.js" },
   { category: "Integration", name: "reverse_sync", file: "tests/integration/reverse_sync.test.js" },
   { category: "Integration", name: "rag_mcp_tools", file: "tests/integration/rag_mcp_tools.test.js" },
@@ -50,7 +53,10 @@ async function main() {
 
     const filePath = join(ROOT, suite.file);
     try {
-      execFileSync(process.execPath, [filePath], { stdio: "inherit" });
+      execFileSync(process.execPath, [filePath], {
+        stdio: "inherit",
+        env: { ...process.env, MEMORY_DISABLE_PERSONA_SYNC: "1" },
+      });
     } catch (err) {
       console.error(`\n❌ TEST SUITE FAILED: ${suite.name} (${suite.file})`);
       process.exit(1);

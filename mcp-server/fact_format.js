@@ -13,8 +13,24 @@
 //   supersedes   id (or number/text) this fact replaces
 //   supersededBy id of the fact that replaced this one
 //   tags         comma-separated free-form tags for recall filtering
+//   kind         "fact" = descriptive context, "directive" = active personalization/working instruction
 
-const META_KEYS = ["id", "ttl", "keep", "supersededBy", "supersedes", "tags", "inject"];
+const META_KEYS = ["id", "ttl", "keep", "supersededBy", "supersedes", "tags", "inject", "kind"];
+
+const LEGACY_DIRECTIVE_TAGS = new Set([
+  "persona",
+  "behavior",
+  "behaviour",
+  "speech",
+  "style",
+  "tone",
+  "preference",
+  "preferences",
+  "pref",
+  "instruction",
+  "instructions",
+  "directive",
+]);
 
 const ENTRY_RE = /^- \[(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})\]\s+(.*)$/;
 
@@ -129,6 +145,21 @@ export function isSuperseded(line) {
   return Boolean(factMeta(line).supersededBy);
 }
 
+// Explicit kind metadata is authoritative. Legacy stores predate `kind`, so
+// well-known personalization tags and inject:1 remain a compatibility bridge.
+// kind:fact can explicitly opt a tagged item out of directive semantics.
+export function isDirectiveFact(line) {
+  const meta = factMeta(line);
+  if (meta.kind === "directive") return true;
+  if (meta.kind === "fact") return false;
+  if (meta.inject === "1") return true;
+  const tags = String(meta.tags || "")
+    .split(",")
+    .map((tag) => tag.trim().toLowerCase())
+    .filter(Boolean);
+  return tags.some((tag) => LEGACY_DIRECTIVE_TAGS.has(tag));
+}
+
 // Keyword match: space-separated terms, all must be present (case-insensitive).
 // Also matches against the fact's id and tags.
 export function matchesQuery(factLine, query) {
@@ -166,6 +197,7 @@ export function metaBadges(factLine, now = Date.now()) {
   if (isExpiredLine(factLine, now)) badges.push("EXPIRED");
   if (isKeepFact(factLine)) badges.push("KEEP");
   if (isSuperseded(factLine)) badges.push("SUPERSEDED");
+  if (isDirectiveFact(factLine)) badges.push("DIRECTIVE");
   return badges;
 }
 

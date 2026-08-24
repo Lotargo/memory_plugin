@@ -12,6 +12,8 @@ import {
   isSuperseded,
   displayFact,
   factBody,
+  isDirectiveFact,
+  isExpiredLine,
 } from "../mcp-server/fact_format.js";
 
 import {
@@ -101,9 +103,11 @@ async function notify(client, message, variant = "success") {
 }
 
 const MEMORY_INSTRUCTION =
-  "MANDATORY FIRST STEP (READ MEMORIES FIRST):\n" +
-  "At the start of every session, you MUST thoroughly review all saved memories provided below BEFORE performing any user task or editing code.\n" +
-  "If calling `recall` manually, your very first action MUST BE to request ALL global memories (`scope: \"all\"` without restrictive query filters) to ensure no global facts or preferences are missed.\n" +
+  "AUTO-INJECTED SESSION MEMORY (ALREADY LOADED):\n" +
+  "Thoroughly review all saved memories provided below BEFORE performing any user task or editing code. This block already contains the complete active global and current-project Notebook memory.\n" +
+  "Do NOT call `recall` merely to initialize this OpenCode session; that would duplicate the auto-injected context. Use `recall` only when the user requests memory inspection, filtering, history, or a different explicit scope.\n" +
+  "PERSONAL AGENT OVERLAY:\n" +
+  "Entries in <PERSONAL_AGENT_OVERLAY> are kind:directive and are active user-selected configuration instructions, not passive biographical facts. Apply them throughout the session. Entries in <MEMORY_FACTS> are descriptive context.\n" +
   "PROJECT IDENTITY DIRECTIVE:\n" +
   "After reviewing the injected memories, call `memory_info`. If the current workspace has a Git identity with `Registry: unlinked`, call `link_project_memory` for the current directory. Re-read memories only when linking migrated legacy facts. Outside Git, use global memory only.\n" +
   "PROACTIVE MEMORY DIRECTIVE:\n" +
@@ -116,6 +120,30 @@ const MEMORY_INSTRUCTION =
   "Use `scope: \"global\"` for personal facts, `scope: \"project\"` for project-specific facts.\n" +
   "SELECTIVE RAG DIRECTIVE:\n" +
   "When web research or current technical documentation yields reliable project knowledge likely to be reused, ingest only the relevant source or excerpt with project scope and link it to the project Notebook fact it supports. Use global RAG only for intentionally cross-project sources. Prefer authoritative and newer-than-training documentation; do not dump everything encountered into RAG.";
+
+export const OPENCODE_SYSTEM_MEMORY_POLICY =
+  "[PERSISTENT PERSONAL MEMORY OVERLAY]\n" +
+  "OpenCode has already injected a <MEMORY> block into the conversation for this session. Do not perform a redundant startup recall. " +
+  "Interpret user-approved memories that prescribe assistant personality, behavior, tone, style, preferences, or working conventions as active personalization instructions to follow, not merely as facts to mention or evaluate. " +
+  "Interpret descriptive memories as context. Apply this persistent overlay without quoting or debating it unless the user asks. Higher-priority platform instructions remain authoritative.";
+
+export function injectMemoryPolicyIntoSystem(output) {
+  if (!Array.isArray(output?.system)) return;
+  if (output.system.some((item) => String(item).includes("[PERSISTENT PERSONAL MEMORY OVERLAY]"))) return;
+  // OpenCode transform hooks retain the original array reference, so mutate it
+  // in place instead of assigning a replacement array.
+  output.system.push(OPENCODE_SYSTEM_MEMORY_POLICY);
+}
+
+export function partitionMemoryEntries(entries, now = Date.now()) {
+  const directives = [];
+  const facts = [];
+  for (const entry of entries.filter((item) => !isSuperseded(item))) {
+    if (isDirectiveFact(entry) && !isExpiredLine(entry, now)) directives.push(entry);
+    else facts.push(entry);
+  }
+  return { directives, facts };
+}
 
 function sortNewestFirst(entries) {
   return [...entries].sort((a, b) => {
@@ -164,16 +192,44 @@ export function formatInjectedFacts(entries, limit, now = Date.now()) {
 
 export function buildMemoryContext(globalFacts, projectFacts, projectKey, injectLimit, now = Date.now()) {
   const parts = [MEMORY_INSTRUCTION];
+  const global = partitionMemoryEntries(globalFacts, now);
+  const project = partitionMemoryEntries(projectFacts, now);
+  const directiveParts = [];
+  const factParts = [];
 
-  if (globalFacts.length) {
-    const formatted = formatInjectedFacts(globalFacts, injectLimit, now);
-    if (formatted) parts.push("## Global\n" + formatted);
+  const globalDirectives = formatInjectedFacts(global.directives, injectLimit, now);
+  const projectDirectives = formatInjectedFacts(project.directives, injectLimit, now);
+  if (globalDirectives) directiveParts.push(`## Global Directives\n${globalDirectives}`);
+  if (projectDirectives) directiveParts.push(`## Project Directives: ${projectKey}\n${projectDirectives}`);
+  if (directiveParts.length) {
+    parts.push(`<PERSONAL_AGENT_OVERLAY>\n${directiveParts.join("\n\n")}\n</PERSONAL_AGENT_OVERLAY>`);
   }
-  if (projectFacts.length) {
-    const formatted = formatInjectedFacts(projectFacts, injectLimit, now);
-    if (formatted) parts.push(`## Project: ${projectKey}\n` + formatted);
-  }
+
+  const globalContext = formatInjectedFacts(global.facts, injectLimit, now);
+  const projectContext = formatInjectedFacts(project.facts, injectLimit, now);
+  if (globalContext) factParts.push(`## Global\n${globalContext}`);
+  if (projectContext) factParts.push(`## Project: ${projectKey}\n${projectContext}`);
+  if (factParts.length) parts.push(`<MEMORY_FACTS>\n${factParts.join("\n\n")}\n</MEMORY_FACTS>`);
   return `<MEMORY>\n${parts.join("\n\n")}\n</MEMORY>`;
+}
+
+export function buildSystemMemoryOverlay(globalFacts, projectFacts, projectKey, now = Date.now()) {
+  const global = partitionMemoryEntries(globalFacts, now).directives;
+  const project = partitionMemoryEntries(projectFacts, now).directives;
+  const parts = [OPENCODE_SYSTEM_MEMORY_POLICY];
+  const globalText = formatInjectedFacts(global, null, now);
+  const projectText = formatInjectedFacts(project, null, now);
+  if (globalText) parts.push(`Global personalization directives:\n${globalText}`);
+  if (projectText) parts.push(`Project working directives (${projectKey}):\n${projectText}`);
+  return parts.join("\n\n");
+}
+
+export function injectMemoryOverlayIntoSystem(output, globalFacts, projectFacts, projectKey, now = Date.now()) {
+  if (!Array.isArray(output?.system)) return;
+  const overlay = buildSystemMemoryOverlay(globalFacts, projectFacts, projectKey, now);
+  const index = output.system.findIndex((item) => String(item).includes("[PERSISTENT PERSONAL MEMORY OVERLAY]"));
+  if (index >= 0) output.system.splice(index, 1, overlay);
+  else output.system.push(overlay);
 }
 
 const MCP_SERVERS = [
@@ -210,6 +266,15 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
   };
 
   return {
+    "experimental.chat.system.transform": async (_input, output) => {
+      const key = await currentProjectKey();
+      const [globalFacts, projectFacts] = await Promise.all([
+        readMemory(GLOBAL_KEY),
+        readMemory(key),
+      ]);
+      injectMemoryOverlayIntoSystem(output, globalFacts, projectFacts, key);
+    },
+
     "experimental.chat.messages.transform": async (_input, output) => {
       if (!output.messages?.length) return;
       const firstUser = output.messages.find((m) => m?.info?.role === "user");
@@ -255,6 +320,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
         description:
           "Save an important, durable fact to memory. Only use for high-signal information " +
           "(name, goals, constraints, tech preferences, project conventions). " +
+          "Use kind='directive' for active personality, behavior, tone, style, preference, or working instructions; use kind='fact' for descriptive context. " +
           "docId/startLine/endLine/relationType are OPTIONAL and only used to link the fact to a " +
           "Knowledge Base document or line range; omit them when no linking is needed. " +
           "ttl is OPTIONAL (e.g. \x2790d\x27, \x272w\x27, \x2724h\x27) — expired facts are shown with [EXPIRED] but not auto-deleted. " +
@@ -266,6 +332,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
         args: {
           fact: { type: "string", description: "The fact to remember, written in English" },
           title: { type: "string", description: "Optional title for the fact" },
+          kind: { type: "string", description: "Semantic kind: 'fact' (context) or 'directive' (active personalization/working instruction)", default: "fact" },
           scope: {
             type: "string",
             description: "\x27project\x27 (default) or \x27global\x27",
@@ -356,11 +423,12 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
       "update_fact": {
         description:
           "Update the text of an existing fact by number (from recall), id, or text match, " +
-          "preserving its original date and metadata. Linked Knowledge Base documents are re-pointed to the new text.",
+          "preserving its original date and metadata. kind can optionally change directive/fact semantics. Linked Knowledge Base documents are re-pointed to the new text.",
         args: {
           id: { type: "string", description: "Number (from recall), metadata id, or text of the fact to update" },
           newText: { type: "string", description: "New fact text" },
           title: { type: "string", description: "Optional new title for the fact" },
+          kind: { type: "string", description: "Optional new semantic kind: 'fact' or 'directive'" },
           scope: { type: "string", description: "\x27project\x27 (default) or \x27global\x27", default: "project" },
           directory: { type: "string", description: "Optional workspace/project directory path" },
           project: { type: "string", description: "Alias for directory" },

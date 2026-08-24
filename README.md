@@ -1,10 +1,10 @@
 <div align="center">
 
-<img src="./assets/hero.jpg" alt="@lotargo/memory_plugin" width="800" style="max-width: 100%; border-radius: 12px; margin-bottom: 16px;">
+<img src="https://raw.githubusercontent.com/Lotargo/memory_pugin/main/assets/hero.jpg" alt="@lotargo/memory_plugin" width="800" style="max-width: 100%; border-radius: 12px; margin-bottom: 16px;">
 
 <br>
 
-<img src="./assets/title.svg" alt="@lotargo/memory_plugin" width="520" style="max-width: 100%; margin-bottom: 12px;">
+<img src="https://raw.githubusercontent.com/Lotargo/memory_pugin/main/assets/title.svg" alt="@lotargo/memory_plugin" width="520" style="max-width: 100%; margin-bottom: 12px;">
 
 <br>
 
@@ -13,438 +13,534 @@
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![node version](https://img.shields.io/badge/node-%3E%3D22.5.0-brightgreen)](https://nodejs.org)
 [![mcp](https://img.shields.io/badge/MCP-Supported-8A2BE2)](https://modelcontextprotocol.io)
-[![storage](https://img.shields.io/badge/Storage-Local%20%2B%20Cloud%20Sync-success)](#storage--privacy)
+[![storage](https://img.shields.io/badge/Storage-Local%20%2B%20Cloud%20Sync-success)](#storage-privacy-and-security)
 
 <br>
 
-**Zero-Docker Local Hybrid RAG Engine & Long-Term Memory for AI Coding Agents**
+**Local-first long-term memory, cold episodic notes, and hybrid RAG for AI coding agents**
 
-Automatically remembers durable user facts, ingests complex document repositories, and performs high-precision hybrid retrieval across sessions, platforms, and devices.
+One memory system for OpenCode, Codex, Claude Code, Antigravity / Gemini CLI, Google Jules, and other MCP clients.
 
 </div>
 
 ---
 
-## Overview
+## Why This Project Exists
 
-Standard AI coding assistants lose context as soon as a chat session closes or a conversation is reset. You end up repeatedly re-explaining your preferences, architectural decisions, coding style, or project conventions.
+AI coding assistants forget user preferences, architectural decisions, investigations, and project context when a session ends. They also tend to mix very different kinds of information into one oversized prompt.
 
-`@lotargo/memory_plugin` gives your AI tools durable, **persistent**, local-first long-term memory and document retrieval capabilities that persist across restarts and work seamlessly across all supported coding environments. Any LLM-based coding agent (OpenCode, Claude Code, Codex, Antigravity / Gemini CLI) can query its own memory and hybrid knowledge base via the **Model Context Protocol (MCP)**.
+`@lotargo/memory_plugin` separates persistent knowledge into the right storage class:
 
-> **Project Scope & Runtime Notes**:
-> `@lotargo/memory_plugin` is designed primarily as a practical plugin to expand capabilities and streamline daily interaction with AI coding tools. Benchmark scores in this repository represent internal synthetic evaluation runs and are not intended as generalized RAG benchmarks.
->
-> **Hardware Acceleration**: GPU execution mode is an experimental feature and may vary in stability across different operating systems or models. For optimal stability and consistent runtime performance, using standard CPU mode with `multilingual-e5-small` or `multilingual-e5-base` is recommended.
+| What you want to preserve | Tool | Storage behavior |
+| :--- | :--- | :--- |
+| Concise facts, preferences, constraints, conventions, and persona settings | `remember` | **Hot Notebook memory**; available during session initialization |
+| Detailed decisions, research, investigations, experiments, and handoffs | `remember_note` | **Cold RAG Memory Note**; searchable but not injected into every session |
+| Files, URLs, documentation, reports, specifications, and code | `ingest_document` | **Curated external knowledge** in the RAG index |
 
-### Practical Use Cases
+The same engine adds Git-based project isolation, semantic search, full raw-source expansion, explicit fact-to-document links, optional Turso synchronization, and native OpenCode auto-injection.
 
-- **Architectural Decisions**: _"In this project, we use Fastify instead of Express and strict schema validation via Zod."_
-- **Coding Conventions**: _"Place all helper utilities inside `src/utils/` and cover new functions with Vitest tests."_
-- **Environment Constraints**: _"Our target deployment environment is Node.js 20 on AWS Lambda."_
-- **User Profile & Tone**: _"My name is Alex. I prefer concise, direct answers without conversational filler."_
+### Highlights
+
+- Human-readable Markdown Notebook facts with stable IDs, TTL, protection, tags, superseding, and explicit `fact` / `directive` semantics.
+- Agent-authored long-form RAG Memory Notes for cold or episodic context.
+- Hybrid SQLite FTS5 BM25 + local ONNX vector retrieval with RSF/RRF fusion.
+- Compact semantic TOC discovery through `resultMode: "index"`, followed by deliberate full-source expansion.
+- PDF, DOCX, XLSX/XLS/CSV, Markdown, text, HTML/URL, and source-code ingestion.
+- Three-tier document hierarchy, retrieval-policy expansion for tables/code, and GraphRAG Lite symbol extraction.
+- Git-identity project scopes that follow a repository across directories, machines, and operating systems.
+- Active persona overlays shared across OpenCode, Codex, Claude Code, and Antigravity.
+- Local-only, cloud-only, and bidirectional hybrid-sync modes, including portable raw RAG blobs and deletion tombstones.
+- No Docker, external vector database, hosted embedding API, or telemetry.
+
+> This is a practical agent-memory system, not a claim of generalized benchmark superiority. Repository benchmark results describe the included evaluation corpus and configuration.
 
 ---
 
 ## Quick Start
 
-### Minimum System Requirements
+### Requirements
 
-- **Node.js**: `22.5.0` or higher (required by the built-in `node:sqlite` module)
-- **Package Manager**: `npm` / `npx` (included with Node.js)
-- **Supported Environment**: OpenCode, Antigravity / Gemini CLI, Claude Code, Codex, or Google Jules
+- Node.js `22.5.0` or newer; the project uses the built-in `node:sqlite` module.
+- npm/npx.
+- OpenCode, Codex, Claude Code, Antigravity / Gemini CLI, Google Jules, or another MCP-capable client.
 
-### Installation & Auto-Setup
+CPU execution with `Xenova/multilingual-e5-small` is the recommended stable default. WebGPU execution is experimental.
 
-Run the setup command to configure all detected AI environments automatically:
+### Install and Configure
+
+Configure every supported client location:
 
 ```bash
-# Recommended: Global installation & auto-setup across all environments
-npm install -g @lotargo/memory_plugin && memory_plugin setup
+npm install -g @lotargo/memory_plugin
+memory_plugin setup
+```
 
-# Or via npx
+Or run setup without a permanent global installation:
+
+```bash
 npx @lotargo/memory_plugin setup
 ```
 
-To target a specific environment:
+Target one client when needed:
 
 ```bash
-# Antigravity / Gemini CLI
-memory_plugin setup --antigravity
-
-# OpenCode
 memory_plugin setup --opencode
-
-# Claude Code
-memory_plugin setup --claude
-
-# Codex
 memory_plugin setup --codex
+memory_plugin setup --claude
+memory_plugin setup --antigravity
+memory_plugin setup --gemini        # Antigravity alias
 ```
 
-Codex is configured with a direct executable chain (`node` → `mcp-server/boot.js`),
-not `npx`. This avoids Windows stdio handshake failures caused by `.cmd` launchers.
-Running setup again safely migrates legacy `npx` entries and preserves unrelated
-sections in `~/.codex/config.toml`.
+Use `--local` with Antigravity setup to create the workspace-local `.agents/mcp_config.json` even when `.agents/` does not yet exist.
 
-`memory_plugin setup --codex` updates only the Codex MCP registration, Codex prompt,
-and the Codex-compatible skill locations (`~/.codex/skills` and the shared
-`~/.agents/skills`). It does not modify Claude Code, OpenCode, or Antigravity files.
+Setup also installs the bundled `using-memory` skill and managed memory instructions for the selected clients. Existing unrelated configuration is preserved.
 
-To verify registration, the Node runtime, MCP initialization, tool discovery, and
-real `memory_info` / `recall(scope="all")` calls:
+### Verify Codex
+
+Codex uses a direct executable chain (`node` -> `mcp-server/boot.js`) instead of an `npx`/`.cmd` launcher, avoiding Windows stdio handshake failures. Setup safely migrates legacy registrations in `~/.codex/config.toml`.
 
 ```bash
 memory_plugin doctor --codex
 ```
 
-The doctor checks the server process itself. If it passes but a fresh Codex Desktop
-task still does not expose the tools, the remaining fault is in Desktop tool
-exposure rather than the memory MCP launcher.
+The doctor validates the configured Node runtime, MCP initialization, tool discovery, and real `memory_info` and `recall(scope: "all")` calls.
 
-`setup` also accepts `--gemini` (alias for Antigravity) and `--local` (registers the MCP server in the project-local `.agents/` directory). Without a specific flag, all detected environments are configured.
-
-### Headless & Cloud Setup (CI / Docker / Cloud Workspaces)
-
-For headless environments (e.g., Google Jules, VPS, CI/CD pipelines), configure auth and sync mode in a single non-interactive command:
+### Headless / CI Setup
 
 ```bash
-# Authenticate via Turso API token and set hybrid sync mode
+# Authenticate with a Turso account token and enable hybrid sync
 memory_plugin setup --api-key <TURSO_API_TOKEN> --mode hybrid-sync
 
-# Or set sync mode if already authorized
+# Or change mode when credentials already exist
 memory_plugin setup --mode only-cloud
 ```
 
----
+Prefer `TURSO_API_TOKEN`, `TURSO_DB_URL`, and `TURSO_DB_TOKEN` environment variables over command-line secrets because shell arguments may appear in process lists and history.
 
-## Multi-Layer Architecture
-
-1. **Layer 1: Notebook Store (Durable Facts)**
-   - **Tools**: `remember`, `recall`, `get_fact`, `update_fact`, `forget`, `memory_info`
-   - **Scope**: User preferences, identity, project conventions, system rules.
-   - **Storage**: Human-readable Markdown format (`global` and per-project stores).
-   - **Fact Schema**: Every fact is formatted as `**Title** — body` with inline metadata badges (`[id]`, `[ttl]`, `[keep]`, `[tags]`, `[supersedes]`, `[inject]`).
-   - **Project Identity**: Project stores are bound to a **Git-based project identity** — the normalized remote URL (`git:github.com/owner/repo`) or `git:local:<repo basename>` — never to a directory path. Memories follow the repository across machines, OSes, and subdirectories. Legacy path/basename stores can be linked and merged via `link_project_memory`.
-
-2. **Layer 2: RAG Knowledge Base (Technical Documents & Codebases)**
-   - **Tools**: `ingest_document`, `query_knowledge_base`, `batch_query_knowledge_base`, `manage_knowledge_base`, `reindex_knowledge_base`
-   - **Capabilities**: Ingests raw text files, Markdown, HTML, Web URLs, office documents (PDF, DOCX, XLSX, CSV), and codebases.
-   - **Curation Model**: Stores only project-relevant sources likely to be reused—for example important web findings and current library/framework documentation that may be newer than model training. Ingest the useful document or excerpt, then link it to the project memory it supports; do not archive everything the agent encounters.
-   - **Scope Isolation**: New documents default to the current linked Git project. `scope: "all"` searches global sources plus the current project's sources; outside a Git repository it searches global sources only. Use `scope: "global"` only for genuinely cross-project material.
-   - **Stable Shared Sources**: Ingesting the same path or URL in another scope reuses one document and adds a scope association. Re-ingesting updated content preserves the document ID and its fact links; removing one scope does not delete a document still used by another scope.
-   - **Engine Components**: 3-tier hierarchy chunking (Big / Medium / Small), SQLite FTS5 BM25 search, ONNX dense vector embeddings (`multilingual-e5-small`), Reciprocal Rank Fusion (RRF / RSF), cross-encoder reranking (optional), and GraphRAG Lite code symbol extraction.
-
-3. **Layer 3: Agent-Driven Knowledge Graph**
-   - **Tools**: `link_knowledge` (plus `docId`, `startLine`, `endLine` in `remember`)
-   - **Capabilities**: Connects Layer 1 notebook facts directly to Layer 2 documents, sections, or exact line ranges with semantic edge relations (`RULES_FOR`, `IMPLEMENTS`, `EXPLAINS`, `REFERENCES`).
-   - **Surfacing**: Linked facts automatically highlight target documents and line ranges in `recall` output (`🔗 [Linked Docs: ...]`).
-
----
-
-## Cloud Synchronization & Database Modes (Turso / LibSQL)
-
-The plugin provides local-first SQLite persistence with optional cloud database synchronization powered by Turso (LibSQL):
-
-### 3 Storage Sync Modes
-
-| Mode | Command / Flag | Description |
-| :--- | :------------- | :---------- |
-| **`only-local`** (default) | `--mode only-local` | 100% local SQLite database. No external network traffic for data storage. |
-| **`only-cloud`** | `--mode only-cloud` | Direct LibSQL connection to a remote Turso database instance. |
-| **`hybrid-sync`** | `--mode hybrid-sync` | Local SQLite performance with background asynchronous synchronization to Turso Cloud, featuring automatic reverse-sync and conflict resolution. |
-
-### Cloud Failover & Circuit Breaker
-
-When operating in cloud modes (`only-cloud` or `hybrid-sync`), the database engine incorporates a built-in **Circuit Breaker**:
-- If the primary cloud database endpoint is unreachable or encounters network failure, queries fail over to the secondary cloud endpoint configured in `failoverUrl`. Failover is disabled when `failoverUrl` is empty (the default).
-- In `hybrid-sync` the local SQLite copy keeps serving reads regardless; in `only-cloud` no local database is opened, so an outage with no `failoverUrl` surfaces as an error.
-- Prevents agent blocking or crash loops during internet outages or cloud service degradation.
-
-### Secure Credential Storage
-
-Cloud authentication tokens are never written to `config.json`. They are stored in `auth_secrets.enc`, encrypted with **AES-256-GCM** using a key derived via **PBKDF2-HMAC-SHA256 (600,000 iterations)** from a stable machine fingerprint (OS machine ID + platform + architecture). The file is written with owner-only permissions (`0600`).
-
-> **Note:** this is not an OS keychain (DPAPI / Keychain / Secret Service). The fingerprint components are readable by other processes running as the same user, so the encryption protects against file exfiltration and casual inspection, not against a compromised local account. Secrets are bound to the machine — copying `auth_secrets.enc` to another computer will not decrypt.
->
-> **Exception:** the headless fallback via `MEMORY_DIR/.env` (`TURSO_DB_URL`, `TURSO_DB_TOKEN`, `TURSO_API_TOKEN`) stores credentials in **plain text** by design, for Docker/CI deployments.
-
----
-
-## Available Tools
-
-The package currently exposes **17 unique tool names** across its two integration surfaces:
-
-| Integration surface | Tool count | Composition |
-| :------------------ | ---------: | :---------- |
-| **MCP server** (Codex, Claude Code, Antigravity / Gemini CLI and other MCP clients) | **15** | 6 Notebook + 4 identity/graph + 5 RAG tools |
-| **Native OpenCode plugin** | **17** | 15 shared memory/identity/RAG tools + 2 OpenCode-only helpers |
-
-The two surfaces are intentionally counted separately. The OpenCode plugin exposes
-all 15 shared tools, including `batch_query_knowledge_base`, and adds the native
-`list-mcp-tools` and `mcp-reminder` helpers.
-
-### MCP Server Tools (15)
-
-#### 1. Memory Notebook Tools (Layer 1)
-
-| Tool | Scope / Target | Key Parameters | Description |
-| :--- | :------------- | :------------- | :---------- |
-| `remember` | `project` / `global` | `fact`, `title`, `scope`, `docId`, `startLine`, `endLine`, `relationType`, `ttl`, `keep`, `tags`, `supersedes` | Save a durable fact or preference. Supports optional title, document linking, TTL, keep protection, tags, and version superseding. |
-| `recall` | `all`, `project`, `global`, `list_projects` | `scope`, `project`, `query`, `tags`, `since`, `until`, `mode`, `offset`, `limit`, `includeSuperseded` | Display saved facts with metadata badges and linked docs. Superseded facts are hidden by default; opt into history with `includeSuperseded: true`. Filtered results retain stable storage indices for safe `forget` operations. |
-| `get_fact` | `all`, `project`, `global` | `id`, `scope` | Retrieve full text, raw line, and metadata of a single fact by its metadata ID (e.g. `"8f3a2c"`). |
-| `update_fact` | `project` / `global` | `id`, `newText`, `title`, `scope` | Rewrite a fact (and optionally its `**Title**`) while preserving its original creation date, metadata, and knowledge links. |
-| `forget` | `project` / `global` | `id` / `range` / `query`, `scope`, `force` | Remove a fact by index number, ID, range (e.g. `"3-30"`), or query. Requires `force: true` for protected (`[KEEP]`) facts. |
-| `memory_info` | - | - | Show storage paths, fact counts, RAG statistics, git identity bindings, and package version. |
-
-#### 2. Project Identity Tools
-
-| Tool | Key Parameters | Description |
-| :--- | :------------- | :---------- |
-| `link_project_memory` | `directory`, `remote` | Link a directory path to a Git-based project identity key, register aliases, and migrate legacy path/basename stores with deduplication. |
-| `unlink_project_memory` | `directory`, `purge` | Remove a path alias binding for a directory. Optionally purge the project identity entry if `purge: true`. |
-| `relink_project_memory` | `directory`, `remote` | Switch a project's primary identity to a new remote URL and merge all stored facts into the target store with fact-text deduplication. |
-
-#### 3. RAG Knowledge Base & Graph Tools (Layers 2 & 3)
-
-| Tool | Key Parameters | Description |
-| :--- | :------------- | :---------- |
-| `ingest_document` | `content`, `type`, `title`, `path`, `scope`, `generateEmbeddings` | Ingest local files, URLs, or raw text into the 3-tier index. Defaults to the current linked Git project; use `scope: "global"` for intentionally shared knowledge. |
-| `query_knowledge_base` | `query`, `scope`, `limit`, `instruction`, `generateEmbeddings` | Perform hybrid search (RSF/RRF BM25 + dense vectors). `all` means global plus the current project, while `project` and `global` restrict retrieval explicitly. |
-| `batch_query_knowledge_base` | `queries` (array), `scope`, `limit`, `instruction`, `generateEmbeddings` | Execute multiple scoped queries in one call. All embeddings are computed in one ONNX pass, making this the preferred API for comparisons and multi-part research. |
-| `manage_knowledge_base` | `action`, `scope`, `docId`, `snapshotPath` | Inspect, list, read, or unlink documents within the selected scope, or export/import complete snapshots. Delete defaults to the current project (global outside Git); broader removal requires explicit `global` or `all`. |
-| `reindex_knowledge_base` | `model`, `dimension` | Re-embed all stored vectors with the active (or specified) embedding model and vector dimension. Use after switching the embedding model or vector dimension so previously indexed documents remain retrievable. Preserves documents, FTS index, graph edges, and fact links. |
-| `link_knowledge` | `action`, `factText`, `docId`, `scope`, `startLine`, `endLine`, `relationType` | Create, list, or retrieve semantic graph links connecting Notebook facts to Knowledge Base documents, sections, or line ranges. Actions: `link`, `list_links`, `get_doc_links`. |
-
-### Native OpenCode Plugin Tools (17)
-
-| Group | Count | Tools |
-| :---- | ----: | :---- |
-| **Memory Notebook** | 6 | `remember`, `recall`, `get_fact`, `forget`, `update_fact`, `memory_info` |
-| **Project Identity & Knowledge Graph** | 4 | `link_knowledge`, `link_project_memory`, `unlink_project_memory`, `relink_project_memory` |
-| **RAG Knowledge Base** | 5 | `ingest_document`, `query_knowledge_base`, `batch_query_knowledge_base`, `manage_knowledge_base`, `reindex_knowledge_base` |
-| **OpenCode-only helpers** | 2 | `list-mcp-tools`, `mcp-reminder` |
-
-The OpenCode-only helpers have the following purpose:
-
-| Tool | Key Parameters | Description |
-| :--- | :------------- | :---------- |
-| `list-mcp-tools` | - | Discover connected MCP servers and their intended use cases. |
-| `mcp-reminder` | `task` | Recommend the appropriate MCP tool or server for a developer task. |
-
----
-
-## CLI Command Reference
-
-The plugin provides both direct non-interactive CLI commands and an interactive terminal UI (TUI):
+### Local Repository Development
 
 ```bash
-# Executable commands (available globally or via npx)
-memory_plugin <command> [options]
-# or
-memory-cli <command> [options]
+npm install
+npm run dev:link
 ```
 
-Both binaries accept the same commands. `memory_plugin` with **no** command starts the MCP server on stdio; `memory-cli` with no command opens the interactive TUI. Use `--help` on either for the full usage text.
+`dev:link` performs an npm global link for the `memory_plugin`, `memory-agent`, and `memory-cli` binaries; rewrites only this plugin's OpenCode entry to an absolute `file://` URL for `opencode-plugin/main.js`; creates `opencode.json.memory-dev-backup` on first use; synchronizes managed prompts; and copies the current skill to all client skill locations.
 
-> **Secrets:** prefer the environment variables `TURSO_API_TOKEN`, `TURSO_DB_URL` and `TURSO_DB_TOKEN` over `--api-key` / `--db-token` flags — arguments passed on the command line are visible in the process list and shell history. Without a flag or env var, `login` prompts for the token on stdin with echo disabled.
+After code changes, restart OpenCode to reload the module. Codex, Claude Code, and Antigravity load prompt and skill files at session start, so open a new task/session after synchronization. Publishing to npm is not required for local testing.
 
-### Direct Non-Interactive Commands
+---
 
-| Command | Options / Flags | Description |
-| :------ | :-------------- | :---------- |
-| **`setup`** | `--antigravity`, `--opencode`, `--claude`, `--codex`, `--local`, `--api-key <TOKEN>`, `--mode <MODE>` | Configures MCP server registrations across detected environments and sets initial cloud auth/sync mode. |
-| **`link`** | `--dir <path>`, `--remote <url>` | Links a directory to a Git project identity or remote URL. |
-| **`unlink`** | `--dir <path>`, `--purge` | Unlinks a directory path alias. `--purge` removes the identity record. |
-| **`relink`** | `--remote <url>`, `--dir <path>` | Relinks project identity to a new remote URL and merges facts. |
-| **`identity`** | `--dir <path>` | Inspects Git project identity key, primary remote, name, and toplevel path for a directory. |
-| **`migrate_titles`** | `--key <key>` | Auto-generates `**Title**` prefixes for legacy facts without titles. |
-| **`enable-prompt`** | - | Injects memory agent instructions into client agent files (`AGENTS.md`, `CLAUDE.md`). |
-| **`disable-prompt`** | - | Removes memory agent instructions from client agent files. |
-| **`doctor`** | `--codex` | Validates Codex config, direct Node runtime, MCP initialize/tools/list, and live `memory_info` + `recall` calls. |
-| **`login`** | `--api-token`, `--from-env`, `--db-url <URL> --db-token`, `$TURSO_API_TOKEN`, `$TURSO_DB_TOKEN` | Authenticates with Turso Cloud via API token, direct DB token, or environment variables. Token values are read from the environment or a hidden stdin prompt. |
-| **`logout`** | `--api-key` | Signs out of Turso Cloud or removes stored API key while retaining DB session. |
-| **`auth-status`** | - | Displays authentication source, endpoint URL, username, organization, database, and sync mode. |
+## Memory Architecture
 
-### Interactive TUI (CLI Menu)
+### 1. Hot Notebook Memory
 
-Launch the interactive terminal UI to manage engine settings, tune retrieval algorithms, inspect databases, and run diagnostics:
+Notebook memory stores concise, high-signal context in Markdown:
+
+```text
+- [2026-08-22 10:00] **API Convention** — Use Fastify and Zod for new services <!-- id:a1b2c3, keep:1, tags:arch, kind:fact -->
+```
+
+Supported metadata includes:
+
+- `id`: stable short identifier used by `get_fact`, `update_fact`, and `forget`.
+- `kind`: `fact` for descriptive context or `directive` for active personalization/working instructions.
+- `ttl`: `90d`, `2w`, `24h`, `12m`, or a bare day count. Expired entries are retained and marked `[EXPIRED]`.
+- `keep`: protects an entry from ordinary deletion.
+- `tags`: recall filters and legacy classification metadata.
+- `supersedes` / `supersededBy`: preserves version history while excluding obsolete facts from active recall.
+
+`recall(scope: "all")` returns global facts plus only the current Git-linked project's facts. Full bodies are the default and should be used for session initialization; `mode: "headers"` is only for compact inventories.
+
+### 2. Cold RAG Memory Notes
+
+Use `remember_note` when the reusable value is in the detailed record itself:
+
+```text
+remember_note(
+  title: "Authentication Investigation",
+  content: "Detailed symptoms, experiments, rejected explanations, and final cause...",
+  kind: "research",
+  tags: "auth,incident",
+  scope: "project"
+)
+```
+
+Supported note kinds are `decision`, `research`, `context`, `handoff`, and `note`. Notes are represented as virtual RAG documents with stable `docId` and content-addressed `blobHash`. They are searchable with the same engine as external sources but are not injected into every session.
+
+Recommended discovery flow:
+
+```text
+query_knowledge_base(query: "authentication token decryption investigation", resultMode: "index")
+    -> inspect compact candidates and stable doc_id values
+manage_knowledge_base(action: "read_document", docId: "selected-id")
+    -> expand the complete raw note only when needed
+```
+
+Use `resultMode: "snippet"` when retrieved passages are immediately useful. Use `resultMode: "index"` when first identifying the correct source; index mode intentionally omits bodies and disables large policy expansion.
+
+### 3. Curated External Knowledge
+
+`ingest_document` accepts:
+
+- Raw text or Markdown (`type: "text"`).
+- Local files (`type: "file"`), including PDF, DOCX, XLSX, XLS, CSV, text, Markdown, and source code.
+- Web pages (`type: "url"`), which are fetched and normalized instead of indexing the URL string.
+
+RAG is a curated library, not an automatic archive. Ingest reliable sources likely to matter again, particularly current documentation or project specifications. Project scope is the default; use global scope only for intentionally reusable cross-project knowledge.
+
+### Hot + Cold Linking
+
+When a decision needs both quick orientation and detailed history:
+
+1. Save the concise conclusion with `remember`.
+2. Save the rationale or investigation with `remember_note`.
+3. Connect them with `link_knowledge`, using the note's returned `docId`.
+
+This keeps startup context small while preserving the complete reasoning trail without duplicating the note body into Notebook memory.
+
+---
+
+## Persona and Agent Personalization
+
+Notebook entries have explicit semantics:
+
+```text
+kind: "fact"       # descriptive context
+kind: "directive"  # active user-approved personality or working configuration
+```
+
+Use `kind: "directive"` for personality, behavior, tone, communication style, preferences, or working conventions the agent should actively apply. Explicit `kind` is authoritative; persuasive wording alone does not turn a fact into an instruction.
+
+### OpenCode
+
+The native plugin performs complete session initialization automatically:
+
+- Global and current-project descriptive entries are injected into `<MEMORY_FACTS>`.
+- Active global directives are separated into `<PERSONAL_AGENT_OVERLAY>`.
+- Directives are promoted through OpenCode's system-prompt transform.
+- Agents are instructed not to perform a redundant startup `recall`; manual or filtered recall remains available.
+
+### Codex, Claude Code, and Antigravity
+
+These clients receive plugin-owned instruction and persona blocks in:
+
+- `~/.codex/AGENTS.md`
+- `~/.claude/CLAUDE.md`
+- `~/.gemini/config/AGENTS.md`
+
+The global Notebook is the source of truth. Managed prompt blocks are generated views and update automatically after global directive changes, relevant cloud pulls, setup, or `dev:link`.
+
+Manual synchronization:
 
 ```bash
-memory_plugin cli
-# or
-memory-cli
+memory-cli sync-persona
+npm run persona:sync             # from the repository
 ```
 
-#### TUI Menu Navigation
+Legacy entries using `persona`, `behavior`, `speech`, `style`, `tone`, `preference(s)`, `instruction(s)`, `directive`, or `inject:1` metadata remain compatible. Permanently classify them as explicit directives with the idempotent migration:
 
-Use **Up / Down** arrows to navigate, **ENTER** to select, and **BACKSPACE** to go back.
+```bash
+memory-cli migrate-persona --dry-run
+memory-cli migrate-persona
+npm run persona:migrate          # from the repository
+```
 
-- **Engine & Hybrid Search Settings**: Switch fusion algorithms (`rsf`, `rrf`, `semantic_only`, `lexical_only`), adjust RSF $\alpha$ balance, select ONNX embedding models, set a fixed embedding vector dimension, toggle Cross-Encoder rerankers, configure GPU attention budget, and set WASM threads.
-- **Knowledge Base & Storage Management**: Browse Layer 1 facts, manage Layer 2 RAG docs, re-embed all vectors after switching model/dimension (`[REINDEX]`), export/import JSON snapshots, purge model cache, or perform a hard reset.
-- **Global Prompt & Integration**: Toggle memory instruction sync across client configurations (`~/.gemini/config/AGENTS.md`, `~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`).
-- **Diagnostics & System Actions**: Execute a hybrid search verification query, run the graph & notebook linking check, and reset config to factory defaults.
-
----
-
-## Agent Skill & System Prompt Integration
-
-### Built-in Agent Skill (`using-memory`)
-
-The plugin bundles a pre-configured Agent Skill located at [`skills/using-memory/SKILL.md`](./skills/using-memory/SKILL.md). When installed in supported environments (such as Antigravity / Gemini CLI or OpenCode), coding agents automatically read this skill to:
-1. **Initialize Sessions**: Invoke full-body `recall(scope: "all")` first, loading global memory plus only the current Git project's memory (or global-only outside Git).
-2. **Register Git Projects**: Inspect `memory_info` after recall and automatically call `link_project_memory` when the current Git identity reports `Registry: unlinked`.
-3. **Proactively Save Context**: Automatically call `remember` whenever you share durable facts, tech stack choices, or coding guidelines.
-4. **Curate and Use RAG Deliberately**: Preserve important web findings and current technical documentation only when they are likely to matter again. Store project-specific sources in the current project scope, reserve global scope for reusable cross-project material, query with concept-dense searches, and avoid low-value bulk ingestion.
-5. **Architect Knowledge Graphs**: Use `link_knowledge` or `remember(docId, startLine, endLine)` to connect concise project memories to their supporting technical sources.
-
-### Global System Prompt Synchronization
-
-Run `memory_plugin enable-prompt` to automatically inject memory agent guidance into your global LLM configuration files:
-- `~/.gemini/config/AGENTS.md` (Antigravity / Gemini CLI)
-- `~/.codex/AGENTS.md` (Codex)
-- `~/.claude/CLAUDE.md` (Claude Code)
-
-This ensures your coding assistant is always aware of its memory capabilities even in fresh workspace sessions.
+Higher-priority platform and safety instructions remain authoritative.
 
 ---
 
-## GraphRAG Lite
+## Project Identity and Scope Isolation
 
-The RAG engine includes a lightweight graph layer built on SQLite. It combines code symbol extraction, hierarchy edges, and explicit memory-to-document links without requiring external graph databases or LLM calls at ingest time.
+Project memory is Git-first:
 
-### Multilingual Code Symbol Parsing
+- Repositories with a remote use `git:<normalized-host-and-path>`, for example `git:github.com/owner/repo`.
+- Repositories without a remote use `git:local:<repository-name>`.
+- Every subdirectory of the same repository resolves to the same identity.
+- Outside Git, project memory is not created; global memory remains available.
 
-During `ingest_document`, code symbols are extracted from code blocks using fast regex heuristics across the following language families:
+The SQLite identity registry stores remote, path, and basename aliases. It supports moving a repository between directories or operating systems without changing its logical memory identity.
 
-- **JavaScript / TypeScript**: `function`, `class`, `interface`, `type`, `enum`, `const`, `let`, `var`
-- **Python**: `def`, `class`
-- **Go**: `struct`, `interface`, `func` (including methods with receivers)
-- **Rust**: `struct`, `enum`, `trait`, `fn` (including async/pub)
-- **C++**: `class`, `struct`, `namespace`, functions and methods
-- **Java & Kotlin**: `class`, `interface`, `record`, `enum`, `fun`, synchronized methods
-- **C#**: `class`, `interface`, `struct`, `record`, methods (properties without a parameter list are not captured)
-- **PHP**: `class`, `interface`, `trait`, functions
-- **Ruby**: `module`, `class`, methods
-
-### Graph Edges
-
-| Relation Type | Direction / Example |
+| Tool | Purpose |
 | :--- | :--- |
-| `CONTAINS` | Document -> Section -> Micro-Chunk (3-tier hierarchy) |
-| `DEFINES_SYMBOL` | Section -> `symbol:<name>` (extracted code symbol) |
-| `LINKS_TO` (default) | Memory fact -> Document or line range (via `link_knowledge`) |
+| `link_project_memory` | Register the current Git identity and merge compatible legacy path/basename facts and RAG scope data. |
+| `unlink_project_memory` | Remove a path alias; optionally purge the identity record. |
+| `relink_project_memory` | Move/merge facts and RAG scope data to a new normalized remote identity. |
+
+For both Notebook and RAG retrieval, `all` means **global + current project**, never all known projects. Unrelated project memories and documents are isolated.
 
 ---
 
-## Supported Platforms
+## Retrieval and Knowledge Graph
 
-| Platform | Status | Configuration Mechanism |
+### Hybrid Retrieval
+
+The local retrieval pipeline combines:
+
+- SQLite FTS5 BM25 lexical search.
+- Local ONNX dense embeddings (`Xenova/multilingual-e5-small` by default).
+- RSF (default), RRF, semantic-only, or lexical-only ranking.
+- Optional cross-encoder reranking.
+- Batched query embeddings through `batch_query_knowledge_base`.
+- Optional fixed vector dimensions and an experimental WebGPU execution mode.
+
+Queries should be short, concept-dense phrases. For multi-part research or comparisons, use `batch_query_knowledge_base`; all query embeddings are computed in one ONNX pass.
+
+### Three-Tier Chunking and Policy Expansion
+
+Each document is partitioned into three retrieval levels: section-level big chunks, medium blocks, and micro chunks. Tables receive compact summaries and code blocks receive signature chunks. With `policyExpansion: true` (default), matching summaries/signatures expand to their full source blocks for content-rich retrieval. Set the configuration to `false` when pure micro-chunk precision is preferred.
+
+Re-ingesting an updated path/URL preserves its stable document ID and knowledge links while rebuilding chunks, vectors, policies, and structural edges. Ingesting the same source in another scope adds a scope association without duplicating the document.
+
+### GraphRAG Lite
+
+The SQLite graph layer requires no external graph database or ingestion-time LLM:
+
+| Relation | Meaning |
+| :--- | :--- |
+| `CONTAINS` | Document -> Section -> Micro Chunk graph hierarchy |
+| `DEFINES_SYMBOL` | A document section defines an extracted code symbol |
+| `LINKS_TO` and custom relations | A Notebook fact points to a document, note, section, or line range |
+
+Code-symbol extraction covers JavaScript/TypeScript, Python, Go, Rust, C++, Java/Kotlin, C#, PHP, and Ruby patterns.
+
+---
+
+## Cloud Synchronization
+
+Cloud support uses Turso / LibSQL and is optional.
+
+| Mode | Behavior |
+| :--- | :--- |
+| `only-local` (default) | Markdown notebooks, SQLite index, CAS blobs, and models remain local. |
+| `only-cloud` | Notebook and database operations use Turso directly; raw RAG blobs are materialized into a verified local cache when read. |
+| `hybrid-sync` | Local-first reads/writes with background push, reverse synchronization, and conflict resolution. |
+
+Hybrid synchronization covers Notebook stores and complete RAG state: documents, scopes, sections, chunks, vectors, retrieval policies, graph edges, fact links, compressed raw CAS blobs, and deletion tombstones. Raw notes/documents can therefore be expanded on another device rather than returning metadata without source content.
+
+Notebook conflict strategies:
+
+- `merge` (default): union fact lines with local order first and deduplication.
+- `cloud-wins`.
+- `local-wins`.
+
+Cloud operations retry with timeouts and can switch to `failoverUrl` after repeated primary failures. In `hybrid-sync`, local SQLite continues serving reads during an outage. In `only-cloud`, an unavailable primary with no failover surfaces as an error.
+
+### Authentication
+
+```bash
+memory-cli login
+memory-cli login --api-token          # hidden prompt if value omitted
+memory-cli login --from-env
+memory-cli login --db-url <URL>       # token from prompt or TURSO_DB_TOKEN
+memory-cli auth-status
+memory-cli logout
+```
+
+Stored tokens live in `auth_secrets.enc`, not `config.json`. They are encrypted with AES-256-GCM using PBKDF2-HMAC-SHA256 (600,000 iterations) over a stable machine fingerprint and written with owner-only permissions where supported.
+
+This is not an OS keychain. It protects against casual inspection/file-only exfiltration, not a compromised local user account. Encrypted secrets are machine-bound. The headless `.env` fallback stores credentials in plaintext by design.
+
+---
+
+## Tool Reference
+
+The MCP server exposes **16 tools**. The native OpenCode plugin exposes the same 16 plus two OpenCode-specific helpers, for **18 total**.
+
+### Notebook and Cold Memory
+
+| Tool | Important parameters | Purpose |
 | :--- | :--- | :--- |
-| **Antigravity / Gemini CLI** | Supported | MCP Server (`~/.gemini/config/mcp_config.json` & `.agents/mcp_config.json`) |
-| **OpenCode** | Native | Native plugin with 16 tools (`~/.config/opencode/opencode.json`) |
-| **Claude Code** | Supported | MCP Server (`~/.claude.json`) |
-| **Codex** | Supported | MCP Server (`~/.codex/config.toml`) |
-| **Google Jules** | Supported | MCP Server via global install + setup (`memory_plugin setup`) |
+| `remember` | `fact`, `title`, `kind`, `scope`, `directory`, `ttl`, `keep`, `tags`, `supersedes`, optional link fields | Save a concise hot fact or directive. |
+| `recall` | `scope`, `directory`, `query`, `tags`, `since`, `until`, `mode`, `offset`, `limit`, `includeSuperseded` | Load/filter Notebook facts and linked-document references. |
+| `get_fact` | `id`, `scope`, `directory` | Read one fact and all metadata by stable ID. |
+| `update_fact` | `id`, `newText`, `title`, `kind`, `scope`, `directory` | Update/reclassify a fact while preserving date, metadata, and links. |
+| `forget` | `query`, `scope`, `directory`, `force` | Delete by index, range, ID, or text; `force` overrides `[KEEP]`. |
+| `memory_info` | `directory` | Show version, storage paths/counts, Git identity/registry state, and RAG statistics. |
+| `remember_note` | `title`, `content`, `kind`, `tags`, `scope`, `directory`, `generateEmbeddings` | Save a detailed cold/episodic note into RAG. |
+
+### Identity and Knowledge Graph
+
+| Tool | Important parameters | Purpose |
+| :--- | :--- | :--- |
+| `link_project_memory` | `directory`, `remote` | Register Git identity and migrate compatible legacy data. |
+| `unlink_project_memory` | `directory`, `purge` | Remove an alias or purge its registry identity. |
+| `relink_project_memory` | `directory`, `remote` | Move/merge memory into a new Git remote identity. |
+| `link_knowledge` | `action`, `factText`, `docId`, `scope`, `startLine`, `endLine`, `relationType` | Link facts to documents/notes or inspect graph links. |
+
+### RAG Knowledge Base
+
+| Tool | Important parameters | Purpose |
+| :--- | :--- | :--- |
+| `ingest_document` | `content`, `type`, `title`, `path`, `scope`, `directory`, `generateEmbeddings` | Ingest raw text, a local file, or a URL. |
+| `query_knowledge_base` | `query`, `scope`, `limit`, `instruction`, `resultMode`, `generateEmbeddings`, `directory` | Run one hybrid query in snippet or compact index mode. |
+| `batch_query_knowledge_base` | `queries`, `scope`, `limit`, `instruction`, `resultMode`, `generateEmbeddings`, `directory` | Run several queries with one embedding batch. |
+| `manage_knowledge_base` | `action`, `scope`, `docId`, `snapshotPath`, `directory` | Stats, list, full raw read, scoped delete/unlink, snapshot export/import. |
+| `reindex_knowledge_base` | `model`, `dimension` | Rebuild vectors after changing model/dimension while preserving source and graph data. |
+
+### OpenCode-Only Helpers
+
+| Tool | Purpose |
+| :--- | :--- |
+| `list-mcp-tools` | Show connected MCP servers and their intended roles. |
+| `mcp-reminder` | Suggest a connected MCP/tool family for a described task. |
+
+---
+
+## CLI Reference
+
+`memory_plugin` and `memory-agent` are MCP stdio entry points. `memory_plugin setup` performs client installation, while `memory_plugin cli` or `memory-cli` opens the interactive control panel. Direct administration commands should use `memory-cli`.
+
+| Command | Purpose |
+| :--- | :--- |
+| `memory_plugin setup [client flags] [--mode <mode>]` | Configure clients, skills, prompts, and optional cloud mode/auth. |
+| `memory_plugin doctor --codex` | Validate Codex configuration and live MCP behavior. |
+| `memory-cli` | Open the interactive TUI. |
+| `memory-cli login ...` / `logout` / `auth-status` | Manage Turso authentication. |
+| `memory-cli link --dir <path> [--remote <url>]` | Link a Git project identity. |
+| `memory-cli unlink --dir <path> [--purge]` | Remove an alias or registry identity. |
+| `memory-cli relink --dir <path> --remote <url>` | Move/merge into a new remote identity. |
+| `memory-cli identity --dir <path>` | Inspect resolved Git identity. |
+| `memory-cli migrate_titles [--key <key>]` | Add titles to legacy Notebook entries. |
+| `memory-cli enable-prompt` / `disable-prompt` | Add/remove only plugin-owned memory instruction blocks. |
+| `memory-cli sync-persona` | Regenerate managed persona blocks from global directives. |
+| `memory-cli migrate-persona [--dry-run]` | Convert legacy persona metadata to explicit `kind:directive`. |
+| `memory-cli dev-link` | Link the installed binaries/OpenCode plugin to the working repository. |
+
+The TUI provides retrieval configuration, model management, Notebook/RAG browsing, reindexing, snapshots, cloud settings, prompt integration, diagnostics, and reset actions. Use Up/Down, Enter, and Backspace to navigate.
+
+---
+
+## Client Integration
+
+| Client | Integration | Session initialization | Tool count |
+| :--- | :--- | :--- | ---: |
+| OpenCode | Native plugin in `~/.config/opencode/opencode.json` | Full memory auto-injection + system persona transform | 18 |
+| Codex | MCP server in `~/.codex/config.toml` | Managed prompt requires full `recall(scope: "all")` | 16 |
+| Claude Code | MCP server in `~/.claude.json` | Managed prompt requires full `recall(scope: "all")` | 16 |
+| Antigravity / Gemini CLI | MCP server in `~/.gemini/config/mcp_config.json` and optional `.agents/mcp_config.json` | Managed prompt requires full `recall(scope: "all")` | 16 |
+| Google Jules / generic MCP | MCP stdio server | Client instructions should initialize with full recall | 16 |
+
+The bundled [`using-memory` skill](./skills/using-memory/SKILL.md) teaches agents to:
+
+1. Avoid duplicate recall when OpenCode already auto-injected memory.
+2. Perform full unfiltered recall first in clients without auto-injection.
+3. Apply `kind:directive` entries as active configuration.
+4. Register unlinked Git identities with `link_project_memory`.
+5. Route concise facts, long internal notes, and external sources to the correct store.
+6. Use semantic index discovery before expanding a full note/document.
+7. Save high-signal knowledge proactively and avoid transient noise.
 
 ---
 
 ## Configuration
 
-The engine is configured through `<memory-dir>/config.json` (created with defaults on first run):
+Configuration is stored in `<memory-dir>/config.json`.
 
-| Key | Default | Description |
+| Key | Default | Meaning |
 | :--- | :--- | :--- |
-| `mode` | `only-local` | Storage sync mode: `only-local`, `only-cloud`, or `hybrid-sync` |
+| `mode` | `only-local` | `only-local`, `only-cloud`, or `hybrid-sync` |
+| `conflictStrategy` | `merge` | Notebook conflict policy: `merge`, `cloud-wins`, `local-wins` |
 | `fusionAlgorithm` | `rsf` | `rsf`, `rrf`, `semantic_only`, or `lexical_only` |
-| `alpha` | `0.5` | Vector vs BM25 weight in RSF `[0.0 - 1.0]` |
-| `embeddingModel` | `Xenova/multilingual-e5-small` | ONNX dense embedding model (E5 / BGE families supported) |
-| `vectorDimension` | `0` | Fixed embedding vector dimension; `0` = auto-detect from the model |
-| `rerankerModel` | `none` | Cross-encoder reranker model (e.g. `Xenova/bge-reranker-base`) |
-| `rerankerEnabled` | `false` | Enable cross-encoder re-ranking |
-| `batchSize` | `12` | Ingestion vector batch size `[1 - 256]` |
-| `gpuAttentionBudget` | `2000000` | GPU micro-batch attention budget `[1M - 16M]` |
-| `onnxThreads` | `0` | ONNX WASM threads: `0` auto-detect, or `1-16` |
-| `executionDevice` | `cpu` | `cpu` or `webgpu` (experimental) |
-| `vectorScanLimit` | `50000` | Max micro-chunks scanned per vector query (`0` = unlimited) |
-| `policyExpansion` | `true` | Expand table_summary/code_signature policy chunks for better recall (slight MRR trade-off). Disable for pure micro_chunk precision. |
-| `conflictStrategy` | `merge` | Hybrid-sync conflict resolution: `merge`, `cloud-wins`, or `local-wins` |
-| `tursoUrl` | `""` | Primary Turso endpoint URL (set by `login`) |
-| `failoverUrl` | `""` | Secondary cloud endpoint for the circuit breaker; empty = failover disabled |
-| `authorized` | `false` | Set to `true` once a cloud login completed |
-| `username` | `""` | Account username from the Turso profile |
-| `ingestAllowedPaths` | `[]` | Extra directories `ingest_document(type: "file")` may read from |
-| `ingestAllowAnyPath` | `false` | Escape hatch: allow reading **any** path from disk (unsafe) |
+| `alpha` | `0.5` | Dense-vector weight for RSF |
+| `embeddingModel` | `Xenova/multilingual-e5-small` | Local Hugging Face/ONNX embedding model |
+| `vectorDimension` | `0` | Fixed vector size; `0` auto-detects model output |
+| `vectorScanLimit` | `50000` | Maximum vector candidates; `0` is unlimited |
+| `rerankerModel` | `none` | Optional cross-encoder model |
+| `rerankerEnabled` | `false` | Enable cross-encoder reranking |
+| `batchSize` | `12` | Ingestion embedding batch size |
+| `policyExpansion` | `true` | Expand matched table summaries/code signatures |
+| `executionDevice` | `cpu` | `cpu` or experimental `webgpu` |
+| `gpuAttentionBudget` | `2000000` | Experimental GPU micro-batch budget |
+| `onnxThreads` | `0` | WASM thread count; `0` auto-detects |
+| `tursoUrl` | `""` | Primary LibSQL endpoint populated by login |
+| `failoverUrl` | `""` | Optional secondary cloud endpoint |
+| `authorized` | `false` | Whether cloud authorization completed |
+| `username` | `""` | Authenticated Turso username |
+| `ingestAllowedPaths` | `[]` | Additional directories allowed for local-file ingestion |
+| `ingestAllowAnyPath` | `false` | Unsafe escape hatch allowing arbitrary file reads |
 
-> `ingest_document(type: "file")` reads only from the current working directory and the plugin data directory by default. This prevents a prompt-injected agent from pulling `~/.ssh/id_rsa` or `.env` into the knowledge base (and, in `hybrid-sync`, into the cloud). Widen it deliberately via `ingestAllowedPaths`.
+`ingest_document(type: "file")` is restricted to the current working directory, the plugin data directory, and explicitly allowed paths. This prevents a prompt-injected agent from silently indexing unrelated secrets such as SSH keys or `.env` files.
 
 ---
 
-## Testing & Benchmarking
+## Storage, Privacy, and Security
 
-To run the automated test suite and benchmarks locally, from the repository root:
+The data-directory resolution order is:
 
-```bash
-# Unit + integration + cloud suites (18 files) — fast and fully offline
-npm test
+1. `MEMORY_DIR`.
+2. `$OPENCODE_CONFIG_DIR/memory`.
+3. Existing legacy `~/.config/opencode/memory`.
+4. `%LOCALAPPDATA%/opencode/memory` on Windows.
+5. `$XDG_CONFIG_HOME/opencode/memory` or `~/.config/opencode/memory` elsewhere.
 
-# End-to-end smoke test with REAL ONNX embeddings — run before a release
-npm run smoke
+Important paths inside it:
 
-# Search quality & ingestion benchmarks
-npm run benchmark
+```text
+global.md                         global Notebook facts/directives
+git_<identity>.md                 per-project Notebook facts
+config.json                       non-secret configuration
+auth_secrets.enc                  encrypted cloud credentials
+storage/memory.sqlite             RAG, graph, identity registry, sync state
+storage/blobs/                    content-addressed compressed raw sources
+storage/models/                   cached ONNX models
+exports/                          snapshots/exports
 ```
 
-### Two testing modes, and why both exist
+- No telemetry or analytics are sent.
+- Model weights download from Hugging Face on first use and remain cached afterward.
+- Network access is otherwise limited to explicit URL ingestion and configured Turso cloud modes.
+- Snapshot path validation and local ingestion allowlists restrict arbitrary filesystem access.
+- SQLite uses foreign keys, migrations, transactions, and a busy timeout for concurrent access.
 
-`npm test` runs every suite with `generateEmbeddings: false`. That keeps it fast
-and offline (no model download, no network), but it means the **dense-vector half
-of the engine is never exercised** — retrieval falls back to BM25-only.
+### Dependency Advisories
 
-`npm run smoke` covers exactly that blind spot: it ingests a document with real
-ONNX vectors and asserts that hybrid retrieval returns a non-zero cosine
-similarity, plus that a Russian query still reaches an English document
-(something BM25 cannot do). It also walks the full user journey — remember →
-recall → ingest → query → link → update → get → forget — and checks the ingest
-path guard.
+At the time of this README update, `npm audit` reports three high-severity findings with no npm-available fix:
 
-This split is not academic: a regression in `v1.5.3+` disabled vector search
-entirely (`node:sqlite` returns BLOBs as `Uint8Array`, and a `Buffer.isBuffer()`
-guard discarded every stored vector) while all offline suites stayed green. The
-smoke test exists so that class of failure cannot ship unnoticed again.
-
-The smoke test reuses the model weights already cached in your data directory, so
-it does not re-download them. Point `MEMORY_MODEL_CACHE` at a cache directory to
-override the lookup; without any cache the weights are fetched once.
-
-For complete methodology details and search quality evaluation metrics, see [`docs/BENCHMARKS.md`](./docs/BENCHMARKS.md).
-
-### Empirical Search Quality Results
-
-Evaluated across a 32-document technical corpus (21 queries) using Mean Reciprocal Rank (MRR@5), Recall@5, and Normalized Discounted Cumulative Gain (NDCG@5):
-
-| Retrieval Strategy            |   MRR@5    |  Recall@5   |   NDCG@5   |
-| :---------------------------- | :--------: | :---------: | :--------: |
-| BM25 Lexical Search Only      |   0.6706   |   76.19%    |   0.6934   |
-| Dense ONNX Vector Only        |   0.8135   |   100.00%   |   0.8612   |
-| Hybrid RRF ($k=60$)           |   0.8810   |   95.24%    |   0.8997   |
-| **Hybrid RSF ($\alpha=0.5$)** | **0.9286** | **100.00%** | **0.9473** |
+| Package | Exposure in this project | Mitigation |
+| :--- | :--- | :--- |
+| `xlsx` | Spreadsheet parsing when the user explicitly ingests XLSX/XLS/CSV | Do not ingest untrusted spreadsheets. Advisories: [prototype pollution](https://github.com/advisories/GHSA-4r6h-8v6p-xvw6), [ReDoS](https://github.com/advisories/GHSA-5pgg-2g8v-p4x9). |
+| `sharp` via `@huggingface/transformers` | Transformers dependency includes image decoding, while this project supplies text to embedding/reranking pipelines | Normal text-memory use does not exercise the image path. Advisory: [libvips inherited vulnerabilities](https://github.com/advisories/GHSA-f88m-g3jw-g9cj). |
 
 ---
 
-## Storage & Privacy
+## Testing and Benchmarks
 
-- **Local-First Storage**: All SQLite indexes, ONNX models, CAS blobs, and Markdown notebooks are stored locally in the memory directory. Resolution order: `$MEMORY_DIR` → `$OPENCODE_CONFIG_DIR/memory` → the legacy `~/.config/opencode/memory` directory when it already exists (this takes precedence on Windows too) → `%LOCALAPPDATA%\opencode\memory`.
-- **Model Weights**: ONNX weights are downloaded on first use from `https://huggingface.co` and cached locally; later runs are fully offline.
-- **Zero Telemetry**: No third-party analytics or telemetry calls are made. The only outbound traffic is the one-off model download, plus Turso requests in the cloud sync modes.
+```bash
+npm test                   # 25 unit, integration, and simulated-cloud suites
+npm run smoke              # real ONNX vectors and end-to-end memory journey
+npm run test:rag           # retrieval quality evaluation
+npm run benchmark          # full search benchmark report
+npm run benchmark:table-code
+```
 
-### Known Dependency Advisories
+The fast suites use `generateEmbeddings: false` in retrieval paths for deterministic offline coverage. `npm run smoke` covers the dense-vector path with real cached/downloaded model weights and checks multilingual semantic retrieval. Both modes are needed: lexical-only tests cannot catch a broken vector serialization or ONNX execution path.
 
-`npm audit` reports three high-severity advisories with no upstream fix available. Both affected packages are only reachable through explicit user action:
+The unified suites cover fact formatting, typed directives, persona migration/synchronization, client prompt safety, Codex launcher compatibility, Git identity isolation, RAG scopes, policy expansion, RAG Memory Notes, semantic index output, raw blob portability, reverse sync, tombstones, snapshots, MCP contracts, and cloud authentication workflows.
 
-| Package | Advisory | Reachability | Mitigation |
-| :--- | :--- | :--- | :--- |
-| `xlsx` (SheetJS) | Prototype Pollution ([GHSA-4r6h-8v6p-xvw6](https://github.com/advisories/GHSA-4r6h-8v6p-xvw6)), ReDoS ([GHSA-5pgg-2g8v-p4x9](https://github.com/advisories/GHSA-5pgg-2g8v-p4x9)) | Only when you ingest a `.xlsx` / `.xls` / `.csv` file | Do not ingest untrusted spreadsheets. A migration to `exceljs` is under consideration. |
-| `sharp` `<0.35.0` (via `@huggingface/transformers`) | libvips CVE-2026-33327 / 33328 / 35590 / 35591 ([GHSA-f88m-g3jw-g9cj](https://github.com/advisories/GHSA-f88m-g3jw-g9cj)) | Image decoding path only; this plugin runs text embedding models exclusively and never feeds images to `sharp` | Not reachable in normal use; will clear once `@huggingface/transformers` bumps `sharp`. |
+See [`docs/BENCHMARKS.md`](./docs/BENCHMARKS.md) for methodology and detailed reports.
+
+### Included Search Evaluation
+
+The stored 32-document / 21-query technical corpus produced:
+
+| Strategy | MRR@5 | Recall@5 | NDCG@5 |
+| :--- | :---: | :---: | :---: |
+| BM25 lexical only | 0.6706 | 76.19% | 0.6934 |
+| Dense ONNX only | 0.8135 | 100.00% | 0.8612 |
+| Hybrid RRF (`k=60`) | 0.8810 | 95.24% | 0.8997 |
+| **Hybrid RSF (`alpha=0.5`)** | **0.9286** | **100.00%** | **0.9473** |
+
+---
+
+## Troubleshooting
+
+- **`No such built-in module: node:sqlite`**: install Node.js `22.5.0` or newer.
+- **Codex tools are missing**: run `memory_plugin setup --codex`, then `memory_plugin doctor --codex`, and open a new Codex task.
+- **OpenCode still runs old code**: restart OpenCode. For repository development, confirm `npm run dev:link` points its plugin entry to `opencode-plugin/main.js`.
+- **Persona changes are not visible**: run `memory-cli sync-persona`, then start a new CLI session/task. Use `memory-cli migrate-persona --dry-run` for legacy entries.
+- **Project recall is empty**: call `memory_info`; if a Git identity is `Registry: unlinked`, run `link_project_memory` or `memory-cli link --dir <repo>`.
+- **A raw note/document exists only in cloud**: `manage_knowledge_base(action: "read_document")` automatically materializes and verifies its CAS blob locally when cloud credentials are available.
+- **Embedding model changed**: run `reindex_knowledge_base` or use the TUI `[REINDEX]` action.
 
 ---
 

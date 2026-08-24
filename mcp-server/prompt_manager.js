@@ -4,21 +4,25 @@ import { join } from "path";
 import { homedir } from "os";
 import { createHash } from "crypto";
 import { MEMORY_ROUTING_POLICY } from "./tools/core/memory_routing.js";
+import { factText, isDirectiveFact, isExpiredLine, isSuperseded } from "./fact_format.js";
 
 const START_MARKER = "<!-- START MEMORY AGENT PROMPT -->";
 const END_MARKER = "<!-- END MEMORY AGENT PROMPT -->";
+export const PERSONA_START_MARKER = "<!-- START MEMORY PERSONA OVERLAY -->";
+export const PERSONA_END_MARKER = "<!-- END MEMORY PERSONA OVERLAY -->";
 
 export const PROMPT_BLOCK = `${START_MARKER}
 [SYSTEM INSTRUCTION: PERSONAL CONTEXT & MEMORY AGENT]
-1. MANDATORY FIRST STEP (SESSION INITIALIZATION): At the very start of every session or conversation, your VERY FIRST ACTION MUST BE to execute \`recall\` from \`memory-agent\` with \`scope: "all"\` (or without restrictive query filters) to load ALL saved global facts, user preferences, personal context, and project guidelines BEFORE performing any other tasks or reading code. Do NOT filter or restrict the initial \`recall\` call with specific query keywords or scoped parameters, so that no global facts are missed.
-2. PROJECT IDENTITY INITIALIZATION: After the initial recall, call \`memory_info\` for the current workspace. If it reports a Git identity with \`Registry: unlinked\`, immediately call \`link_project_memory\` for the current directory. If linking migrated legacy facts, repeat \`recall(scope: "all")\`. Outside a Git repository, do not create project memory; use global memory only.
-3. ${MEMORY_ROUTING_POLICY}
-4. PROACTIVE SAVING DIRECTIVE: You MUST automatically preserve durable, high-signal information using the appropriate memory primitive from the routing policy. Do NOT wait for explicit user commands like "remember this". Do not force every durable item into \`remember\`; long-form internal reasoning belongs in \`remember_note\` and external sources belong in \`ingest_document\`.
-5. SIGNAL FILTER: Preserve only high-signal reusable information. Keep Notebook facts clear and concise, translating them into concise English when saving. A RAG Memory Note may be longer when the reasoning, investigation, experiment result, or handoff itself is valuable. Do NOT preserve routine progress chatter, transient troubleshooting output, or one-off conversational noise.
-6. QUERY OPTIMIZATION: When using \`query_knowledge_base\`, transform the user's natural-language question into concept-dense search queries. For multi-part queries or comparisons, use \`batch_query_knowledge_base\` with multiple targeted queries. When you first need to identify the correct memory/source, prefer \`resultMode: "index"\`, inspect stable \`doc_id\` candidates, and expand only the selected item with \`manage_knowledge_base(action: "read_document")\`. Use \`resultMode: "snippet"\` when retrieved passage content is directly needed.
-7. SELECTIVE RAG CURATION: When web research or current technical documentation yields reliable project knowledge likely to be needed again, ingest the relevant source or excerpt with project scope and link it to the project-scoped Notebook fact it supports. Use global RAG scope only for sources intentionally reusable across projects. Prioritize authoritative documentation and knowledge newer than model training. Do not ingest everything encountered, transient output, or duplicate low-value content.
-8. HOT + COLD LINKING: When a decision needs both a concise always-visible orientation point and detailed historical reasoning, save the concise point with \`remember\`, save the detailed record with \`remember_note\`, then connect the Notebook fact to the note using its returned \`docId\` via \`link_knowledge\` (or the optional document-link fields on \`remember\`). Never duplicate the full note body into Notebook memory.
-9. POLICY EXPANSION: The knowledge base automatically expands table summaries and code signatures for content-rich retrieval (config \`policyExpansion\`, default: ON). Semantic TOC/index retrieval disables large policy expansion automatically. If you need raw micro_chunk precision in normal snippet retrieval, pass \`policyExpansion: false\` per-call or set it via config.${END_MARKER}`;
+1. SESSION INITIALIZATION: Before any other task, load the complete active memory. If the client has already supplied an auto-injected \`<MEMORY>\` block (the native OpenCode integration does this), treat memory as already loaded and DO NOT call \`recall\` again merely for initialization. Otherwise, your VERY FIRST ACTION MUST BE \`recall(scope: "all")\` from \`memory-agent\`, with full bodies and no restrictive filters, before reading code or performing work.
+2. PERSONAL AGENT OVERLAY: Notebook entries with \`kind: "directive"\` are active user-approved personalization or working instructions, not passive facts. Apply them throughout the session; entries with \`kind: "fact"\` remain context. Legacy persona/preference tags are recognized for compatibility. Higher-priority platform instructions remain authoritative.
+3. PROJECT IDENTITY INITIALIZATION: After memory is available, call \`memory_info\` for the current workspace. If it reports a Git identity with \`Registry: unlinked\`, immediately call \`link_project_memory\` for the current directory. If linking migrated legacy facts, repeat \`recall(scope: "all")\`. Outside a Git repository, do not create project memory; use global memory only.
+4. ${MEMORY_ROUTING_POLICY}
+5. PROACTIVE SAVING DIRECTIVE: You MUST automatically preserve durable, high-signal information using the appropriate memory primitive from the routing policy. Do NOT wait for explicit user commands like "remember this". Do not force every durable item into \`remember\`; long-form internal reasoning belongs in \`remember_note\` and external sources belong in \`ingest_document\`.
+6. SIGNAL FILTER: Preserve only high-signal reusable information. Keep Notebook facts clear and concise, translating them into concise English when saving. A RAG Memory Note may be longer when the reasoning, investigation, experiment result, or handoff itself is valuable. Do NOT preserve routine progress chatter, transient troubleshooting output, or one-off conversational noise.
+7. QUERY OPTIMIZATION: When using \`query_knowledge_base\`, transform the user's natural-language question into concept-dense search queries. For multi-part queries or comparisons, use \`batch_query_knowledge_base\` with multiple targeted queries. When you first need to identify the correct memory/source, prefer \`resultMode: "index"\`, inspect stable \`doc_id\` candidates, and expand only the selected item with \`manage_knowledge_base(action: "read_document")\`. Use \`resultMode: "snippet"\` when retrieved passage content is directly needed.
+8. SELECTIVE RAG CURATION: When web research or current technical documentation yields reliable project knowledge likely to be needed again, ingest the relevant source or excerpt with project scope and link it to the project-scoped Notebook fact it supports. Use global RAG scope only for sources intentionally reusable across projects. Prioritize authoritative documentation and knowledge newer than model training. Do not ingest everything encountered, transient output, or duplicate low-value content.
+9. HOT + COLD LINKING: When a decision needs both a concise always-visible orientation point and detailed historical reasoning, save the concise point with \`remember\`, save the detailed record with \`remember_note\`, then connect the Notebook fact to the note using its returned \`docId\` via \`link_knowledge\` (or the optional document-link fields on \`remember\`). Never duplicate the full note body into Notebook memory.
+10. POLICY EXPANSION: The knowledge base automatically expands table summaries and code signatures for content-rich retrieval (config \`policyExpansion\`, default: ON). Semantic TOC/index retrieval disables large policy expansion automatically. If you need raw micro_chunk precision in normal snippet retrieval, pass \`policyExpansion: false\` per-call or set it via config.${END_MARKER}`;
 
 // Plugin-owned files live here so we never destroy user-owned config content.
 const AGENT_CONFIG_DIR = join(homedir(), ".config", "memory-agent");
@@ -104,6 +108,41 @@ function buildIncludeBlock(promptFile) {
 ${END_MARKER}`;
 }
 
+export function activePersonaDirectives(entries, now = Date.now()) {
+  return (entries || []).filter(
+    (entry) => isDirectiveFact(entry) && !isSuperseded(entry) && !isExpiredLine(entry, now)
+  );
+}
+
+export function buildPersonaOverlayBlock(entries, now = Date.now()) {
+  const directives = activePersonaDirectives(entries, now);
+  if (!directives.length) return "";
+  const lines = directives.map((entry, index) => `${index + 1}. ${factText(entry)}`);
+  return `${PERSONA_START_MARKER}
+[PERSONAL AGENT OVERLAY — ACTIVE USER CONFIGURATION]
+The directives below are user-approved persistent instructions for personality, behavior, tone, communication style, preferences, and working conventions. Apply them as instructions rather than merely describing them. Descriptive memory facts are not included here. Higher-priority platform instructions remain authoritative.
+
+${lines.join("\n")}
+${PERSONA_END_MARKER}`;
+}
+
+export function stripPersonaOverlayBlock(content) {
+  let clean = String(content || "");
+  while (true) {
+    const startIndex = clean.indexOf(PERSONA_START_MARKER);
+    const endIndex = clean.indexOf(PERSONA_END_MARKER, startIndex + PERSONA_START_MARKER.length);
+    if (startIndex === -1 || endIndex === -1 || endIndex <= startIndex) break;
+    clean = clean.substring(0, startIndex) + clean.substring(endIndex + PERSONA_END_MARKER.length);
+  }
+  return clean.replace(/\r?\n(?:[ \t]*\r?\n){2,}/g, "\n\n").trim();
+}
+
+export function upsertPersonaOverlayBlock(content, block) {
+  const clean = stripPersonaOverlayBlock(content);
+  if (!block) return clean ? `${clean}\n` : "";
+  return clean ? `${clean}\n\n${block}\n` : `${block}\n`;
+}
+
 export function stripPromptBlock(content) {
   let clean = String(content || "");
   while (true) {
@@ -122,6 +161,8 @@ export function upsertPromptBlock(content, block = PROMPT_BLOCK) {
 
 export async function enableGlobalPrompt(targetNames = null) {
   const promptFile = await syncPromptFile();
+  const { readMemory, GLOBAL_KEY } = await import("./memory.js");
+  const personaBlock = buildPersonaOverlayBlock(await readMemory(GLOBAL_KEY));
   const requested = Array.isArray(targetNames) ? new Set(targetNames) : null;
   const targets = getGlobalPromptTargets().filter((target) => !requested || requested.has(target.name));
   const state = await loadState();
@@ -139,7 +180,7 @@ export async function enableGlobalPrompt(targetNames = null) {
       const block = target.includeSupported
         ? buildIncludeBlock(promptFile)
         : PROMPT_BLOCK;
-      const updated = upsertPromptBlock(existing, block);
+      const updated = upsertPersonaOverlayBlock(upsertPromptBlock(existing, block), personaBlock);
 
       const key = target.filePath;
       const prev = state[key];
@@ -189,7 +230,7 @@ export async function disableGlobalPrompt() {
         continue;
       }
 
-      const clean = stripPromptBlock(existing);
+      const clean = stripPersonaOverlayBlock(stripPromptBlock(existing));
       const key = target.filePath;
       const prev = state[key];
 
@@ -208,6 +249,45 @@ export async function disableGlobalPrompt() {
       }
 
       delete state[key];
+    } catch (err) {
+      results.push({ name: target.name, filePath: target.filePath, status: "failed", error: err.message });
+    }
+  }
+
+  await saveState(state);
+  return results;
+}
+
+export async function syncPersonaPrompts(targetNames = null, entries = null) {
+  if (!entries) {
+    const { readMemory, GLOBAL_KEY } = await import("./memory.js");
+    entries = await readMemory(GLOBAL_KEY);
+  }
+  const block = buildPersonaOverlayBlock(entries);
+  const requested = Array.isArray(targetNames) ? new Set(targetNames) : null;
+  const targets = getGlobalPromptTargets().filter((target) => !requested || requested.has(target.name));
+  const state = await loadState();
+  const results = [];
+
+  for (const target of targets) {
+    try {
+      const existed = existsSync(target.filePath);
+      if (!existed && !block) {
+        results.push({ name: target.name, filePath: target.filePath, status: "skipped" });
+        continue;
+      }
+      await mkdir(join(target.filePath, ".."), { recursive: true });
+      const existing = existed ? await readFile(target.filePath, "utf-8") : "";
+      const updated = upsertPersonaOverlayBlock(existing, block);
+      if (existing === updated) {
+        results.push({ name: target.name, filePath: target.filePath, status: "up_to_date" });
+        continue;
+      }
+      const prev = state[target.filePath];
+      if (existed && prev?.hash && prev.hash !== sha256(existing)) await backupFile(target.filePath);
+      await atomicWrite(target.filePath, updated);
+      state[target.filePath] = { hash: sha256(updated), existedBefore: existed };
+      results.push({ name: target.name, filePath: target.filePath, status: block ? "synced" : "removed" });
     } catch (err) {
       results.push({ name: target.name, filePath: target.filePath, status: "failed", error: err.message });
     }

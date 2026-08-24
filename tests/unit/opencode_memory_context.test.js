@@ -2,7 +2,13 @@ import assert from "node:assert";
 
 export async function runOpenCodeMemoryContextTests() {
   console.log("--- Running Unit Tests: opencode_memory_context ---");
-  const { formatInjectedFacts, buildMemoryContext } = await import("../../opencode-plugin/index.js");
+  const {
+    formatInjectedFacts,
+    buildMemoryContext,
+    injectMemoryPolicyIntoSystem,
+    injectMemoryOverlayIntoSystem,
+    partitionMemoryEntries,
+  } = await import("../../opencode-plugin/index.js");
   const now = new Date("2026-08-13T12:00:00Z").getTime();
   const normal = "- [2026-08-13 10:00] **Normal Rule** — full normal fact body <!-- id:n1, tags:arch -->";
   const priority = "- [2026-08-12 09:00] **Injected Rule** — full injected fact body <!-- id:i1, inject:1 -->";
@@ -30,8 +36,34 @@ export async function runOpenCodeMemoryContextTests() {
   assert.ok(context.includes("SELECTIVE RAG DIRECTIVE"), context);
   assert.ok(context.includes("do not dump everything"), context);
   assert.ok(context.includes("full normal fact body"), context);
-  assert.ok(context.includes("## Project: git:example/project\n"), context);
+  assert.ok(!context.includes("## Project: git:example/project\n"), context);
   assert.ok(context.includes("full injected fact body"), context);
+  assert.ok(context.includes("<PERSONAL_AGENT_OVERLAY>"), context);
+  assert.ok(context.includes("## Project Directives: git:example/project"), context);
+  assert.ok(context.includes("<MEMORY_FACTS>"), context);
+  const memoryFactsSection = context.slice(context.lastIndexOf("<MEMORY_FACTS>"));
+  assert.ok(!memoryFactsSection.includes("full injected fact body"), context);
+  assert.ok(context.includes("ALREADY LOADED"), context);
+  assert.ok(context.includes("Do NOT call `recall` merely to initialize"), context);
+  assert.ok(context.includes("active user-selected configuration instructions"), context);
+
+  const system = ["base system prompt"];
+  injectMemoryPolicyIntoSystem({ system });
+  injectMemoryPolicyIntoSystem({ system });
+  assert.strictEqual(system.length, 2, "system memory overlay must be appended once");
+  assert.ok(system[1].includes("PERSISTENT PERSONAL MEMORY OVERLAY"), system[1]);
+  assert.ok(system[1].includes("Do not perform a redundant startup recall"), system[1]);
+  assert.ok(system[1].includes("active personalization instructions"), system[1]);
+
+  const dynamicSystem = ["base system prompt"];
+  injectMemoryOverlayIntoSystem({ system: dynamicSystem }, [normal], [priority], "git:example/project", now);
+  assert.strictEqual(dynamicSystem.length, 2);
+  assert.ok(dynamicSystem[1].includes("Project working directives"), dynamicSystem[1]);
+  assert.ok(dynamicSystem[1].includes("full injected fact body"), dynamicSystem[1]);
+  assert.ok(!dynamicSystem[1].includes("full normal fact body"), dynamicSystem[1]);
+  const partitioned = partitionMemoryEntries([normal, priority], now);
+  assert.deepStrictEqual(partitioned.directives, [priority]);
+  assert.deepStrictEqual(partitioned.facts, [normal]);
   console.log("✅ OPENCODE FULL-BODY MEMORY CONTEXT TESTS PASSED!");
 }
 

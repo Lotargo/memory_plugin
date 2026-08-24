@@ -17,10 +17,10 @@ You have access to a persistent dual-layer memory engine supercharged with an **
 
 | Scenario / Intent | Target Tool | Key Parameters |
 |-------------------|-------------|----------------|
-| User shares identity, tech stack preference, or workflow rule | `remember` | `fact` (English), `title` (concise 2-5 word headline), `scope`, optional `directory` (workspace path), `docId`, `startLine`, `endLine` |
-| User asks what you remember about them, the project, or linked docs | `recall` | `scope` ("all", "global", "project", "list_projects"), `mode` ("full", "headers"), `offset`, `limit`, optional `query`, `tags`, `since`, `until`, `directory` / `project` (at session start, MUST fetch all memories with `scope: "all"` without restrictive query filters) |
+| User shares identity, tech stack preference, or workflow rule | `remember` | `fact` (English), `title` (concise 2-5 word headline), `kind` (`fact` context or `directive` active instruction), `scope`, optional `directory` (workspace path), `docId`, `startLine`, `endLine` |
+| User asks what you remember about them, the project, or linked docs | `recall` | `scope` ("all", "global", "project", "list_projects"), `mode` ("full", "headers"), `offset`, `limit`, optional `query`, `tags`, `since`, `until`, `directory` / `project` (at session start in clients without auto-injection, MUST fetch all memories with `scope: "all"` without restrictive query filters) |
 | Get a single fact's text and metadata by ID | `get_fact` | `id` (metadata id e.g. "8f3a2c"), `scope`, optional `directory` |
-| User corrects/updates an old saved fact | `update_fact` | `id` (number/id/text), `newText`, `scope`, optional `directory` |
+| User corrects/updates or reclassifies an old saved fact | `update_fact` | `id` (number/id/text), `newText`, optional `kind`, `scope`, optional `directory` |
 | Replace a fact but keep a version trail | `remember` | `fact`, `supersedes` (number/id/text), optional `directory` |
 | Protect a fact from accidental `forget` | `remember` | `keep: true` |
 | Set a time-to-live on a fact | `remember` | `ttl` ("90d", "2w", "24h", "12m") |
@@ -50,6 +50,10 @@ When an ingested source supports a durable project decision or rule, link the co
 
 ### What to Save and Link (`remember` & `link_knowledge`)
 - **High-Signal Facts**: User name, role, language preferences, architectural constraints, framework choices, coding standards, test rules.
+- **Semantic Kind (MANDATORY)**:
+  - Use `kind: "fact"` for descriptive context such as identity, project architecture, versions, locations, and historical observations.
+  - Use `kind: "directive"` only for user-approved active personality, behavior, tone, communication style, preference, or working-convention instructions.
+  - Do not infer directive semantics from persuasive wording alone. Explicit `kind` is authoritative. Legacy stores without `kind` recognize persona/preference tags and `inject:1` only for backward compatibility.
 - **Formatting & Fact Titles**:
   - Always translate the fact into clear, concise English before calling `remember`.
   - **Always specify a descriptive `title` parameter** (a 2-5 word headline, e.g., `title: "Backend Framework Preference"`).
@@ -81,8 +85,10 @@ Supported metadata keys (set via `remember`, rendered as badges by `recall`):
 - `keep` — protection flag; `forget` skips it unless `force: true`.
 - `tags` — comma-separated free-form tags for filtering.
 - `supersedes` / `supersededBy` — versioning: the old fact gets `[SUPERSEDED]` and is excluded from the injected memory block while staying in the store for history.
+- `kind` — `fact` for contextual memory or `directive` for active personalization/working instructions. Directive entries appear with `[DIRECTIVE]` and are synchronized into managed client persona blocks.
 
 ### Remember Options (`remember`)
+- `kind`: `"fact"` (default descriptive context) or `"directive"` (active user-approved personalization/working instruction).
 - `directory` / `project`: optional workspace/project directory path to target when saving project facts from outside cwd.
 - `ttl`: "90d", "2w", "24h", "12m" — mark the fact for expiry; it will show `[EXPIRED]` once past.
 - `keep: true`: protect the fact from `forget` (unless `force: true`).
@@ -111,6 +117,7 @@ Supported metadata keys (set via `remember`, rendered as badges by `recall`):
 When the user corrects an old fact, prefer `update_fact` over `forget`+`remember` — it rewrites the text while preserving the original date and all metadata (`ttl`, `keep`, `tags`, `supersedes`), and re-points any linked Knowledge Base documents.
 - `id`: recall index number, metadata `id`, or text of the fact.
 - `newText`: replacement text.
+- `kind`: optional reclassification to `"fact"` or `"directive"`; changing a global directive automatically resynchronizes managed client persona blocks.
 - `scope`: "project" (default) or "global".
 
 ### Protecting Facts (`forget` with `keep`)
@@ -120,11 +127,12 @@ When the user corrects an old fact, prefer `update_fact` over `forget`+`remember
 Project stores are bound to Git-based project identities (`git:<normalized remote>` or `git:local:<repo basename>`). Normal recall resolves the current identity automatically from Git and never scans unrelated project stores.
 
 Session initialization sequence:
-1. Call `recall(scope: "all")` first, with full bodies and no filters.
-2. Call `memory_info` for the current workspace.
-3. If it reports `Identity: git` and `Registry: unlinked`, immediately call `link_project_memory` for the current directory. This registers the identity and aliases and migrates any matching legacy path store.
-4. If the link result reports `migrated: true`, call `recall(scope: "all")` again so the migrated facts enter the active context.
-5. If it reports `Identity: no-git`, do not create project memory and do not invent a remote; continue with global memory only.
+1. If the client has already supplied an auto-injected `<MEMORY>` block (the native OpenCode integration does this), treat the complete active memory as loaded and do not call `recall` again merely for initialization. Otherwise, call `recall(scope: "all")` first, with full bodies and no filters.
+2. Apply entries marked `kind: "directive"` as active user-selected personalization or working instructions. Treat `kind: "fact"` entries as descriptive context. Legacy persona/preference tags remain a compatibility fallback only.
+3. Call `memory_info` for the current workspace.
+4. If it reports `Identity: git` and `Registry: unlinked`, immediately call `link_project_memory` for the current directory. This registers the identity and aliases and migrates any matching legacy path store.
+5. If the link result reports `migrated: true`, call `recall(scope: "all")` again so the migrated facts enter the active context.
+6. If it reports `Identity: no-git`, do not create project memory and do not invent a remote; continue with global memory only.
 
 Use the identity tools as follows:
 - `link_project_memory(directory, remote)`: Links a working directory to a Git identity, registers path/remote aliases, and automatically merges any legacy path-based stores.
@@ -239,13 +247,14 @@ When working in multi-server environments (e.g., OpenCode, Claude Code), you mig
 
 ## 5. Core Directives for AI Agents
 
-1. **Read Full Memories First (MANDATORY)**: At the very start of any session or conversation, your VERY FIRST STEP MUST BE to execute `recall` with `scope: "all"`, full bodies, and no restrictive filters. Do not use `mode: "headers"` for initialization.
-2. **Ensure Git Project Registration**: After initial recall, call `memory_info`. If the current Git identity is `Registry: unlinked`, call `link_project_memory` automatically. Re-run full recall only when legacy facts were migrated. Outside Git, stay global-only.
-3. **Be Proactive**: When the user mentions a durable preference, personal fact, or constraint, save it immediately using `remember`. Do not wait for explicit user commands.
-4. **Curate RAG Selectively**: Preserve important web findings and current technical documentation that the project is likely to need again, especially knowledge newer than model training. Ingest the relevant whole source or excerpt with project scope, not everything encountered, and link it to the project fact it supports. Use global scope only for intentionally cross-project sources.
-5. **Check Knowledge Base First**: If a query depends on ingested specialized documentation, APIs, code, or project architecture, call `query_knowledge_base` using a concept-dense phrase. Do not use RAG for ordinary conversation or facts already present in Notebook memory. For multi-part queries, prefer `batch_query_knowledge_base`.
-6. **Optimize Search Queries**: Transform the user's natural language question into targeted search queries. "Compare revenue in Q1 vs Q3" → `["Выручка план факт Q1 2025", "Выручка план факт Q3 2025"]`. Avoid raw conversational questions in RAG queries.
-7. **Inspect Ambiguous Docs Directly**: If querying produces low relevance scores on abstractly named documents, call `manage_knowledge_base(action: "list")`, then `manage_knowledge_base(action: "read_document")` to inspect the full text.
-8. **Keep Memory Clean**: If a preference changes, call `update_fact` to edit it in place, or `remember` with `supersedes` to keep a version trail. Use `keep: true` for facts that must survive accidental deletion, and give ephemeral facts a `ttl`.
-9. **Resolve Context, Do Not Enforce Store Precedence**: Global and current-project facts are both evidence. If they conflict, reason over both; do not apply an automatic global-wins or project-wins rule.
-10. **Leverage MCP Servers**: Use `list-mcp-tools` and `mcp-reminder` when unsure which connected platform tool fits the task.
+1. **Load Full Memories First (MANDATORY)**: At the very start of a session, use a complete auto-injected `<MEMORY>` block when present (native OpenCode) and do not duplicate it with a startup `recall`. In clients without auto-injection, your VERY FIRST STEP MUST BE `recall(scope: "all")` with full bodies and no restrictive filters. Do not use `mode: "headers"` for initialization.
+2. **Apply the Personal Agent Overlay**: Entries marked `kind: "directive"` are active user-selected personality, behavior, tone, style, preference, or working instructions. `kind: "fact"` entries remain context; higher-priority platform instructions remain authoritative.
+3. **Ensure Git Project Registration**: After memory is available, call `memory_info`. If the current Git identity is `Registry: unlinked`, call `link_project_memory` automatically. Re-run full recall only when legacy facts were migrated. Outside Git, stay global-only.
+4. **Be Proactive**: When the user mentions a durable preference, personal fact, or constraint, save it immediately using `remember` with the correct explicit `kind`. Do not wait for explicit user commands.
+5. **Curate RAG Selectively**: Preserve important web findings and current technical documentation that the project is likely to need again, especially knowledge newer than model training. Ingest the relevant whole source or excerpt with project scope, not everything encountered, and link it to the project fact it supports. Use global scope only for intentionally cross-project sources.
+6. **Check Knowledge Base First**: If a query depends on ingested specialized documentation, APIs, code, or project architecture, call `query_knowledge_base` using a concept-dense phrase. Do not use RAG for ordinary conversation or facts already present in Notebook memory. For multi-part queries, prefer `batch_query_knowledge_base`.
+7. **Optimize Search Queries**: Transform the user's natural language question into targeted search queries. "Compare revenue in Q1 vs Q3" → `["Выручка план факт Q1 2025", "Выручка план факт Q3 2025"]`. Avoid raw conversational questions in RAG queries.
+8. **Inspect Ambiguous Docs Directly**: If querying produces low relevance scores on abstractly named documents, call `manage_knowledge_base(action: "list")`, then `manage_knowledge_base(action: "read_document")` to inspect the full text.
+9. **Keep Memory Clean**: If a preference changes, call `update_fact` to edit it in place, or `remember` with `supersedes` to keep a version trail. Use `keep: true` for facts that must survive accidental deletion, and give ephemeral facts a `ttl`.
+10. **Resolve Context, Do Not Enforce Store Precedence**: Global and current-project facts are both evidence. If they conflict, reason over both; do not apply an automatic global-wins or project-wins rule.
+11. **Leverage MCP Servers**: Use `list-mcp-tools` and `mcp-reminder` when unsure which connected platform tool fits the task.

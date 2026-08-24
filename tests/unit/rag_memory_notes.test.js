@@ -137,6 +137,15 @@ export async function runRagMemoryNotesUnitTests() {
   assert.ok(MEMORY_ROUTING_POLICY.includes('resultMode="index"'));
   assert.ok(MEMORY_ROUTING_POLICY.includes('action="read_document"'));
 
+  const { rememberNote } = await import("../../mcp-server/tools/core/note_core.js");
+  const remembered = await rememberNote({
+    title: "Blob hash contract",
+    content: "remember_note must expose its portable raw blob identity",
+    scope: "global",
+    generateEmbeddings: false,
+  });
+  assert.match(remembered.blobHash, /^[0-9a-f]{64}$/i, "remember_note returns the ingestion blobHash");
+
   closeDatabase();
   rmSync(temp, { recursive: true, force: true });
   console.log("✅ RAG MEMORY NOTES UNIT CONTRACTS PASSED!");

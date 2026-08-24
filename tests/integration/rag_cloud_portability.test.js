@@ -195,7 +195,22 @@ export async function runRagCloudPortabilityTests() {
   } finally {
     closeDatabase();
     resetConfig();
-    if (existsSync(temp)) rmSync(temp, { recursive: true, force: true });
+    if (existsSync(temp)) {
+      try {
+        rmSync(temp, {
+          recursive: true,
+          force: true,
+          maxRetries: process.platform === "win32" ? 10 : 0,
+          retryDelay: 100,
+        });
+      } catch (err) {
+        // @libsql/client's local Windows native handle can remain alive until
+        // process exit even after close(). Cleanup must not turn a fully passed
+        // portability test into a product failure.
+        if (!(process.platform === "win32" && err?.code === "EPERM")) throw err;
+        console.warn(`  [WARN] Deferred Windows temp cleanup until process exit: ${temp}`);
+      }
+    }
   }
 }
 

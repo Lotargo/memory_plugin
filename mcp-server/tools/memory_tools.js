@@ -16,6 +16,7 @@ export function registerMemoryTools(server) {
       description:
         "Save an important, durable fact to memory. Only use for high-signal information " +
         "(name, goals, constraints, tech preferences, project conventions). " +
+        "Set kind='directive' only for active user-approved personality, behavior, tone, style, preference, or working instructions; use kind='fact' for descriptive context. " +
         "directory: optional workspace/project directory path to target (ensures saving into the project store even from external cwd). " +
         "docId/startLine/endLine/relationType are OPTIONAL and only used to link the fact to a " +
         "Knowledge Base document or line range; omit them when no linking is needed. " +
@@ -29,6 +30,7 @@ export function registerMemoryTools(server) {
       inputSchema: z.object({
         fact: z.string().describe("The fact to remember, written in English"),
         title: optStr().describe("Optional title for the fact. If not specified, one is auto-generated."),
+        kind: z.enum(["fact", "directive"]).nullish().transform((v) => v || "fact").describe("'fact' (context) or 'directive' (active personalization/working instruction)"),
         scope: defStr("project").describe("'project' (default) or 'global'"),
         directory: optStr().describe("Optional workspace/project directory path to target when scope='project' (e.g. 'F:/projects/my-app')"),
         project: optStr().describe("Alias for directory"),
@@ -109,11 +111,12 @@ export function registerMemoryTools(server) {
     {
       description:
         "Update the text of an existing fact by number (from recall), id, or text match, " +
-        "preserving its original date and metadata. Linked Knowledge Base documents are re-pointed to the new text.",
+        "preserving its original date and metadata. kind can optionally reclassify it as context ('fact') or active personalization ('directive'). Linked Knowledge Base documents are re-pointed to the new text.",
       inputSchema: z.object({
         id: z.string().describe("Number (from recall), metadata id, or text of the fact to update"),
         newText: z.string().describe("New fact text"),
         title: optStr().describe("Optional new title for the fact"),
+        kind: z.enum(["fact", "directive"]).nullish().describe("Optional new semantic kind: 'fact' or 'directive'"),
         scope: defStr("project").describe("'project' (default) or 'global'"),
         directory: optStr().describe("Optional workspace/project directory path"),
         project: optStr().describe("Alias for directory"),

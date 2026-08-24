@@ -6,6 +6,9 @@
   "main": "opencode-plugin/main.js",
   "scripts": {
     "preinstall": "node mcp-server/preinstall.js || true",
+    "dev:link": "node mcp-server/cli_boot.js dev-link",
+    "persona:sync": "node mcp-server/cli_boot.js sync-persona",
+    "persona:migrate": "node mcp-server/cli_boot.js migrate-persona",
     "test": "node tests/run_all.js",
     "test:rag": "node tests/unit/rag_evaluation.test.js",
     "smoke": "node tests/smoke/e2e_real_embeddings.test.js",

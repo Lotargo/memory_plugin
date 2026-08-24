@@ -12,6 +12,39 @@ import {
 import { factBody } from "../fact_format.js";
 
 export async function handleDirectCommands(cliArgs) {
+  if (cliArgs[0] === "dev-link" || cliArgs[0] === "dev_link") {
+    const { runDevLink } = await import("../dev_link.js");
+    await runDevLink();
+    return true;
+  }
+
+  if (cliArgs[0] === "sync-persona" || cliArgs[0] === "sync_persona") {
+    const { syncPersonaPrompts } = await import("../prompt_manager.js");
+    const results = await syncPersonaPrompts();
+    console.log("\nPersona overlay synchronization:\n");
+    for (const result of results) {
+      console.log(`  - ${result.name}: ${result.status}${result.error ? ` (${result.error})` : ""}`);
+    }
+    console.log("");
+    if (results.some((result) => result.status === "failed")) process.exitCode = 1;
+    return true;
+  }
+
+  if (cliArgs[0] === "migrate-persona" || cliArgs[0] === "migrate_persona") {
+    const { migrateLegacyPersonaDirectives } = await import("../persona_migration.js");
+    const dryRun = cliArgs.includes("--dry-run");
+    const result = await migrateLegacyPersonaDirectives({ dryRun });
+    console.log(`\nPersona metadata migration${dryRun ? " (dry run)" : ""}:\n`);
+    console.log(`  Legacy directives found: ${result.changed}`);
+    for (const item of result.migrated) {
+      console.log(`  - ${item.title}${item.id ? ` (${item.id})` : ""}`);
+    }
+    console.log(dryRun
+      ? "\nNo files were changed.\n"
+      : "\nGlobal directives and managed client prompts are synchronized.\n");
+    return true;
+  }
+
   if (cliArgs[0] === "doctor" && cliArgs.includes("--codex")) {
     const { runCodexDoctor } = await import("../codex_diagnostics.js");
     console.log("\nCodex memory-agent diagnostics\n");

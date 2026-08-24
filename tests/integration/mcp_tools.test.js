@@ -95,7 +95,7 @@ export async function runMcpToolsTests() {
 
   child = spawn(process.execPath, [join(ROOT, "mcp-server/index.js")], {
     cwd: temp,
-    env: { ...process.env, MEMORY_DIR },
+    env: { ...process.env, MEMORY_DIR, MEMORY_DISABLE_PERSONA_SYNC: "1" },
     stdio: ["pipe", "pipe", "pipe"],
   });
   attach(child);
@@ -117,6 +117,24 @@ export async function runMcpToolsTests() {
     const r2 = toolResult(await request("tools/call", { name: "remember", arguments: { scope: "project", fact: "alpha workspace uses ESM", ttl: "30d", keep: true, tags: "setup,pref" } }));
     assert.ok(r2.includes("Memory updated"), r2);
     ok("remember: ttl + keep + tags");
+
+    const directive = toolResult(await request("tools/call", {
+      name: "remember",
+      arguments: { scope: "project", fact: "alpha agent uses terse output", kind: "directive" },
+    }));
+    assert.ok(directive.includes("Memory updated"), directive);
+    assert.ok(readFileSync(storeFile, "utf8").includes("kind:directive"));
+    const directiveRecall = toolResult(await request("tools/call", { name: "recall", arguments: { scope: "project", query: "terse" } }));
+    assert.ok(directiveRecall.includes("[DIRECTIVE]"), directiveRecall);
+    const directiveToFact = toolResult(await request("tools/call", {
+      name: "update_fact",
+      arguments: { scope: "project", id: "alpha agent uses terse output", newText: "alpha historically used terse output", kind: "fact" },
+    }));
+    assert.ok(directiveToFact.includes("Fact updated"), directiveToFact);
+    const factRecall = toolResult(await request("tools/call", { name: "recall", arguments: { scope: "project", query: "historically" } }));
+    assert.ok(!factRecall.includes("[DIRECTIVE]"), factRecall);
+    await request("tools/call", { name: "forget", arguments: { scope: "project", query: "historically", force: true } });
+    ok("remember/update_fact: directive kind round-trip");
 
     const r3 = toolResult(await request("tools/call", { name: "remember", arguments: { scope: "project", fact: "alpha uses ESM (v2)", supersedes: "alpha workspace uses ESM" } }));
     assert.ok(r3.includes("superseded"), r3);
@@ -196,7 +214,7 @@ export async function runMcpToolsTests() {
     const nonGitDir = mkdtempSync(join(tmpdir(), "mcp-nongit-"));
     child = spawn(process.execPath, [join(ROOT, "mcp-server/index.js")], {
       cwd: nonGitDir,
-      env: { ...process.env, MEMORY_DIR: join(nonGitDir, "mem") },
+      env: { ...process.env, MEMORY_DIR: join(nonGitDir, "mem"), MEMORY_DISABLE_PERSONA_SYNC: "1" },
       stdio: ["pipe", "pipe", "pipe"],
     });
     attach(child);

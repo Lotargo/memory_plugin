@@ -10,6 +10,7 @@ import {
   isExpiredLine,
   isKeepFact,
   isSuperseded,
+  isDirectiveFact,
   matchesQuery,
   matchesTags,
   inDateRange,
@@ -161,15 +162,27 @@ export async function runFactFormatTests() {
   // --- metaBadges / displayFact ---
   {
     const now = Date.parse("2026-08-02T06:08:00Z");
-    assert.deepEqual(metaBadges(META, now), ["KEEP"]);
+    assert.deepEqual(metaBadges(META, now), ["KEEP", "DIRECTIVE"]);
     assert.deepEqual(metaBadges("- [2026-01-01 00:00] x <!-- ttl:30d -->", now), ["EXPIRED"]);
     assert.deepEqual(metaBadges("- [2026-01-01 00:00] x <!-- ttl:30d, supersededBy:9f31bd -->", now), ["EXPIRED", "SUPERSEDED"]);
     assert.deepEqual(metaBadges(PLAIN, now), []);
     assert.equal(displayFact(PLAIN, now), "user prefers TypeScript");
-    assert.equal(displayFact(META, now), "engine uses zod v4  [KEEP]");
+    assert.equal(displayFact(META, now), "engine uses zod v4  [KEEP] [DIRECTIVE]");
     ok("metaBadges ordering + displayFact text+badges");
 
     assert.equal(isSuperseded("- [2026-08-01 00:00] old <!-- supersededBy:x -->"), true);
+  }
+
+  // --- directive semantics + legacy compatibility ---
+  {
+    assert.equal(isDirectiveFact("- [2026-08-01 00:00] explicit <!-- kind:directive -->"), true);
+    assert.equal(isDirectiveFact("- [2026-08-01 00:00] explicit fact <!-- kind:fact, tags:persona -->"), false);
+    assert.equal(isDirectiveFact("- [2026-08-01 00:00] legacy persona <!-- tags:persona,speech -->"), true);
+    assert.equal(isDirectiveFact("- [2026-08-01 00:00] legacy injected <!-- inject:1 -->"), true);
+    assert.equal(isDirectiveFact("- [2026-08-01 00:00] ordinary <!-- tags:arch -->"), false);
+    const line = formatFactEntry({ date: "2026-08-01", time: "00:00", text: "directive", meta: { kind: "directive" } });
+    assert.equal(line, "- [2026-08-01 00:00] directive <!-- kind:directive -->");
+    ok("directive kind explicit semantics + legacy tags");
   }
 
   console.log(`✅ ${passed} fact_format assertions passed.`);

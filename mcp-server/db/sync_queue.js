@@ -11,6 +11,7 @@ import {
 
 let isSyncing = false;
 let syncRequested = false;
+let activeSyncPromise = null;
 let lastReverseSync = 0;
 let isReverseSyncing = false;
 const REVERSE_SYNC_INTERVAL_MS = 5000;
@@ -211,6 +212,7 @@ async function pullFromCloud(db) {
   const { getConfig } = await import("../config/config_manager.js");
   const strategy = getConfig().conflictStrategy || "merge";
   const summary = { pulled: 0, pushed: 0, merged: 0, cloudWins: 0, localWins: 0, unchanged: 0, conflicts: 0 };
+  let globalChanged = false;
   const cloudRes = await db.cloudClient.execute("SELECT key, content FROM notebooks;");
   const cloudRows = cloudRes.rows || [];
   const cloudByKey = new Map(cloudRows.map((r) => [r.key, r.content || ""]));
@@ -239,12 +241,20 @@ async function pullFromCloud(db) {
       continue;
     }
     if (!localHas) {
-      if (cloudHas) { await writeMemoryFile(key, cloudContent); summary.pulled++; }
+      if (cloudHas) {
+        await writeMemoryFile(key, cloudContent);
+        if (key === GLOBAL_KEY) globalChanged = true;
+        summary.pulled++;
+      }
       continue;
     }
     if (localContent === cloudContent) { summary.unchanged++; continue; }
     summary.conflicts++;
-    if (strategy === "cloud-wins") { await writeMemoryFile(key, cloudContent); summary.cloudWins++; }
+    if (strategy === "cloud-wins") {
+      await writeMemoryFile(key, cloudContent);
+      if (key === GLOBAL_KEY) globalChanged = true;
+      summary.cloudWins++;
+    }
     else if (strategy === "local-wins") { await upsertCloud(key, localContent); summary.localWins++; }
     else {
       const seen = new Set();
@@ -254,9 +264,16 @@ async function pullFromCloud(db) {
       }
       const mergedContent = buildMemoryContent(key, mergedFacts);
       await writeMemoryFile(key, mergedContent);
+      if (key === GLOBAL_KEY) globalChanged = true;
       await upsertCloud(key, mergedContent);
       summary.merged++;
     }
+  }
+  if (globalChanged && process.env.MEMORY_DISABLE_PERSONA_SYNC !== "1") {
+    try {
+      const { syncPersonaPrompts } = await import("../prompt_manager.js");
+      await syncPersonaPrompts();
+    } catch {}
   }
   return summary;
 }
@@ -286,14 +303,10 @@ export function resetReverseSyncThrottle() {
   lastReverseSync = 0;
 }
 
-export async function triggerBackgroundSync() {
-  if (isSyncing) { syncRequested = true; return; }
-  isSyncing = true;
-  syncRequested = false;
-  try {
+async function runBackgroundSyncPass() {
     const { getDatabase } = await import("./database.js");
     const db = await getDatabase();
-    if (db.mode !== "hybrid-sync" || !db.cloudClient) { isSyncing = false; return; }
+    if (db.mode !== "hybrid-sync" || !db.cloudClient) return;
     await db.exec(`CREATE TABLE IF NOT EXISTS sync_queue (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       action TEXT NOT NULL,
@@ -317,13 +330,26 @@ export async function triggerBackgroundSync() {
       }
     }
     await syncFromCloud();
-  } catch (err) {
-    console.error("Error during background sync execution:", err.message);
-  } finally {
-    isSyncing = false;
-    if (syncRequested) {
-      syncRequested = false;
-      await triggerBackgroundSync();
-    }
+}
+
+export function triggerBackgroundSync() {
+  if (activeSyncPromise) {
+    syncRequested = true;
+    return activeSyncPromise;
   }
+  isSyncing = true;
+  activeSyncPromise = (async () => {
+    try {
+      do {
+        syncRequested = false;
+        await runBackgroundSyncPass();
+      } while (syncRequested);
+    } catch (err) {
+      console.error("Error during background sync execution:", err.message);
+    } finally {
+      isSyncing = false;
+      activeSyncPromise = null;
+    }
+  })();
+  return activeSyncPromise;
 }

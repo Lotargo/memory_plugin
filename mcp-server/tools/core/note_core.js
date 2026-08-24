@@ -39,6 +39,7 @@ export async function rememberNote(
   return {
     status: "success",
     docId: result.docId,
+    blobHash: result.blobHash,
     path: result.path,
     title: result.title,
     sourceType: result.sourceType,
