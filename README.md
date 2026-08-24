@@ -542,7 +542,7 @@ Spreadsheet ingestion uses SheetJS CE `0.20.3` from the official SheetJS CDN rat
 ## Testing and Benchmarks
 
 ```bash
-npm test                   # 25 unit, integration, and simulated-cloud suites
+npm test                   # unified unit, integration, and simulated-cloud suites
 npm run smoke              # real ONNX vectors and end-to-end memory journey
 npm run test:rag           # retrieval quality evaluation
 npm run benchmark          # full search benchmark report
