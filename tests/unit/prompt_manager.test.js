@@ -24,6 +24,14 @@ export async function runPromptManagerTests() {
   assert.strictEqual(upsertPromptBlock(updated), updated, "enable-prompt must be idempotent");
   assert.strictEqual(stripPromptBlock(updated), userText, "disable must remove only the plugin-owned block");
 
+  const spacedUserText = "# User instructions\n\n\n\nKeep intentional spacing.";
+  const spacedWithBlock = `${spacedUserText}\n\n${PROMPT_BLOCK}\n`;
+  assert.strictEqual(
+    stripPromptBlock(spacedWithBlock),
+    spacedUserText,
+    "removing a managed block must not normalize unrelated whitespace"
+  );
+
   const directive = "- [2026-08-22 10:00] **Tone** — Use concise Russian <!-- kind:directive -->";
   const normal = "- [2026-08-22 10:01] **Name** — User is Oleg <!-- kind:fact -->";
   const legacy = "- [2026-08-22 10:02] **Style** — Use playful tone <!-- tags:persona,style -->";
@@ -36,6 +44,11 @@ export async function runPromptManagerTests() {
   const withPersona = upsertPersonaOverlayBlock(updated, persona);
   assert.strictEqual(upsertPersonaOverlayBlock(withPersona, persona), withPersona, "persona sync must be idempotent");
   assert.strictEqual(stripPersonaOverlayBlock(withPersona), updated.trim(), "persona removal must preserve agent prompt");
+  assert.strictEqual(
+    stripPersonaOverlayBlock(`${userText}\n\n${persona}\n`),
+    userText,
+    "persona-only cleanup must preserve user instructions"
+  );
   console.log("✅ ALL PROMPT MANAGER IDEMPOTENCY TESTS PASSED!");
 }
 

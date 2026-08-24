@@ -13,6 +13,12 @@ import { handleDiagnosticsAction } from "./cli/handlers/diagnostics_actions.js";
 export async function runCli() {
   const cliArgs = process.argv.slice(2);
 
+  if (cliArgs.includes("uninstall") || cliArgs.includes("--uninstall")) {
+    const { runUninstall } = await import("./uninstall.js");
+    await runUninstall();
+    return;
+  }
+
   if (cliArgs.includes("--help") || cliArgs.includes("-h") || cliArgs[0] === "help") {
     console.log(`memory-cli — interactive control panel for @lotargo/memory_plugin
 
@@ -28,6 +34,7 @@ Usage:
   memory-cli migrate-persona [--dry-run]
                                      Mark legacy global persona entries as directives
   memory-cli enable-prompt | disable-prompt
+  memory-cli uninstall [--purge] [--purge-cache] [--dry-run] [--yes] [--opencode|--claude|--codex|--gemini|--antigravity]
   memory-cli doctor --codex
 
 Options:
@@ -283,9 +290,9 @@ async function showCategorySubmenu(category, config, stats, initialIndex = 0) {
     case "prompt":
       items = [
         {
-          label: "[PROMPT ENABLE] Enable Global Prompt (Antigravity / Codex / Claude)",
+          label: "[PROMPT ENABLE] Enable Global Prompt (Gemini / Antigravity / Codex / Claude)",
           value: "enable_prompt",
-          info: "Inject memory instructions into ~/.gemini/config/AGENTS.md, ~/.codex/AGENTS.md, ~/.claude/CLAUDE.md",
+          info: "Inject managed memory instructions into each supported client's global prompt file",
         },
         {
           label: "[PROMPT DISABLE] Disable Global Prompt",

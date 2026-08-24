@@ -1,7 +1,7 @@
 {
   "name": "@lotargo/memory_plugin",
-  "version": "1.6.6",
-  "description": "100% local hybrid RAG memory for AI coding agents (OpenCode, Claude Code, Codex, Antigravity). MCP server + plugin: persistent user facts, document ingestion, vector + SQLite FTS5 retrieval across sessions.",
+  "version": "1.6.7",
+  "description": "100% local hybrid RAG memory for AI coding agents (OpenCode, Claude Code, Codex, Gemini CLI, Antigravity). MCP server + plugin: persistent user facts, document ingestion, vector + SQLite FTS5 retrieval across sessions.",
   "type": "module",
   "main": "opencode-plugin/main.js",
   "scripts": {
@@ -44,6 +44,7 @@
     "opencode",
     "claude-code",
     "codex",
+    "gemini-cli",
     "antigravity",
     "plugin",
     "vector-search",

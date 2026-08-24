@@ -45,7 +45,9 @@ function printUsage() {
 
 Usage:
   memory_plugin                      Start the MCP server on stdio (default)
-  memory_plugin setup [--opencode|--claude|--codex|--antigravity] [--mode <MODE>]
+  memory_plugin setup [--opencode|--claude|--codex|--gemini|--antigravity] [--mode <MODE>]
+  memory_plugin setup --uninstall [--purge] [--purge-cache] [--dry-run] [--yes]
+  memory_plugin uninstall [--purge] [--purge-cache] [--dry-run] [--yes] [--opencode|--claude|--codex|--gemini|--antigravity]
   memory_plugin cli                  Interactive terminal UI
   memory_plugin login [--from-env|--api-token|--db-url <URL>]
   memory_plugin logout [--api-key]
@@ -64,7 +66,9 @@ variables over command-line flags — argv is visible to other local processes.
 Data directory: ${MEMORY_DIR}`);
 }
 
-if (cliArgs.includes("--help") || cliArgs.includes("-h") || cliArgs[0] === "help") {
+const isUninstallCommand = cliArgs.includes("uninstall") || cliArgs.includes("--uninstall");
+
+if (!isUninstallCommand && (cliArgs.includes("--help") || cliArgs.includes("-h") || cliArgs[0] === "help")) {
   printUsage();
   process.exit(0);
 }
@@ -72,6 +76,12 @@ if (cliArgs.includes("--help") || cliArgs.includes("-h") || cliArgs[0] === "help
 if (cliArgs.includes("--version") || cliArgs.includes("-v")) {
   console.log(readPackageVersion());
   process.exit(0);
+}
+
+if (isUninstallCommand) {
+  const { runUninstall } = await import("./uninstall.js");
+  await runUninstall();
+  process.exit(process.exitCode || 0);
 }
 
 if (cliArgs.includes("setup") || cliArgs.includes("install") || cliArgs.includes("--setup") || cliArgs.includes("-s")) {

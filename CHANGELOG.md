@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated shared prompts and the bundled memory skill to distinguish auto-injected clients from integrations that must initialize with `recall(scope: "all")`.
 - OpenCode now separates active `<PERSONAL_AGENT_OVERLAY>` entries from descriptive `<MEMORY_FACTS>` and injects the actual active directives into `experimental.chat.system.transform`.
 - `dev:link` now synchronizes managed prompts and bundled skills for non-OpenCode clients in addition to linking the OpenCode source and system CLI.
+- Claude Code, Gemini CLI, and Codex setup/uninstall now use each client's native MCP lifecycle command first, verify the resulting registration, and fall back to ownership-checked JSON/TOML editing only when the client CLI is missing, fails, or leaves the expected entry unchanged.
+- Gemini CLI is now a separate integration using `~/.gemini/settings.json`, `~/.gemini/GEMINI.md`, and `~/.gemini/skills`; Antigravity keeps its distinct `~/.gemini/config` and optional workspace `.agents` layout.
+- Normal OpenCode uninstall now preserves the host package cache. Cache cleanup is explicit through `--purge-cache` and removes only exact package-owned directories, including versioned cache entries.
 
 ### Added
 
@@ -21,11 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added explicit Notebook `kind: "fact" | "directive"` semantics across MCP and OpenCode `remember` / `update_fact` tools, with `[DIRECTIVE]` recall badges and compatibility for legacy persona/preference tags.
 - Added managed persona prompt synchronization for Codex, Claude Code, and Antigravity through `memory-cli sync-persona` / `npm run persona:sync`, including automatic refresh after global directive mutations and cloud pulls.
 - Added idempotent `memory-cli migrate-persona [--dry-run]` / `npm run persona:migrate` to permanently classify legacy global personalization entries as `kind:directive` and regenerate managed client prompts.
+- Added `memory_plugin uninstall` / `memory-cli uninstall` and the `memory_plugin setup --uninstall` alias with per-client targeting, `--dry-run`, data-preserving defaults, guarded `--purge`, and explicit `--purge-cache` support.
+- Added a shared cross-platform client path and CLI execution layer with Windows npm-shim support plus `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `OPENCODE_CONFIG_DIR`, and `MEMORY_DIR` handling.
 
 ### Fixed
 
 - Fixed `remember_note` omitting the ingestion `blobHash` from its public result, which broke cross-device raw-blob portability consumers and was previously masked by Windows temp-cleanup errors.
 - Fixed concurrent `triggerBackgroundSync()` callers returning before the active queue drain completed; callers now join one active promise that includes requested follow-up passes.
+- Fixed uninstall ownership checks so foreign `memory-agent` registrations, unrelated OpenCode plugins/cache packages, modified skills, and user-authored content outside managed prompt/persona markers are never removed.
+- Fixed Codex TOML cleanup to remove only plugin-owned `memory-agent` tables while preserving unrelated formatting and child sections, and made malformed client configuration fail closed instead of being overwritten.
+- Fixed uninstall failure reporting to return a non-zero exit status when any requested cleanup step fails.
 
 ## [1.6.6] - 2026-08-17
 

@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
-import { linkOpenCodeToRepository, rewriteOpenCodePluginList, syncDevelopmentSkills } from "../../mcp-server/dev_link.js";
+import { isMemoryPluginSpec, linkOpenCodeToRepository, rewriteOpenCodePluginList, syncDevelopmentSkills } from "../../mcp-server/dev_link.js";
 
 export async function runDevLinkTests() {
   console.log("--- Running Unit Tests: dev_link ---");
@@ -15,6 +15,11 @@ export async function runDevLinkTests() {
   );
   assert.deepStrictEqual(rewritten, ["unrelated", devUrl, unrelatedTuple]);
   assert.deepStrictEqual(rewriteOpenCodePluginList(rewritten, devUrl), rewritten, "rewrite must be idempotent");
+  assert.strictEqual(
+    isMemoryPluginSpec("file:///C:/projects/memory-dashboard/opencode-plugin/main.js", devUrl),
+    false,
+    "an unrelated file plugin containing 'memory' in its path must not be claimed"
+  );
 
   const root = await mkdtemp(join(tmpdir(), "memory-dev-link-"));
   try {

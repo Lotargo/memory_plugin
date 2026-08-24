@@ -12,6 +12,12 @@ import {
 import { factBody } from "../fact_format.js";
 
 export async function handleDirectCommands(cliArgs) {
+  if (cliArgs[0] === "uninstall" || cliArgs.includes("uninstall") || cliArgs.includes("--uninstall")) {
+    const { runUninstall } = await import("../uninstall.js");
+    await runUninstall();
+    return true;
+  }
+
   if (cliArgs[0] === "dev-link" || cliArgs[0] === "dev_link") {
     const { runDevLink } = await import("../dev_link.js");
     await runDevLink();

@@ -19,7 +19,7 @@
 
 **Local-first long-term memory, cold episodic notes, and hybrid RAG for AI coding agents**
 
-One memory system for OpenCode, Codex, Claude Code, Antigravity / Gemini CLI, Google Jules, and other MCP clients.
+One memory system for OpenCode, Codex, Claude Code, Gemini CLI, Antigravity, Google Jules, and other MCP clients.
 
 </div>
 
@@ -48,7 +48,7 @@ The same engine adds Git-based project isolation, semantic search, full raw-sour
 - PDF, DOCX, XLSX/XLS/CSV, Markdown, text, HTML/URL, and source-code ingestion.
 - Three-tier document hierarchy, retrieval-policy expansion for tables/code, and GraphRAG Lite symbol extraction.
 - Git-identity project scopes that follow a repository across directories, machines, and operating systems.
-- Active persona overlays shared across OpenCode, Codex, Claude Code, and Antigravity.
+- Active persona overlays shared across OpenCode, Codex, Claude Code, Gemini CLI, and Antigravity.
 - Local-only, cloud-only, and bidirectional hybrid-sync modes, including portable raw RAG blobs and deletion tombstones.
 - No Docker, external vector database, hosted embedding API, or telemetry.
 
@@ -62,7 +62,7 @@ The same engine adds Git-based project isolation, semantic search, full raw-sour
 
 - Node.js `22.5.0` or newer; the project uses the built-in `node:sqlite` module.
 - npm/npx.
-- OpenCode, Codex, Claude Code, Antigravity / Gemini CLI, Google Jules, or another MCP-capable client.
+- OpenCode, Codex, Claude Code, Gemini CLI, Antigravity, Google Jules, or another MCP-capable client.
 
 CPU execution with `Xenova/multilingual-e5-small` is the recommended stable default. WebGPU execution is experimental.
 
@@ -88,12 +88,46 @@ memory_plugin setup --opencode
 memory_plugin setup --codex
 memory_plugin setup --claude
 memory_plugin setup --antigravity
-memory_plugin setup --gemini        # Antigravity alias
+memory_plugin setup --gemini        # Gemini CLI (~/.gemini/settings.json)
 ```
 
 Use `--local` with Antigravity setup to create the workspace-local `.agents/mcp_config.json` even when `.agents/` does not yet exist.
 
+Claude Code, Gemini CLI, and Codex setup/uninstall use their native MCP lifecycle commands when available. An ownership-checked config edit is retained as a compatibility fallback for missing, older, or non-functional client CLIs. Antigravity remains a separate integration because it uses a different config layout.
+
 Setup also installs the bundled `using-memory` skill and managed memory instructions for the selected clients. Existing unrelated configuration is preserved.
+
+### Uninstall
+
+Remove the plugin from one or all clients without deleting Notebook/RAG data:
+
+```bash
+memory_plugin uninstall --dry-run   # preview
+memory_plugin uninstall             # remove all clients, keep data
+memory_plugin uninstall --purge --yes  # also delete local data (MEMORY_DIR, prompt state)
+memory_plugin uninstall --opencode --purge-cache  # explicitly remove this plugin's OpenCode cache
+memory_plugin uninstall --opencode --claude  # only selected clients
+npx @lotargo/memory_plugin uninstall --dry-run
+memory_plugin setup --uninstall --purge  # alias
+```
+
+What `uninstall` removes by default (without `--purge`):
+
+- `~/.config/opencode/opencode.json` — plugin entry (including `file://` dev link)
+- `~/.claude.json` — `mcpServers.memory-agent`
+- `~/.gemini/settings.json` — Gemini CLI `mcpServers.memory-agent`
+- `~/.gemini/config/mcp_config.json` and `.agents/mcp_config.json` — Antigravity `mcpServers.memory-agent`
+- `~/.codex/config.toml` — `[mcp_servers.memory-agent]` (only if owned by this plugin)
+- Managed prompt blocks from `~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`, `~/.gemini/GEMINI.md`, and `~/.gemini/config/AGENTS.md`
+- `using-memory` skill from each client's `skills/` directory
+
+Existing user content outside the managed prompt/persona markers is preserved. Foreign `memory-agent` registrations, modified/non-owned `using-memory` skills, unrelated file plugins, and other packages in the `@lotargo` OpenCode cache namespace are left untouched.
+
+Normal uninstall keeps OpenCode's package cache, matching the host lifecycle. `--purge-cache` removes only exact cache directories owned by this package; unrelated packages, including other packages in the `@lotargo` namespace, remain untouched.
+
+With `--purge` it also deletes `MEMORY_DIR` (`~/.config/opencode/memory` by default) and the memory-agent prompt state. Purge resolves and validates every target before changing client configuration, rejects filesystem roots, home/workspace/config roots and broad top-level paths, follows symlinks for validation, and prints the exact targets before interactive confirmation. The npm package itself is removed separately with `npm uninstall -g @lotargo/memory_plugin`. Restart clients after uninstall.
+
+On Linux/macOS, `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` are respected for OpenCode configuration, prompt state, and package-cache cleanup. `OPENCODE_CONFIG_DIR` and `MEMORY_DIR` remain explicit overrides on every platform.
 
 ### Verify Codex
 
@@ -126,7 +160,7 @@ npm run dev:link
 
 `dev:link` performs an npm global link for the `memory_plugin`, `memory-agent`, and `memory-cli` binaries; rewrites only this plugin's OpenCode entry to an absolute `file://` URL for `opencode-plugin/main.js`; creates `opencode.json.memory-dev-backup` on first use; synchronizes managed prompts; and copies the current skill to all client skill locations.
 
-After code changes, restart OpenCode to reload the module. Codex, Claude Code, and Antigravity load prompt and skill files at session start, so open a new task/session after synchronization. Publishing to npm is not required for local testing.
+After code changes, restart OpenCode to reload the module. Codex, Claude Code, Gemini CLI, and Antigravity load prompt and skill files at session start, so open a new task/session after synchronization. Publishing to npm is not required for local testing.
 
 ---
 
@@ -220,12 +254,13 @@ The native plugin performs complete session initialization automatically:
 - Directives are promoted through OpenCode's system-prompt transform.
 - Agents are instructed not to perform a redundant startup `recall`; manual or filtered recall remains available.
 
-### Codex, Claude Code, and Antigravity
+### Codex, Claude Code, Gemini CLI, and Antigravity
 
 These clients receive plugin-owned instruction and persona blocks in:
 
 - `~/.codex/AGENTS.md`
 - `~/.claude/CLAUDE.md`
+- `~/.gemini/GEMINI.md`
 - `~/.gemini/config/AGENTS.md`
 
 The global Notebook is the source of truth. Managed prompt blocks are generated views and update automatically after global directive changes, relevant cloud pulls, setup, or `dev:link`.
@@ -405,6 +440,7 @@ The MCP server exposes **16 tools**. The native OpenCode plugin exposes the same
 | `memory-cli sync-persona` | Regenerate managed persona blocks from global directives. |
 | `memory-cli migrate-persona [--dry-run]` | Convert legacy persona metadata to explicit `kind:directive`. |
 | `memory-cli dev-link` | Link the installed binaries/OpenCode plugin to the working repository. |
+| `memory-cli uninstall [--purge] [--purge-cache] [--dry-run] [--yes] [client flags]` | Remove plugin, MCP entries, prompts and skills; `--purge` deletes local data, while `--purge-cache` explicitly removes only this plugin's OpenCode cache. |
 
 The TUI provides retrieval configuration, model management, Notebook/RAG browsing, reindexing, snapshots, cloud settings, prompt integration, diagnostics, and reset actions. Use Up/Down, Enter, and Backspace to navigate.
 
@@ -417,7 +453,8 @@ The TUI provides retrieval configuration, model management, Notebook/RAG browsin
 | OpenCode | Native plugin in `~/.config/opencode/opencode.json` | Full memory auto-injection + system persona transform | 18 |
 | Codex | MCP server in `~/.codex/config.toml` | Managed prompt requires full `recall(scope: "all")` | 16 |
 | Claude Code | MCP server in `~/.claude.json` | Managed prompt requires full `recall(scope: "all")` | 16 |
-| Antigravity / Gemini CLI | MCP server in `~/.gemini/config/mcp_config.json` and optional `.agents/mcp_config.json` | Managed prompt requires full `recall(scope: "all")` | 16 |
+| Gemini CLI | MCP server in `~/.gemini/settings.json` | Managed `~/.gemini/GEMINI.md` prompt requires full `recall(scope: "all")` | 16 |
+| Antigravity | MCP server in `~/.gemini/config/mcp_config.json` and optional `.agents/mcp_config.json` | Managed prompt requires full `recall(scope: "all")` | 16 |
 | Google Jules / generic MCP | MCP stdio server | Client instructions should initialize with full recall | 16 |
 
 The bundled [`using-memory` skill](./skills/using-memory/SKILL.md) teaches agents to:

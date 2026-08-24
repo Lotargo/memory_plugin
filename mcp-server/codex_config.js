@@ -102,6 +102,44 @@ function sectionRanges(lines) {
   }));
 }
 
+function validateOwnedMemoryAgentTargets(lines, ranges) {
+  const targets = ranges.filter((range) => isMemoryAgentHeader(range.name));
+  if (targets.length === 0) return { targets, exactTargets: [], conflict: null };
+
+  const exactTargets = targets.filter((range) => isMemoryAgentHeader(range.name, { exact: true }));
+  const unowned = exactTargets.filter((range) => {
+    const text = lines.slice(range.start, range.end).join("\n");
+    return !isMemoryPluginOwnedSection(text);
+  });
+  if (unowned.length > 0 || exactTargets.length === 0) {
+    return {
+      targets,
+      exactTargets,
+      conflict: "Existing memory-agent TOML section is not recognized as owned by @lotargo/memory_plugin",
+    };
+  }
+
+  let activeOwnedRoot = false;
+  for (const range of ranges) {
+    if (isMemoryAgentHeader(range.name, { exact: true })) {
+      const text = lines.slice(range.start, range.end).join("\n");
+      activeOwnedRoot = isMemoryPluginOwnedSection(text);
+    } else if (isMemoryAgentHeader(range.name)) {
+      if (!activeOwnedRoot) {
+        return {
+          targets,
+          exactTargets,
+          conflict: "A memory-agent child TOML section is not attached to an owned plugin section",
+        };
+      }
+    } else {
+      activeOwnedRoot = false;
+    }
+  }
+
+  return { targets, exactTargets, conflict: null };
+}
+
 export function getCodexMemoryAgentSections(content) {
   const lines = String(content || "").split(/\r?\n/);
   return sectionRanges(lines)
@@ -113,25 +151,65 @@ export function getCodexMemoryAgentSections(content) {
     }));
 }
 
+export function removeCodexMemoryAgentConfig(content) {
+  const source = String(content || "");
+  const eol = source.includes("\r\n") ? "\r\n" : "\n";
+  const lines = source.split(/\r?\n/);
+  const ranges = sectionRanges(lines);
+  const { targets, conflict } = validateOwnedMemoryAgentTargets(lines, ranges);
+
+  if (targets.length === 0) {
+    return { content: source, changed: false, status: "not_found", removed: 0 };
+  }
+
+  if (conflict) {
+    return {
+      content: source,
+      changed: false,
+      status: "conflict",
+      reason: conflict,
+      removed: 0,
+    };
+  }
+
+  const targetLineIndexes = new Set();
+  for (const target of targets) {
+    let contentEnd = target.end;
+    while (contentEnd > target.start + 1 && lines[contentEnd - 1] === "") contentEnd--;
+    for (let i = target.start; i < contentEnd; i++) targetLineIndexes.add(i);
+  }
+
+  const result = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (targetLineIndexes.has(i)) continue;
+    result.push(lines[i]);
+  }
+
+  let updated = result.join(eol);
+  if (updated.trim() === "") updated = "";
+
+  return {
+    content: updated,
+    changed: updated !== source,
+    status: updated !== source ? "removed" : "unchanged",
+    removed: targets.length,
+  };
+}
+
 export function updateCodexMemoryAgentConfig(content, options) {
   const source = String(content || "");
   const eol = source.includes("\r\n") ? "\r\n" : "\n";
   const lines = source.split(/\r?\n/);
   const desired = buildCodexMemoryAgentSection(options).split("\n");
   const ranges = sectionRanges(lines);
-  const targets = ranges.filter((range) => isMemoryAgentHeader(range.name));
-  const exactTargets = targets.filter((range) => isMemoryAgentHeader(range.name, { exact: true }));
+  const { targets, conflict } = validateOwnedMemoryAgentTargets(lines, ranges);
 
-  const unowned = exactTargets.filter((range) => {
-    const text = lines.slice(range.start, range.end).join("\n");
-    return !isMemoryPluginOwnedSection(text);
-  });
-  if (unowned.length > 0) {
+  if (conflict) {
     return {
       content: source,
       changed: false,
       status: "conflict",
-      reason: "Existing [mcp_servers.memory-agent] section is not recognized as owned by @lotargo/memory_plugin",
+      reason: conflict,
     };
   }
 

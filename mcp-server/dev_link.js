@@ -2,8 +2,8 @@ import { copyFile, cp, mkdir, readFile, readdir, rename, writeFile } from "node:
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
-import { homedir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { resolveClientPaths } from "./client_paths.js";
 
 export const PACKAGE_NAME = "@lotargo/memory_plugin";
 export const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -20,12 +20,13 @@ function pluginSpec(entry) {
   return Array.isArray(entry) ? entry[0] : entry;
 }
 
-function isMemoryPluginSpec(spec, devPluginUrl) {
+export function isMemoryPluginSpec(spec, devPluginUrl = pathToFileURL(DEV_PLUGIN_FILE).href) {
   if (typeof spec !== "string") return false;
   if (LEGACY_PACKAGE_NAMES.has(spec)) return true;
+  if (/^@lotargo\/memory_plugin(?:@[^/]+)?$/i.test(spec)) return true;
+  if (/^(?:opencode-memory-plugin|memory_plugin|memory-plugin)(?:@[^/]+)?$/i.test(spec)) return true;
   if (spec === devPluginUrl) return true;
-  const normalized = spec.replace(/\\/g, "/").toLowerCase();
-  return normalized.includes("/memory/") && normalized.endsWith("/opencode-plugin/main.js");
+  return false;
 }
 
 export function rewriteOpenCodePluginList(pluginList, devPluginUrl) {
@@ -49,7 +50,7 @@ export function rewriteOpenCodePluginList(pluginList, devPluginUrl) {
 }
 
 export async function linkOpenCodeToRepository({
-  configDir = process.env.OPENCODE_CONFIG_DIR || join(homedir(), ".config", "opencode"),
+  configDir = resolveClientPaths().opencodeDir,
   pluginFile = DEV_PLUGIN_FILE,
 } = {}) {
   if (!existsSync(pluginFile)) throw new Error(`OpenCode plugin entry not found: ${pluginFile}`);
@@ -95,8 +96,7 @@ export async function syncDevelopmentSkills({
   targets = null,
 } = {}) {
   if (!existsSync(skillsSource)) return [];
-  const home = homedir();
-  const opencodeDir = process.env.OPENCODE_CONFIG_DIR || join(home, ".config", "opencode");
+  const { home, opencodeDir } = resolveClientPaths();
   const destinations = targets || [
     join(opencodeDir, "skills"),
     join(home, ".codex", "skills"),
@@ -134,7 +134,7 @@ export async function runDevLink({ skipNpmLink = false } = {}) {
   if (promptFailures.length) {
     throw new Error(`Failed to synchronize client prompts: ${promptFailures.map((item) => item.name).join(", ")}`);
   }
-  console.log("  [OK] Codex, Claude Code, and Antigravity prompts synchronized");
+  console.log("  [OK] Codex, Claude Code, Gemini CLI, and Antigravity prompts synchronized");
   const skillTargets = await syncDevelopmentSkills();
   console.log(`  [OK] Development skills synchronized to ${skillTargets.length} client location(s)`);
   console.log("\nDevelopment link is active. After source edits, restart OpenCode; publishing and reinstalling are not required.\n");

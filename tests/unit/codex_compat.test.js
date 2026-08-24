@@ -4,6 +4,7 @@ import {
   escapeTomlBasicString,
   getCodexMemoryAgentSections,
   isSupportedNodeVersion,
+  removeCodexMemoryAgentConfig,
   updateCodexMemoryAgentConfig,
   validateCodexRuntime,
 } from "../../mcp-server/codex_config.js";
@@ -75,6 +76,36 @@ export async function runCodexCompatTests() {
   const conflict = updateCodexMemoryAgentConfig(foreign, { nodePath, bootPath });
   assert.strictEqual(conflict.status, "conflict");
   assert.strictEqual(conflict.content, foreign);
+
+  const ownedWithFormatting = [
+    'model = "gpt-5"',
+    "",
+    "",
+    "",
+    "[mcp_servers.memory-agent]",
+    `command = "${nodePath.replace(/\\/g, "\\\\")}"`,
+    `args = ["${bootPath.replace(/\\/g, "\\\\")}"]`,
+    "",
+    "[mcp_servers.other]",
+    'command = "other.exe"',
+    "",
+  ].join("\r\n");
+  const removed = removeCodexMemoryAgentConfig(ownedWithFormatting);
+  assert.strictEqual(removed.status, "removed");
+  assert.ok(!removed.content.includes("mcp_servers.memory-agent"), removed.content);
+  assert.ok(removed.content.startsWith('model = "gpt-5"\r\n\r\n\r\n\r\n'), "unrelated blank lines must be preserved");
+  assert.ok(removed.content.includes('[mcp_servers.other]\r\ncommand = "other.exe"'), removed.content);
+
+  const foreignChildOnly = [
+    'title = "foreign"',
+    "",
+    "[mcp_servers.memory-agent.env]",
+    'TOKEN = "keep"',
+    "",
+  ].join("\n");
+  const childConflict = removeCodexMemoryAgentConfig(foreignChildOnly);
+  assert.strictEqual(childConflict.status, "conflict");
+  assert.strictEqual(childConflict.content, foreignChildOnly);
 
   const invalid = validateCodexRuntime({
     nodePath,

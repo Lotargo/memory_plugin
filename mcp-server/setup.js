@@ -1,19 +1,59 @@
 import { readFile, writeFile, mkdir, cp, readdir } from "fs/promises";
 import { existsSync } from "fs";
 import { join, dirname } from "path";
-import { homedir } from "os";
 import { fileURLToPath } from "url";
+import { resolveClientPaths } from "./client_paths.js";
+import { cliFailureMessage, runClientCli } from "./client_cli.js";
+import { MEMORY_MCP_ENTRY, isMemoryMcpServerEntry, isMemoryPluginEntry, readJsonConfig } from "./client_registration.js";
+
+async function configureJsonMcpClient({ label, cliName, cliArgs, configPath }) {
+  let config = await readJsonConfig(configPath);
+  const existing = config.mcpServers?.["memory-agent"];
+  if (existing && !isMemoryMcpServerEntry(existing)) {
+    throw new Error(`Existing mcpServers.memory-agent in ${configPath} is not owned by this plugin`);
+  }
+  if (existing) return { method: "existing", configPath };
+
+  const native = runClientCli(cliName, cliArgs);
+  if (native.ok) {
+    config = await readJsonConfig(configPath);
+    if (isMemoryMcpServerEntry(config.mcpServers?.["memory-agent"])) {
+      return { method: "native", configPath };
+    }
+  }
+
+  // Compatibility fallback for older/missing clients, and for wrappers that
+  // report success without writing the expected user-scope configuration.
+  config = await readJsonConfig(configPath);
+  const afterNative = config.mcpServers?.["memory-agent"];
+  if (afterNative && !isMemoryMcpServerEntry(afterNative)) {
+    throw new Error(`Native ${label} setup created an unrecognized memory-agent entry in ${configPath}`);
+  }
+  if (!config.mcpServers || typeof config.mcpServers !== "object" || Array.isArray(config.mcpServers)) {
+    config.mcpServers = {};
+  }
+  config.mcpServers["memory-agent"] = MEMORY_MCP_ENTRY;
+  await mkdir(dirname(configPath), { recursive: true });
+  await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
+  return {
+    method: "fallback",
+    configPath,
+    nativeReason: native.ok ? "native command did not create the expected entry" : cliFailureMessage(native),
+  };
+}
 
 export async function runSetup() {
   const args = process.argv.slice(2);
-  const hasSpecificFlag = args.some((a) =>
+  const lowerArgs = args.map((arg) => String(arg).toLowerCase());
+  const hasSpecificFlag = lowerArgs.some((a) =>
     ["--opencode", "--claude", "--codex", "--antigravity", "--gemini"].includes(a.toLowerCase())
   );
 
-  const doOpenCode = !hasSpecificFlag || args.includes("--opencode");
-  const doClaude = !hasSpecificFlag || args.includes("--claude");
-  const doAntigravity = !hasSpecificFlag || args.includes("--antigravity") || args.includes("--gemini");
-  const doCodex = !hasSpecificFlag || args.includes("--codex");
+  const doOpenCode = !hasSpecificFlag || lowerArgs.includes("--opencode");
+  const doClaude = !hasSpecificFlag || lowerArgs.includes("--claude");
+  const doAntigravity = !hasSpecificFlag || lowerArgs.includes("--antigravity");
+  const doGemini = !hasSpecificFlag || lowerArgs.includes("--gemini");
+  const doCodex = !hasSpecificFlag || lowerArgs.includes("--codex");
 
   // Headless cloud setup: --api-key <TURSO_API_TOKEN> and/or --mode <only-local|only-cloud|hybrid-sync>
   const VALID_MODES = ["only-local", "only-cloud", "hybrid-sync"];
@@ -24,7 +64,8 @@ export async function runSetup() {
   }
 
   console.log("\nSetting up @lotargo/memory_plugin...\n");
-  const home = homedir();
+  const clientPaths = resolveClientPaths();
+  const { home } = clientPaths;
   let configuredCount = 0;
 
   // 0. Headless cloud authentication (Google Jules / CI / VPS)
@@ -62,28 +103,13 @@ export async function runSetup() {
   // 1. OpenCode (~/.config/opencode/opencode.json)
   if (doOpenCode) {
     try {
-      const opencodeDir = process.env.OPENCODE_CONFIG_DIR || join(home, ".config", "opencode");
-      const opencodeConfigPath = join(opencodeDir, "opencode.json");
+      const { opencodeDir, opencodeConfigPath } = clientPaths;
       await mkdir(opencodeDir, { recursive: true });
 
-      let config = {};
-      if (existsSync(opencodeConfigPath)) {
-        try {
-          config = JSON.parse(await readFile(opencodeConfigPath, "utf-8"));
-        } catch (e) {}
-      }
+      const config = await readJsonConfig(opencodeConfigPath);
       if (!Array.isArray(config.plugin)) config.plugin = [];
       // Clean up legacy / obsolete / duplicate entries of OUR plugin only
-      const obsoleteNames = ["opencode-memory-plugin", "memory_plugin", "memory-plugin", "@lotargo/memory_plugin"];
-      config.plugin = config.plugin.filter((p) => {
-        if (typeof p !== "string") return true;
-        if (obsoleteNames.includes(p)) return false;
-        const normalized = p.replace(/\\/g, "/").toLowerCase();
-        if (normalized.endsWith("/memory") || normalized.endsWith("/memory_plugin") || normalized.endsWith("/memory-plugin")) {
-          return false;
-        }
-        return true;
-      });
+      config.plugin = config.plugin.filter((entry) => !isMemoryPluginEntry(entry));
       config.plugin.push("@lotargo/memory_plugin");
       // Clean up legacy mcp-helper.js standalone file plugin if present
       const legacyPluginFile = join(opencodeDir, "plugins", "mcp-helper.js");
@@ -92,11 +118,18 @@ export async function runSetup() {
       }
 
       // Purge stale OpenCode package cache for memory plugin so OpenCode downloads latest version
-      const opencodeCachePackages = join(home, ".cache", "opencode", "packages");
+      const opencodeCachePackages = clientPaths.opencodeCachePackages;
       if (existsSync(opencodeCachePackages)) {
         try {
           const { rm } = await import("fs/promises");
-          const targets = ["@lotargo", "memory_plugin", "memory_plugin@latest", "opencode-memory-plugin", "opencode-memory-plugin@latest"];
+          const targets = [
+            join("@lotargo", "memory_plugin"),
+            join("@lotargo", "memory_plugin@latest"),
+            "memory_plugin",
+            "memory_plugin@latest",
+            "opencode-memory-plugin",
+            "opencode-memory-plugin@latest",
+          ];
           for (const t of targets) {
             const p = join(opencodeCachePackages, t);
             if (existsSync(p)) await rm(p, { recursive: true, force: true });
@@ -112,52 +145,42 @@ export async function runSetup() {
     }
   }
 
-  // 2. Claude Code (~/.claude.json)
+  // 2. Claude Code (native user-scope MCP lifecycle, JSON fallback)
   if (doClaude) {
     try {
-      const claudePath = join(home, ".claude.json");
-      let config = {};
-      if (existsSync(claudePath)) {
-        try {
-          config = JSON.parse(await readFile(claudePath, "utf-8"));
-        } catch (e) {}
-      }
-      if (!config.mcpServers) config.mcpServers = {};
-      config.mcpServers["memory-agent"] = {
-        command: "npx",
-        args: ["-y", "@lotargo/memory_plugin"],
-      };
-      await writeFile(claudePath, JSON.stringify(config, null, 2));
-      console.log("  [OK] Claude Code: configured MCP server in ~/.claude.json");
+      const result = await configureJsonMcpClient({
+        label: "Claude Code",
+        cliName: "claude",
+        cliArgs: ["mcp", "add", "--scope", "user", "memory-agent", "--", "npx", "-y", "@lotargo/memory_plugin"],
+        configPath: clientPaths.claudeConfigPath,
+      });
+      console.log(`  [OK] Claude Code: configured MCP server via ${result.method === "native" ? "claude mcp add" : result.method === "existing" ? "existing owned registration" : "ownership-checked JSON fallback"}`);
+      if (result.nativeReason) console.log(`  [INFO] Claude Code fallback: ${result.nativeReason}`);
       configuredCount++;
     } catch (err) {
       console.log("  [SKIP] Claude Code setup skipped:", err.message);
     }
   }
 
-  // 3. Antigravity / Gemini CLI (~/.gemini/config/mcp_config.json & .agents/mcp_config.json)
+  // 3. Antigravity (~/.gemini/config/mcp_config.json & .agents/mcp_config.json)
   if (doAntigravity) {
     try {
       // Global Antigravity config
-      const geminiConfigDir = join(home, ".gemini", "config");
+      const geminiConfigDir = clientPaths.geminiConfigDir;
       await mkdir(geminiConfigDir, { recursive: true });
       const geminiConfigFile = join(geminiConfigDir, "mcp_config.json");
 
-      let config = {};
-      if (existsSync(geminiConfigFile)) {
-        try {
-          config = JSON.parse(await readFile(geminiConfigFile, "utf-8"));
-        } catch (e) {}
-      }
+      const config = await readJsonConfig(geminiConfigFile);
       if (!config.mcpServers) config.mcpServers = {};
-      config.mcpServers["memory-agent"] = {
-        command: "npx",
-        args: ["-y", "@lotargo/memory_plugin"],
-      };
-      await writeFile(geminiConfigFile, JSON.stringify(config, null, 2));
+      const existingGlobal = config.mcpServers["memory-agent"];
+      if (existingGlobal && !isMemoryMcpServerEntry(existingGlobal)) {
+        throw new Error(`Existing Antigravity mcpServers.memory-agent in ${geminiConfigFile} is not owned by this plugin`);
+      }
+      config.mcpServers["memory-agent"] = MEMORY_MCP_ENTRY;
+      await writeFile(geminiConfigFile, JSON.stringify(config, null, 2) + "\n", "utf-8");
 
       // Local workspace config (.agents/mcp_config.json) only if .agents exists or --local flag is set
-      const cwd = process.cwd();
+      const cwd = clientPaths.cwd;
       const hasAgentsDir = existsSync(join(cwd, ".agents"));
       const isLocalRequested = args.includes("--local");
 
@@ -165,18 +188,14 @@ export async function runSetup() {
         const localAgentsDir = join(cwd, ".agents");
         await mkdir(localAgentsDir, { recursive: true });
         const localMcpFile = join(localAgentsDir, "mcp_config.json");
-        let localConfig = {};
-        if (existsSync(localMcpFile)) {
-          try {
-            localConfig = JSON.parse(await readFile(localMcpFile, "utf-8"));
-          } catch (e) {}
-        }
+        const localConfig = await readJsonConfig(localMcpFile);
         if (!localConfig.mcpServers) localConfig.mcpServers = {};
-        localConfig.mcpServers["memory-agent"] = {
-          command: "npx",
-          args: ["-y", "@lotargo/memory_plugin"],
-        };
-        await writeFile(localMcpFile, JSON.stringify(localConfig, null, 2));
+        const existingLocal = localConfig.mcpServers["memory-agent"];
+        if (existingLocal && !isMemoryMcpServerEntry(existingLocal)) {
+          throw new Error(`Existing Antigravity mcpServers.memory-agent in ${localMcpFile} is not owned by this plugin`);
+        }
+        localConfig.mcpServers["memory-agent"] = MEMORY_MCP_ENTRY;
+        await writeFile(localMcpFile, JSON.stringify(localConfig, null, 2) + "\n", "utf-8");
         console.log("  [OK] Antigravity: configured MCP server in ~/.gemini/config/mcp_config.json and .agents/mcp_config.json");
       } else {
         console.log("  [OK] Antigravity: configured MCP server in ~/.gemini/config/mcp_config.json");
@@ -187,15 +206,32 @@ export async function runSetup() {
     }
   }
 
-  // 4. Codex (~/.codex/config.toml)
+  // 4. Gemini CLI (native user-scope MCP lifecycle, settings.json fallback)
+  if (doGemini) {
+    try {
+      const result = await configureJsonMcpClient({
+        label: "Gemini CLI",
+        cliName: "gemini",
+        cliArgs: ["mcp", "add", "--scope", "user", "memory-agent", "npx", "--", "-y", "@lotargo/memory_plugin"],
+        configPath: clientPaths.geminiSettingsPath,
+      });
+      console.log(`  [OK] Gemini CLI: configured MCP server via ${result.method === "native" ? "gemini mcp add" : result.method === "existing" ? "existing owned registration" : "ownership-checked settings.json fallback"}`);
+      if (result.nativeReason) console.log(`  [INFO] Gemini CLI fallback: ${result.nativeReason}`);
+      configuredCount++;
+    } catch (err) {
+      console.log("  [SKIP] Gemini CLI setup skipped:", err.message);
+    }
+  }
+
+  // 5. Codex (~/.codex/config.toml)
   if (doCodex) {
     try {
       const {
         updateCodexMemoryAgentConfig,
         validateCodexRuntime,
       } = await import("./codex_config.js");
-      const codexDir = join(home, ".codex");
-      const codexConfig = join(codexDir, "config.toml");
+      const codexDir = clientPaths.codexDir;
+      const codexConfig = clientPaths.codexConfigPath;
       const nodePath = process.execPath;
       const bootPath = fileURLToPath(new URL("./boot.js", import.meta.url));
       const runtime = validateCodexRuntime({ nodePath, nodeVersion: process.versions.node, bootPath });
@@ -204,32 +240,45 @@ export async function runSetup() {
       }
 
       await mkdir(codexDir, { recursive: true });
-      const content = existsSync(codexConfig) ? await readFile(codexConfig, "utf-8") : "";
-      const update = updateCodexMemoryAgentConfig(content, { nodePath, bootPath });
+      let content = existsSync(codexConfig) ? await readFile(codexConfig, "utf-8") : "";
+      let update = updateCodexMemoryAgentConfig(content, { nodePath, bootPath });
       if (update.status === "conflict") {
         throw new Error(update.reason);
+      }
+      let nativeReason = null;
+      if (update.status === "added") {
+        const native = runClientCli("codex", ["mcp", "add", "memory-agent", "--", nodePath, bootPath]);
+        if (native.ok) {
+          content = existsSync(codexConfig) ? await readFile(codexConfig, "utf-8") : "";
+          update = updateCodexMemoryAgentConfig(content, { nodePath, bootPath });
+          if (update.status === "conflict") throw new Error(update.reason);
+        } else {
+          nativeReason = cliFailureMessage(native);
+        }
       }
       if (update.changed) {
         await writeFile(codexConfig, update.content, "utf-8");
         console.log(
           update.status === "added"
-            ? "  [OK] Codex: added direct Node.js memory-agent launcher to ~/.codex/config.toml"
-            : "  [OK] Codex: migrated memory-agent to a direct Node.js launcher in ~/.codex/config.toml"
+            ? "  [OK] Codex: added direct Node.js memory-agent launcher via ownership-checked TOML fallback"
+            : "  [OK] Codex: normalized memory-agent registration after native setup"
         );
       } else {
-        console.log("  [INFO] Codex: direct Node.js memory-agent launcher already configured");
+        console.log("  [INFO] Codex: direct Node.js memory-agent launcher configured via codex mcp add or already present");
       }
+      if (nativeReason) console.log(`  [INFO] Codex fallback: ${nativeReason}`);
       configuredCount++;
     } catch (err) {
       console.log("  [FAIL] Codex setup failed:", err.message);
     }
   }
 
-  // 5. Global Prompt Instructions (Antigravity, Codex, Claude Code)
+  // 6. Global Prompt Instructions
   try {
     const { enableGlobalPrompt } = await import("./prompt_manager.js");
     const promptTargets = [];
     if (doAntigravity) promptTargets.push("Antigravity");
+    if (doGemini) promptTargets.push("Gemini CLI");
     if (doCodex) promptTargets.push("Codex");
     if (doClaude) promptTargets.push("Claude Code");
     const promptResults = await enableGlobalPrompt(promptTargets);
@@ -248,21 +297,22 @@ export async function runSetup() {
     console.log("  [SKIP] Global prompt setup skipped:", err.message);
   }
 
-  // 6. Global & Local Skill Installation (Antigravity, Codex, Claude Code)
+  // 7. Global & Local Skill Installation
   try {
     const packageDir = dirname(dirname(fileURLToPath(import.meta.url)));
     const packageSkillsDir = join(packageDir, "skills");
     if (existsSync(packageSkillsDir)) {
-      const opencodeDir = process.env.OPENCODE_CONFIG_DIR || join(home, ".config", "opencode");
+      const opencodeDir = clientPaths.opencodeDir;
       const targets = [];
       if (doOpenCode) targets.push({ name: "OpenCode", dir: join(opencodeDir, "skills") });
       if (doAntigravity) targets.push({ name: "Antigravity", dir: join(home, ".gemini", "config", "skills") });
+      if (doGemini) targets.push({ name: "Gemini CLI", dir: clientPaths.geminiSkillsDir });
       if (doCodex) {
         targets.push({ name: "Codex", dir: join(home, ".codex", "skills") });
         targets.push({ name: "Codex shared agents", dir: join(home, ".agents", "skills") });
       }
       if (doClaude) targets.push({ name: "Claude Code", dir: join(home, ".claude", "skills") });
-      const cwd = process.cwd();
+      const cwd = clientPaths.cwd;
       if (doAntigravity && existsSync(join(cwd, ".agents"))) {
         targets.push({ name: "Antigravity (local)", dir: join(cwd, ".agents", "skills") });
       }
