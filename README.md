@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/Lotargo/memory_plugin/main/assets/01_hero_banner.png" alt="memory_plugin architecture — persistent memory, RAG, persona and CLI runtime" width="100%">
+<img src="./assets/01_hero_banner.png" alt="memory_plugin architecture — persistent memory, RAG, persona and CLI runtime" width="100%">
 
 <br>
 
@@ -47,7 +47,7 @@ The same engine adds Git-based project isolation, semantic search, full raw-sour
 
 ### Architecture at a Glance
 
-<img src="https://raw.githubusercontent.com/Lotargo/memory_plugin/main/assets/02_project_evolution.png" alt="Evolution of memory_plugin from notebook memory through RAG, persona and cross-client agent state" width="100%">
+<img src="./assets/02_project_evolution.png" alt="Evolution of memory_plugin from notebook memory through RAG, persona and cross-client agent state" width="100%">
 
 ### Highlights
 
@@ -174,7 +174,7 @@ After code changes, restart OpenCode to reload the module. Codex, Claude Code, G
 
 ## Memory Architecture
 
-<img src="https://raw.githubusercontent.com/Lotargo/memory_plugin/main/assets/03_hot_memory_vs_cold_rag.png" alt="Hot persistent memory versus cold RAG retrieval architecture in memory_plugin" width="100%">
+<img src="./assets/03_hot_memory_vs_cold_rag.png" alt="Hot persistent memory versus cold RAG retrieval architecture in memory_plugin" width="100%">
 
 The architecture deliberately separates **small, always-useful context** from **large, on-demand knowledge**. This keeps session initialization useful without turning persistent memory into an ever-growing prompt.
 
@@ -248,7 +248,7 @@ This keeps startup context small while preserving the complete reasoning trail w
 
 ## Persona and Agent Personalization
 
-<img src="https://raw.githubusercontent.com/Lotargo/memory_plugin/main/assets/04_fact_vs_directive.png" alt="Fact versus directive semantics in memory_plugin" width="100%">
+<img src="./assets/04_fact_vs_directive.png" alt="Fact versus directive semantics in memory_plugin" width="100%">
 
 Notebook entries have explicit semantics:
 
@@ -259,7 +259,7 @@ kind: "directive"  # active configuration — how the agent should behave
 
 Use `kind: "directive"` for personality, behavior, tone, communication style, preferences, or working conventions the agent should actively apply. Explicit `kind` is authoritative; persuasive wording alone does not turn a fact into an instruction.
 
-<img src="https://raw.githubusercontent.com/Lotargo/memory_plugin/main/assets/05_persona_as_runtime_state.png" alt="The same model with neutral, coding-focused and personalized runtime state" width="100%">
+<img src="./assets/05_persona_as_runtime_state.png" alt="The same model with neutral, coding-focused and personalized runtime state" width="100%">
 
 ### OpenCode
 
