@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.8] - 2026-08-25
+
+### Changed
+
+- Refreshed npm package positioning around local-first memory, hybrid RAG, agent personalization, and coding-agent integrations.
+- Expanded package keywords for agent memory, coding agents, personalization, context engineering, local-first workflows, and Google Jules discovery.
+- Updated package repository, homepage, and issue metadata to the canonical `Lotargo/memory_plugin` repository after the GitHub rename.
+- Updated README hero asset URLs to the canonical repository and added a text H1 covering memory, hybrid RAG, and agent personalization.
+
+## [1.6.7] - 2026-08-24
+
 ### Changed
 
 - OpenCode's native auto-injection now explicitly suppresses redundant startup `recall` calls while preserving manual recall for inspection, filtering, history, and explicit scopes.
@@ -272,5 +283,7 @@ a critical retrieval regression introduced after `v1.5.3`.
 - `BENCHMARKS.md` tables were re-derived from the stored JSON artifacts; the
   bge-m3 section had carried e5-small numbers shifted by a column.
 
-[1.6.1]: https://github.com/Lotargo/memory_pugin/releases/tag/v1.6.1
-[1.6.0]: https://github.com/Lotargo/memory_pugin/releases/tag/v1.6.0
+[1.6.8]: https://github.com/Lotargo/memory_plugin/releases/tag/v1.6.8
+[1.6.7]: https://github.com/Lotargo/memory_plugin/releases/tag/v1.6.7
+[1.6.1]: https://github.com/Lotargo/memory_plugin/releases/tag/v1.6.1
+[1.6.0]: https://github.com/Lotargo/memory_plugin/releases/tag/v1.6.0
