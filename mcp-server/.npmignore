@@ -1,0 +1,4 @@
+# Repository-only development assets.
+# This nested ignore is required because package.json explicitly includes mcp-server/.
+benchmarks/
+test*
