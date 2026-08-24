@@ -401,7 +401,7 @@ The MCP server exposes **16 tools**. The native OpenCode plugin exposes the same
 | :--- | :--- | :--- |
 | `link_project_memory` | `directory`, `remote` | Register Git identity and migrate compatible legacy data. |
 | `unlink_project_memory` | `directory`, `purge` | Remove an alias or purge its registry identity. |
-| `relink_project_memory` | `directory`, `remote` | Move/merge memory into a new Git remote identity. |
+| `relink_project_memory` | `directory`, `remote` | Move/merge memory into a new normalized remote identity. |
 | `link_knowledge` | `action`, `factText`, `docId`, `scope`, `startLine`, `endLine`, `relationType` | Link facts to documents/notes or inspect graph links. |
 
 ### RAG Knowledge Base
@@ -533,12 +533,9 @@ exports/                          snapshots/exports
 
 ### Dependency Advisories
 
-At the time of this README update, `npm audit` reports three high-severity findings with no npm-available fix:
+Spreadsheet ingestion uses SheetJS CE `0.20.3` from the official SheetJS CDN rather than the stale `xlsx@0.18.5` package in the public npm registry. This version is outside the affected ranges for the known [prototype pollution](https://github.com/advisories/GHSA-4r6h-8v6p-xvw6) and [ReDoS](https://github.com/advisories/GHSA-5pgg-2g8v-p4x9) advisories.
 
-| Package | Exposure in this project | Mitigation |
-| :--- | :--- | :--- |
-| `xlsx` | Spreadsheet parsing when the user explicitly ingests XLSX/XLS/CSV | Do not ingest untrusted spreadsheets. Advisories: [prototype pollution](https://github.com/advisories/GHSA-4r6h-8v6p-xvw6), [ReDoS](https://github.com/advisories/GHSA-5pgg-2g8v-p4x9). |
-| `sharp` via `@huggingface/transformers` | Transformers dependency includes image decoding, while this project supplies text to embedding/reranking pipelines | Normal text-memory use does not exercise the image path. Advisory: [libvips inherited vulnerabilities](https://github.com/advisories/GHSA-f88m-g3jw-g9cj). |
+`npm audit` may still report the high-severity `sharp` / libvips advisory inherited through `@huggingface/transformers`. The project uses Transformers only for text feature extraction and explicitly sets `env.sharp = false`; it does not pass images through the Transformers image-decoding path. The upstream dependency currently constrains `sharp` below the patched `0.35.x` line, so this warning remains transitive until Transformers updates its dependency. Advisory: [GHSA-f88m-g3jw-g9cj](https://github.com/advisories/GHSA-f88m-g3jw-g9cj).
 
 ---
 
