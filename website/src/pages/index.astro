@@ -58,9 +58,141 @@ import MemoryMatrix from '../components/MemoryMatrix.astro';
     </div>
   </section>
 
-  <section class="next-section shell" id="architecture">
-    <p class="section-index">03 / NEXT</p>
-    <h2>Remember what matters.<br /><span>Retrieve the rest.</span></h2>
+  <section id="architecture" class="architecture shell">
+    <header class="section-heading borderless-heading">
+      <p class="section-index">03 / CONTEXT ARCHITECTURE</p>
+      <h2>Remember what matters.<br /><span>Retrieve the rest.</span></h2>
+    </header>
+    <div class="temperature-grid">
+      <article class="temperature-panel hot-panel">
+        <div class="panel-meta"><span>HOT</span><span>ALWAYS AVAILABLE</span></div>
+        <h3>Notebook<br />memory</h3>
+        <ul><li>API conventions</li><li>User preferences</li><li>Project constraints</li><li>Active directives</li></ul>
+        <code>session → context</code>
+      </article>
+      <div class="temperature-bridge" aria-hidden="true"><span>query</span><b>→</b></div>
+      <article class="temperature-panel cold-panel">
+        <div class="panel-meta"><span>COLD</span><span>ON DEMAND</span></div>
+        <h3>RAG<br />knowledge</h3>
+        <ul><li>Research</li><li>Documents</li><li>Investigations</li><li>Long decisions</li></ul>
+        <code>search → source</code>
+      </article>
+    </div>
   </section>
+
+  <section class="retrieval shell">
+    <header class="section-heading borderless-heading">
+      <p class="section-index">04 / RETRIEVAL</p>
+      <h2>Find the memory.<br /><span>Not just the words.</span></h2>
+    </header>
+    <div class="search-stage">
+      <div class="search-top"><span>QUERY KNOWLEDGE BASE</span><span>HYBRID / LOCAL</span></div>
+      <div class="search-query"><span>⌕</span><strong>authentication token investigation</strong><kbd>↵</kbd></div>
+      <div class="search-results">
+        <article><span class="rank">01</span><div><strong>Authentication Investigation</strong><small>research · project</small></div><span class="score">0.94</span></article>
+        <article><span class="rank">02</span><div><strong>Token storage decision</strong><small>decision · project</small></div><span class="score">0.81</span></article>
+        <article><span class="rank">03</span><div><strong>API authentication docs</strong><small>document · global</small></div><span class="score">0.73</span></article>
+      </div>
+      <footer>SQLite FTS5 BM25 <b>+</b> local vectors <b>+</b> hybrid ranking</footer>
+    </div>
+  </section>
+
+  <section id="clients" class="clients shell">
+    <header class="section-heading borderless-heading">
+      <p class="section-index">05 / CLIENTS</p>
+      <h2>Change the agent.<br /><span>Keep yourself.</span></h2>
+    </header>
+    <div class="client-network">
+      <div class="network-grid" aria-hidden="true"></div>
+      <div class="memory-core"><span class="core-mark">M</span><p>YOUR MEMORY</p><strong>one persistent layer</strong></div>
+      <div class="network-axis axis-x" aria-hidden="true"></div><div class="network-axis axis-y" aria-hidden="true"></div>
+      <article class="agent-card a1"><small>01</small><strong>Codex</strong><span>connected</span></article>
+      <article class="agent-card a2"><small>02</small><strong>Claude Code</strong><span>connected</span></article>
+      <article class="agent-card a3"><small>03</small><strong>OpenCode</strong><span>connected</span></article>
+      <article class="agent-card a4"><small>04</small><strong>Gemini CLI</strong><span>connected</span></article>
+      <article class="agent-card a5"><small>05</small><strong>Antigravity</strong><span>connected</span></article>
+      <article class="agent-card a6"><small>06</small><strong>Any MCP client</strong><span>ready</span></article>
+    </div>
+  </section>
+
+  <section class="persona-strip shell">
+    <div class="persona-copy">
+      <p class="section-index">06 / PERSONA</p>
+      <h2>The model can change.<br /><span>The persona stays.</span></h2>
+    </div>
+    <div class="persona-overlay">
+      <div class="overlay-title"><span>PERSONAL AGENT OVERLAY</span><span>ACTIVE</span></div>
+      <dl><div><dt>Tone</dt><dd>direct</dd></div><div><dt>Working style</dt><dd>concise</dd></div><div><dt>Preferences</dt><dd>persistent</dd></div><div><dt>Semantics</dt><dd>directive</dd></div></dl>
+    </div>
+  </section>
+
+  <section class="project-identity shell">
+    <header class="section-heading split-heading">
+      <p class="section-index">07 / PROJECT IDENTITY</p>
+      <h2>Memory follows<br />the repository.</h2>
+    </header>
+    <div class="identity-diagram">
+      <div class="path-box"><span>WINDOWS</span><code>D:\work\memory_plugin</code></div>
+      <i>→</i>
+      <div class="git-box"><span>GIT IDENTITY</span><strong>github.com/Lotargo/<br />memory_plugin</strong><small>same project memory</small></div>
+      <i>←</i>
+      <div class="path-box"><span>LINUX / macOS</span><code>~/projects/memory_plugin</code></div>
+    </div>
+    <p class="identity-caption">Paths change. Machines change. <strong>Project identity doesn't.</strong></p>
+  </section>
+
+  <section id="security" class="local-first shell">
+    <header class="split-heading local-heading">
+      <p class="section-index">08 / LOCAL FIRST</p>
+      <h2>Your memory<br />belongs to you.</h2>
+    </header>
+    <div class="mode-grid">
+      <article><span>01</span><h3>Local</h3><p>Run entirely on your machine. No hosted vector database required.</p></article>
+      <article><span>02</span><h3>Hybrid</h3><p>Keep the local runtime and optionally synchronize portable memory.</p></article>
+      <article><span>03</span><h3>Cloud</h3><p>Carry memory between environments when portability matters.</p></article>
+    </div>
+    <div class="local-facts"><span>SQLite</span><span>Local embeddings</span><span>No external vector DB</span><span>No telemetry</span></div>
+  </section>
+
+  <section id="install" class="install shell">
+    <div class="install-grid">
+      <header>
+        <p class="section-index">09 / GET STARTED</p>
+        <h2>Give your agent<br />a memory.</h2>
+      </header>
+      <div class="install-terminal">
+        <div><span>$</span><code>npm install -g @lotargo/memory_plugin</code><button type="button" data-copy="npm install -g @lotargo/memory_plugin">COPY</button></div>
+        <div><span>$</span><code>memory_plugin setup</code><button type="button" data-copy="memory_plugin setup">COPY</button></div>
+        <small>Node.js 22.5+ · Windows · Linux · macOS</small>
+      </div>
+    </div>
+    <div class="install-actions">
+      <a class="primary-action" href="https://github.com/Lotargo/memory_plugin" target="_blank" rel="noreferrer">View on GitHub <span>→</span></a>
+      <a href="https://www.npmjs.com/package/@lotargo/memory_plugin" target="_blank" rel="noreferrer">npm package <span>↗</span></a>
+    </div>
+  </section>
+
+  <footer class="site-footer shell">
+    <div class="footer-brand"><span class="footer-m">M</span><strong>memory_plugin</strong><p>Persistent context for temporary agents.</p></div>
+    <nav><p>PROJECT</p><a href="https://github.com/Lotargo/memory_plugin" target="_blank" rel="noreferrer">GitHub ↗</a><a href="https://www.npmjs.com/package/@lotargo/memory_plugin" target="_blank" rel="noreferrer">npm ↗</a><a href="https://github.com/Lotargo/memory_plugin/issues" target="_blank" rel="noreferrer">Issues ↗</a></nav>
+    <nav><p>PAGE</p><a href="#features">Features</a><a href="#architecture">Architecture</a><a href="#clients">Clients</a><a href="#security">Local first</a></nav>
+    <nav><p>LEGAL</p><a href="https://github.com/Lotargo/memory_plugin/blob/main/LICENSE" target="_blank" rel="noreferrer">MIT License ↗</a></nav>
+    <div class="footer-bottom"><span>Built for agents that need to remember.</span><span>Lotargo / 2026</span></div>
+  </footer>
 </main>
+
+<script is:inline>
+  document.querySelectorAll('[data-copy]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const value = button.getAttribute('data-copy');
+      if (!value) return;
+      try {
+        await navigator.clipboard.writeText(value);
+        const original = button.textContent;
+        button.textContent = 'COPIED';
+        window.setTimeout(() => { button.textContent = original; }, 1200);
+      } catch {}
+    });
+  });
+</script>
 </BaseLayout>
