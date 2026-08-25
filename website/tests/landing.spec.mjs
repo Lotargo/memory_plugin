@@ -37,13 +37,14 @@ test('mobile explore CTA reaches features', async ({ page }) => {
 test('install section exposes every quick-start setup command separately', async ({ page }) => {
   await page.goto('/memory_plugin/');
   const copyButtons = page.locator('#install [data-copy]');
-  await expect(copyButtons).toHaveCount(8);
+  await expect(copyButtons).toHaveCount(9);
   await expect(page.locator('[data-copy="npm install -g @lotargo/memory_plugin"]')).toBeVisible();
   await expect(page.locator('[data-copy="npx @lotargo/memory_plugin setup"]')).toBeVisible();
   await expect(page.locator('[data-copy="memory_plugin setup --opencode"]')).toBeVisible();
   await expect(page.locator('[data-copy="memory_plugin setup --codex"]')).toBeVisible();
   await expect(page.locator('[data-copy="memory_plugin setup --claude"]')).toBeVisible();
   await expect(page.locator('[data-copy="memory_plugin setup --antigravity"]')).toBeVisible();
+  await expect(page.locator('[data-copy="memory_plugin setup --antigravity --local"]')).toBeVisible();
   await expect(page.locator('[data-copy="memory_plugin setup --gemini"]')).toBeVisible();
 });
 
