@@ -1,5 +1,6 @@
 name: Deploy website to GitHub Pages
 
+# Custom Astro build for the project landing page.
 on:
   push:
     branches:
