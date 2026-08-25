@@ -8,3 +8,12 @@
   <div class="matrix-cell matrix-deep" aria-hidden="true"></div>
   <div class="matrix-cell matrix-warm" aria-hidden="true"></div>
 </div>
+
+<style>
+  /* Keep the desktop mosaic edge-to-edge: Hot Memory and Persona must meet,
+     not occupy the same grid column. Mobile has its own two-column layout. */
+  @media (min-width: 821px) {
+    .matrix-hot { grid-column: 1 / 4; }
+    .matrix-rag { grid-column: 4 / 8; }
+  }
+</style>
