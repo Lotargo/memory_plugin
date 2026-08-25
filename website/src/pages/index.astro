@@ -4,6 +4,7 @@ import Header from '../components/Header.astro';
 import MemoryMatrix from '../components/MemoryMatrix.astro';
 import BrandMark from '../components/BrandMark.astro';
 import BrandIcon from '../components/BrandIcon.astro';
+import CopyIcon from '../components/CopyIcon.astro';
 ---
 <BaseLayout>
 <main id="top">
@@ -17,14 +18,20 @@ import BrandIcon from '../components/BrandIcon.astro';
         <p class="hero-lead">Persistent memory, hybrid RAG, and personalization for AI coding agents.</p>
         <div class="client-line"><span>OpenCode</span><span>Codex</span><span>Claude Code</span><span>Gemini CLI</span><span>Antigravity</span><span>MCP</span></div>
       </div>
-      <aside class="hero-terminal" aria-label="Installation preview">
+      <aside class="hero-terminal" aria-label="Quick start installation commands">
         <div class="terminal-top"><span>QUICK START</span><span class="terminal-status">LOCAL</span></div>
-        <pre><code><span>$</span> npm install -g @lotargo/memory_plugin
-
-<span>$</span> memory_plugin setup
-
-<b>✓</b> Memory layer connected</code></pre>
-        <a href="https://github.com/Lotargo/memory_plugin" target="_blank" rel="noreferrer">View source <span>↗</span></a>
+        <div class="quickstart-list">
+          <div class="quickstart-command"><span class="quickstart-label">GLOBAL INSTALL</span><code>npm install -g @lotargo/memory_plugin</code><button class="icon-copy-button" type="button" data-copy="npm install -g @lotargo/memory_plugin" aria-label="Copy global install command"><CopyIcon /></button></div>
+          <div class="quickstart-command command-primary"><span class="quickstart-label">ALL CLIENTS</span><code>memory_plugin setup</code><button class="icon-copy-button" type="button" data-copy="memory_plugin setup" aria-label="Copy setup command"><CopyIcon /></button></div>
+          <div class="quickstart-command"><span class="quickstart-label">NPX / NO GLOBAL INSTALL</span><code>npx @lotargo/memory_plugin setup</code><button class="icon-copy-button" type="button" data-copy="npx @lotargo/memory_plugin setup" aria-label="Copy npx setup command"><CopyIcon /></button></div>
+          <div class="quickstart-command"><span class="quickstart-label">OPENCODE</span><code>memory_plugin setup --opencode</code><button class="icon-copy-button" type="button" data-copy="memory_plugin setup --opencode" aria-label="Copy OpenCode setup command"><CopyIcon /></button></div>
+          <div class="quickstart-command"><span class="quickstart-label">CODEX</span><code>memory_plugin setup --codex</code><button class="icon-copy-button" type="button" data-copy="memory_plugin setup --codex" aria-label="Copy Codex setup command"><CopyIcon /></button></div>
+          <div class="quickstart-command"><span class="quickstart-label">CLAUDE CODE</span><code>memory_plugin setup --claude</code><button class="icon-copy-button" type="button" data-copy="memory_plugin setup --claude" aria-label="Copy Claude Code setup command"><CopyIcon /></button></div>
+          <div class="quickstart-command"><span class="quickstart-label">ANTIGRAVITY</span><code>memory_plugin setup --antigravity</code><button class="icon-copy-button" type="button" data-copy="memory_plugin setup --antigravity" aria-label="Copy Antigravity setup command"><CopyIcon /></button></div>
+          <div class="quickstart-command"><span class="quickstart-label">ANTIGRAVITY / LOCAL</span><code>memory_plugin setup --antigravity --local</code><button class="icon-copy-button" type="button" data-copy="memory_plugin setup --antigravity --local" aria-label="Copy local Antigravity setup command"><CopyIcon /></button></div>
+          <div class="quickstart-command"><span class="quickstart-label">GEMINI CLI</span><code>memory_plugin setup --gemini</code><button class="icon-copy-button" type="button" data-copy="memory_plugin setup --gemini" aria-label="Copy Gemini CLI setup command"><CopyIcon /></button></div>
+        </div>
+        <a href="https://github.com/Lotargo/memory_plugin#quick-start" target="_blank" rel="noreferrer">Full setup notes <span>↗</span></a>
       </aside>
     </div>
     <MemoryMatrix />
@@ -157,23 +164,17 @@ import BrandIcon from '../components/BrandIcon.astro';
   </section>
 
   <section id="install" class="install shell">
-    <div class="install-grid">
+    <div class="install-grid install-cta-grid">
       <header>
         <p class="section-index">09 / GET STARTED</p>
         <h2>Give your agent<br />a memory.</h2>
-        <p class="install-copy">Install globally, run once with npx, or target only the client you want. Every command below is independently copyable.</p>
+        <p class="install-copy">Pick the setup path you need from Quick Start above, copy it with one click, and keep the full README nearby for configuration details.</p>
       </header>
-      <div class="install-terminal" aria-label="Installation and client setup commands">
-        <div class="command-primary"><span>$</span><span class="command-body"><span class="command-label">Global install</span><code>npm install -g @lotargo/memory_plugin</code></span><button type="button" data-copy="npm install -g @lotargo/memory_plugin">COPY</button></div>
-        <div class="command-primary"><span>$</span><span class="command-body"><span class="command-label">Configure all supported clients</span><code>memory_plugin setup</code></span><button type="button" data-copy="memory_plugin setup">COPY</button></div>
-        <div><span>$</span><span class="command-body"><span class="command-label">No global install / npx</span><code>npx @lotargo/memory_plugin setup</code></span><button type="button" data-copy="npx @lotargo/memory_plugin setup">COPY</button></div>
-        <div class="command-target"><span>$</span><span class="command-body"><span class="command-label">OpenCode only</span><code>memory_plugin setup --opencode</code></span><button type="button" data-copy="memory_plugin setup --opencode">COPY</button></div>
-        <div class="command-target"><span>$</span><span class="command-body"><span class="command-label">Codex only</span><code>memory_plugin setup --codex</code></span><button type="button" data-copy="memory_plugin setup --codex">COPY</button></div>
-        <div class="command-target"><span>$</span><span class="command-body"><span class="command-label">Claude Code only</span><code>memory_plugin setup --claude</code></span><button type="button" data-copy="memory_plugin setup --claude">COPY</button></div>
-        <div class="command-target"><span>$</span><span class="command-body"><span class="command-label">Antigravity only</span><code>memory_plugin setup --antigravity</code></span><button type="button" data-copy="memory_plugin setup --antigravity">COPY</button></div>
-        <div class="command-target"><span>$</span><span class="command-body"><span class="command-label">Antigravity · workspace local</span><code>memory_plugin setup --antigravity --local</code></span><button type="button" data-copy="memory_plugin setup --antigravity --local">COPY</button></div>
-        <div class="command-target"><span>$</span><span class="command-body"><span class="command-label">Gemini CLI only</span><code>memory_plugin setup --gemini</code></span><button type="button" data-copy="memory_plugin setup --gemini">COPY</button></div>
-        <small>Node.js 22.5+ · Windows · Linux · macOS · use <code>--local</code> with Antigravity for workspace-local <code>.agents/mcp_config.json</code></small>
+      <div class="install-summary">
+        <span class="install-summary-label">QUICK START</span>
+        <strong>9 setup paths.<br />One memory layer.</strong>
+        <p>Global install, npx, per-client setup, and workspace-local Antigravity are all available at the top of the page.</p>
+        <a href="#top">Back to Quick Start <span>↑</span></a>
       </div>
     </div>
     <div class="install-actions">
@@ -198,9 +199,12 @@ import BrandIcon from '../components/BrandIcon.astro';
       if (!value) return;
       try {
         await navigator.clipboard.writeText(value);
-        const original = button.textContent;
-        button.textContent = 'COPIED';
-        window.setTimeout(() => { button.textContent = original; }, 1200);
+        button.classList.add('is-copied');
+        button.setAttribute('aria-label', 'Copied');
+        window.setTimeout(() => {
+          button.classList.remove('is-copied');
+          button.setAttribute('aria-label', 'Copy command');
+        }, 1200);
       } catch {}
     });
   });
