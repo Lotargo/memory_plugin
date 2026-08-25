@@ -58,3 +58,29 @@ test('brand assets are wired into the page shell', async ({ page }) => {
   await expect(page.getByRole('link', { name: /GitHub/i }).first().locator('svg')).toBeVisible();
   await expect(page.getByRole('link', { name: /^npm/i }).first().locator('svg')).toBeVisible();
 });
+
+test('Memory Matrix reacts to hover through active and neighbor states', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/memory_plugin/');
+  const matrix = page.locator('[data-memory-matrix]');
+  const hot = matrix.locator('[data-cell="hot"]');
+  const rag = matrix.locator('[data-cell="rag"]');
+  const vector = matrix.locator('[data-cell="vector"]');
+
+  await hot.hover();
+  await expect(matrix).toHaveClass(/has-active/);
+  await expect(hot).toHaveClass(/is-active/);
+  await expect(rag).toHaveClass(/is-neighbor/);
+  await expect(vector).toHaveClass(/is-neighbor/);
+
+  await page.mouse.move(2, 2);
+  await expect(matrix).not.toHaveClass(/has-active/);
+});
+
+test('Memory Matrix disables structural motion when reduced motion is requested', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/memory_plugin/');
+  const matrix = page.locator('[data-memory-matrix]');
+  await expect(matrix).toHaveClass(/is-ready/);
+  await expect(matrix).not.toHaveClass(/motion-armed/);
+});
