@@ -2,6 +2,8 @@
 import BaseLayout from '../layouts/BaseLayout.astro';
 import Header from '../components/Header.astro';
 import MemoryMatrix from '../components/MemoryMatrix.astro';
+import BrandMark from '../components/BrandMark.astro';
+import BrandIcon from '../components/BrandIcon.astro';
 ---
 <BaseLayout>
 <main id="top">
@@ -104,7 +106,7 @@ import MemoryMatrix from '../components/MemoryMatrix.astro';
     </header>
     <div class="client-network">
       <div class="network-grid" aria-hidden="true"></div>
-      <div class="memory-core"><span class="core-mark">M</span><p>YOUR MEMORY</p><strong>one persistent layer</strong></div>
+      <div class="memory-core"><BrandMark class="core-brand-mark" /><p>YOUR MEMORY</p><strong>one persistent layer</strong></div>
       <div class="network-axis axis-x" aria-hidden="true"></div><div class="network-axis axis-y" aria-hidden="true"></div>
       <article class="agent-card a1"><small>01</small><strong>Codex</strong><span>connected</span></article>
       <article class="agent-card a2"><small>02</small><strong>Claude Code</strong><span>connected</span></article>
@@ -159,21 +161,28 @@ import MemoryMatrix from '../components/MemoryMatrix.astro';
       <header>
         <p class="section-index">09 / GET STARTED</p>
         <h2>Give your agent<br />a memory.</h2>
+        <p class="install-copy">Install globally, run once with npx, or target only the client you want. Every command below is independently copyable.</p>
       </header>
-      <div class="install-terminal">
-        <div><span>$</span><code>npm install -g @lotargo/memory_plugin</code><button type="button" data-copy="npm install -g @lotargo/memory_plugin">COPY</button></div>
-        <div><span>$</span><code>memory_plugin setup</code><button type="button" data-copy="memory_plugin setup">COPY</button></div>
-        <small>Node.js 22.5+ · Windows · Linux · macOS</small>
+      <div class="install-terminal" aria-label="Installation and client setup commands">
+        <div class="command-primary"><span>$</span><span class="command-body"><span class="command-label">Global install</span><code>npm install -g @lotargo/memory_plugin</code></span><button type="button" data-copy="npm install -g @lotargo/memory_plugin">COPY</button></div>
+        <div class="command-primary"><span>$</span><span class="command-body"><span class="command-label">Configure all supported clients</span><code>memory_plugin setup</code></span><button type="button" data-copy="memory_plugin setup">COPY</button></div>
+        <div><span>$</span><span class="command-body"><span class="command-label">No global install / npx</span><code>npx @lotargo/memory_plugin setup</code></span><button type="button" data-copy="npx @lotargo/memory_plugin setup">COPY</button></div>
+        <div class="command-target"><span>$</span><span class="command-body"><span class="command-label">OpenCode only</span><code>memory_plugin setup --opencode</code></span><button type="button" data-copy="memory_plugin setup --opencode">COPY</button></div>
+        <div class="command-target"><span>$</span><span class="command-body"><span class="command-label">Codex only</span><code>memory_plugin setup --codex</code></span><button type="button" data-copy="memory_plugin setup --codex">COPY</button></div>
+        <div class="command-target"><span>$</span><span class="command-body"><span class="command-label">Claude Code only</span><code>memory_plugin setup --claude</code></span><button type="button" data-copy="memory_plugin setup --claude">COPY</button></div>
+        <div class="command-target"><span>$</span><span class="command-body"><span class="command-label">Antigravity only</span><code>memory_plugin setup --antigravity</code></span><button type="button" data-copy="memory_plugin setup --antigravity">COPY</button></div>
+        <div class="command-target"><span>$</span><span class="command-body"><span class="command-label">Gemini CLI only</span><code>memory_plugin setup --gemini</code></span><button type="button" data-copy="memory_plugin setup --gemini">COPY</button></div>
+        <small>Node.js 22.5+ · Windows · Linux · macOS · use <code>--local</code> with Antigravity for workspace-local <code>.agents/mcp_config.json</code></small>
       </div>
     </div>
     <div class="install-actions">
-      <a class="primary-action" href="https://github.com/Lotargo/memory_plugin" target="_blank" rel="noreferrer">View on GitHub <span>→</span></a>
-      <a href="https://www.npmjs.com/package/@lotargo/memory_plugin" target="_blank" rel="noreferrer">npm package <span>↗</span></a>
+      <a class="primary-action" href="https://github.com/Lotargo/memory_plugin" target="_blank" rel="noreferrer"><BrandIcon name="github" class="action-brand-icon" /><strong>View on GitHub</strong><span>→</span></a>
+      <a href="https://www.npmjs.com/package/@lotargo/memory_plugin" target="_blank" rel="noreferrer"><BrandIcon name="npm" class="action-brand-icon npm-icon" /><strong>npm package</strong><span>↗</span></a>
     </div>
   </section>
 
   <footer class="site-footer shell">
-    <div class="footer-brand"><span class="footer-m">M</span><strong>memory_plugin</strong><p>Persistent context for temporary agents.</p></div>
+    <div class="footer-brand"><BrandMark class="footer-brand-mark" /><strong>memory_plugin</strong><p>Persistent context for temporary agents.</p></div>
     <nav><p>PROJECT</p><a href="https://github.com/Lotargo/memory_plugin" target="_blank" rel="noreferrer">GitHub ↗</a><a href="https://www.npmjs.com/package/@lotargo/memory_plugin" target="_blank" rel="noreferrer">npm ↗</a><a href="https://github.com/Lotargo/memory_plugin/issues" target="_blank" rel="noreferrer">Issues ↗</a></nav>
     <nav><p>PAGE</p><a href="#features">Features</a><a href="#architecture">Architecture</a><a href="#clients">Clients</a><a href="#security">Local first</a></nav>
     <nav><p>LEGAL</p><a href="https://github.com/Lotargo/memory_plugin/blob/main/LICENSE" target="_blank" rel="noreferrer">MIT License ↗</a></nav>

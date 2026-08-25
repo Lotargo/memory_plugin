@@ -1,6 +1,7 @@
 ---
 import '../styles/global.css';
 import '../styles/sections.css';
+import '../styles/polish.css';
 
 interface Props {
   title?: string;
@@ -10,6 +11,7 @@ const {
   title = 'memory_plugin — persistent memory for AI agents',
   description = 'Local-first persistent memory, hybrid RAG, and agent personalization for AI coding agents.'
 } = Astro.props;
+const base = import.meta.env.BASE_URL;
 ---
 <!doctype html>
 <html lang="en">
@@ -18,6 +20,11 @@ const {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content={description} />
   <meta name="theme-color" content="#0d0d0f" />
+  <link rel="icon" type="image/svg+xml" href={`${base}favicon.svg`} />
+  <link rel="icon" type="image/png" sizes="32x32" href={`${base}favicon-32x32.png`} />
+  <link rel="icon" type="image/png" sizes="16x16" href={`${base}favicon-16x16.png`} />
+  <link rel="shortcut icon" href={`${base}favicon.ico`} />
+  <link rel="apple-touch-icon" sizes="180x180" href={`${base}apple-touch-icon.png`} />
   <title>{title}</title>
 </head>
 <body><slot /></body>

@@ -1,6 +1,10 @@
+---
+import BrandMark from './BrandMark.astro';
+import BrandIcon from './BrandIcon.astro';
+---
 <header class="site-header">
   <a class="brand" href="#top" aria-label="memory_plugin home">
-    <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+    <BrandMark class="brand-mark-v3" />
     <span>memory_plugin</span>
   </a>
   <nav class="desktop-nav" aria-label="Primary navigation">
@@ -10,8 +14,8 @@
     <a href="#security">Local first</a>
   </nav>
   <div class="header-actions">
-    <a class="header-link hide-small" href="https://www.npmjs.com/package/@lotargo/memory_plugin" target="_blank" rel="noreferrer">npm ↗</a>
-    <a class="header-link hide-small" href="https://github.com/Lotargo/memory_plugin" target="_blank" rel="noreferrer">GitHub ↗</a>
+    <a class="header-link brand-link hide-small" href="https://www.npmjs.com/package/@lotargo/memory_plugin" target="_blank" rel="noreferrer"><BrandIcon name="npm" class="brand-icon npm-icon" /><span>npm</span><span aria-hidden="true">↗</span></a>
+    <a class="header-link brand-link hide-small" href="https://github.com/Lotargo/memory_plugin" target="_blank" rel="noreferrer"><BrandIcon name="github" class="brand-icon" /><span>GitHub</span><span aria-hidden="true">↗</span></a>
     <a class="header-cta" href="#features">Explore <span>↓</span></a>
   </div>
 </header>

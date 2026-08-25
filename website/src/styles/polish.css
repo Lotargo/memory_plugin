@@ -1,0 +1,18 @@
+/* v0.2 visual polish: original Memory V3 identity + readable UI scale */
+.eyebrow,.kicker,.section-index,.terminal-top{font-size:12px;line-height:1.3}
+.desktop-nav a,.header-link,.header-cta{font-size:14px}
+.brand{font-size:16px}.brand-mark-v3{width:30px;height:30px;flex:0 0 auto;display:block}
+.brand-link{display:flex!important;grid-auto-flow:column;gap:8px}.brand-icon{width:17px;height:17px;display:block;flex:0 0 auto}.npm-icon{width:22px}
+.hero-terminal pre{font-size:15px;line-height:1.9}.hero-terminal>a{font-size:14px}.client-line{font-size:12px;color:#929197}
+.matrix-cell small{font-size:11px;line-height:1.25}.matrix-cell .eyebrow{font-size:11px}.matrix-persona{grid-column:5/8}.matrix-vector{grid-column:1/5}
+.layer-number{font-size:12px}.layer-card p:not(.eyebrow){font-size:17px;line-height:1.55}.layer-card code{font-size:13px}
+.panel-meta{font-size:11px}.temperature-panel li{font-size:15px}.temperature-panel code{font-size:12px}.temperature-bridge{font-size:11px}
+.search-top{font-size:11px}.rank,.score,.search-results small{font-size:12px}.search-results strong{font-size:16px}.search-stage footer{font-size:11px}
+.agent-card small,.agent-card span{font-size:11px}.agent-card strong{font-size:18px}.memory-core p{font-size:11px}
+.core-brand-mark{position:absolute;top:16px;left:16px;width:58px;height:58px;padding:7px;background:#0d0d0f}
+.overlay-title{font-size:11px}.persona-overlay dt{font-size:12px}.persona-overlay dd{font-size:16px}
+.path-box span,.git-box span,.git-box small{font-size:11px}.path-box code{font-size:14px}.mode-grid article>span{font-size:11px}.mode-grid p{font-size:16px;line-height:1.55}.local-facts span{font-size:11px}
+.install-copy{max-width:520px;color:#aaa8ae;font-size:17px;line-height:1.55;margin:24px 0 0}.install-terminal{align-self:start}.install-terminal>div{min-height:82px;padding:12px 14px}.install-terminal code{font-size:14px;line-height:1.45}.install-terminal button{font-size:10px;padding:8px 10px}.install-terminal small{font-size:11px;line-height:1.45}.command-label{display:block;margin-bottom:7px;color:#8e8d94;font:11px/1.2 ui-monospace,monospace;text-transform:uppercase;letter-spacing:.05em}.command-body{min-width:0;display:block}.install-terminal .command-target{background:#111114}.install-terminal .command-target code{color:#d6d4d9}.install-terminal .command-primary{background:#18181c}
+.install-actions a{justify-content:flex-start;gap:14px;font-size:16px}.install-actions a>span:last-child{margin-left:auto}.action-brand-icon{width:24px;height:24px}.action-brand-icon.npm-icon{width:32px}
+.footer-brand-mark{width:68px;height:68px;margin-bottom:24px;display:block}.footer-brand p{font-size:15px}.site-footer nav p{font-size:11px}.site-footer nav a{font-size:14px}.footer-bottom{font-size:10px}
+@media(max-width:560px){.brand-mark-v3{width:26px;height:26px}.brand>span:last-child{font-size:14px}.header-cta{font-size:12px}.client-line{font-size:11px}.matrix-cell .eyebrow{font-size:10px}.matrix-cell small{display:block;font-size:9px}.install-copy{font-size:15px}.install-terminal>div{grid-template-columns:18px 1fr auto;min-height:96px}.install-terminal button{grid-column:3;align-self:center;margin:0}.command-label{font-size:10px}.footer-brand-mark{width:58px;height:58px}.footer-bottom{font-size:10px}}
