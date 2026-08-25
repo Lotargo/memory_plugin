@@ -33,3 +33,25 @@ test('mobile explore CTA reaches features', async ({ page }) => {
   await page.getByRole('link', { name: /Explore/ }).click();
   await expect(page.locator('#features')).toBeInViewport();
 });
+
+test('install section exposes every quick-start setup command separately', async ({ page }) => {
+  await page.goto('/memory_plugin/');
+  const copyButtons = page.locator('#install [data-copy]');
+  await expect(copyButtons).toHaveCount(8);
+  await expect(page.locator('[data-copy="npm install -g @lotargo/memory_plugin"]')).toBeVisible();
+  await expect(page.locator('[data-copy="npx @lotargo/memory_plugin setup"]')).toBeVisible();
+  await expect(page.locator('[data-copy="memory_plugin setup --opencode"]')).toBeVisible();
+  await expect(page.locator('[data-copy="memory_plugin setup --codex"]')).toBeVisible();
+  await expect(page.locator('[data-copy="memory_plugin setup --claude"]')).toBeVisible();
+  await expect(page.locator('[data-copy="memory_plugin setup --antigravity"]')).toBeVisible();
+  await expect(page.locator('[data-copy="memory_plugin setup --gemini"]')).toBeVisible();
+});
+
+test('brand assets are wired into the page shell', async ({ page }) => {
+  await page.goto('/memory_plugin/');
+  await expect(page.locator('.brand-mark-v3')).toBeVisible();
+  await expect(page.locator('.footer-brand-mark')).toBeVisible();
+  await expect(page.locator('link[rel="icon"][type="image/svg+xml"]')).toHaveAttribute('href', /favicon\.svg$/);
+  await expect(page.getByRole('link', { name: /GitHub/i }).first().locator('svg')).toBeVisible();
+  await expect(page.getByRole('link', { name: /^npm/i }).first().locator('svg')).toBeVisible();
+});
