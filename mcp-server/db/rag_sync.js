@@ -269,9 +269,15 @@ export async function pullRagFromCloud(db) {
       const local = await db.prepare(
         "SELECT id, path, blob_hash, updated_at FROM documents WHERE id = ?;"
       ).get(doc.id);
+      const localUpdated = Number(local?.updated_at || 0);
+      const remoteUpdated = Number(doc.updated_at || 0);
+      if (local && localUpdated > remoteUpdated) {
+        summary.localNewer++;
+        continue;
+      }
       if (
         local &&
-        Number(local.updated_at || 0) === Number(doc.updated_at || 0) &&
+        localUpdated === remoteUpdated &&
         local.blob_hash === doc.blob_hash &&
         local.path === doc.path
       ) {
