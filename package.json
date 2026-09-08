@@ -1,6 +1,6 @@
 {
   "name": "@lotargo/memory_plugin",
-  "version": "1.6.8",
+  "version": "1.6.9",
   "description": "Local-first memory, hybrid RAG, and agent personalization for AI coding agents (OpenCode, Claude Code, Codex, Gemini CLI, Antigravity). MCP server + CLI with persistent context, document ingestion, vector + SQLite FTS5 retrieval, sync, setup, and safe uninstall.",
   "type": "module",
   "main": "opencode-plugin/main.js",

@@ -22,6 +22,7 @@ export async function runPolicyRetrievalTests() {
     passed++;
   }
 
+  try {
   // ── 1. table_summary chunk creation ──────────────────────────────────
   {
     const tableDoc = [
@@ -37,7 +38,7 @@ export async function runPolicyRetrievalTests() {
       "The table above shows retrieval quality metrics.",
     ].join("\n");
 
-    const r = await ingestDocument({ content: tableDoc, path: "test_table.md", customDb: db });
+    const r = await ingestDocument({ content: tableDoc, path: "test_table.md", customDb: db, generateEmbeddings: false });
     const chunks = await db.prepare("SELECT retrieval_policy, content FROM micro_chunks WHERE doc_id = ?").all(r.docId);
 
     const summary = chunks.find((c) => c.retrieval_policy === "table_summary");
@@ -71,7 +72,7 @@ export async function runPolicyRetrievalTests() {
       "```",
     ].join("\n");
 
-    const r = await ingestDocument({ content: codeDoc, path: "test_code.md", customDb: db });
+    const r = await ingestDocument({ content: codeDoc, path: "test_code.md", customDb: db, generateEmbeddings: false });
     const chunks = await db.prepare("SELECT retrieval_policy, content FROM micro_chunks WHERE doc_id = ?").all(r.docId);
 
     const sig = chunks.find((c) => c.retrieval_policy === "code_signature");
@@ -128,8 +129,10 @@ export async function runPolicyRetrievalTests() {
     ok("policyExpansion=false: table query returns micro_chunks");
   }
 
-  closeDatabase();
-  try { rmSync(temp, { recursive: true, force: true }); } catch {}
+  } finally {
+    try { closeDatabase(); } catch {}
+    try { rmSync(temp, { recursive: true, force: true }); } catch {}
+  }
   console.log(`✅ ALL POLICY RETRIEVAL TESTS PASSED (${passed}/7)`);
 }
 

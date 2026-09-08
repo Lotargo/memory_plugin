@@ -5,7 +5,12 @@ All notable changes to `@lotargo/memory_plugin` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.6.9] - 2026-09-08
+
+### Fixed
+
+- Fixed Turso browser OAuth on Windows: URLs no longer go through `cmd.exe` (which truncated the query string at `&`), browser launch now uses `rundll32.exe url.dll,FileProtocolHandler`. The OAuth loopback server now binds an ephemeral port before the login URL is built, eliminating the listen race and `EADDRINUSE` on the fixed port.
+- Made the `policy_retrieval` unit test offline-deterministic: ingestion now runs with `generateEmbeddings: false` (BM25/policy path only) and DB/temp cleanup is guaranteed via `try/finally`, so a corrupted ONNX model cache no longer fails the suite and blocks the runner.
 
 ## [1.6.8] - 2026-08-25
 
@@ -289,6 +294,7 @@ a critical retrieval regression introduced after `v1.5.3`.
 - `BENCHMARKS.md` tables were re-derived from the stored JSON artifacts; the
   bge-m3 section had carried e5-small numbers shifted by a column.
 
+[1.6.9]: https://github.com/Lotargo/memory_plugin/releases/tag/v1.6.9
 [1.6.8]: https://github.com/Lotargo/memory_plugin/releases/tag/v1.6.8
 [1.6.7]: https://github.com/Lotargo/memory_plugin/releases/tag/v1.6.7
 [1.6.1]: https://github.com/Lotargo/memory_plugin/releases/tag/v1.6.1
