@@ -118,10 +118,18 @@ export async function handleStorageAction(value, config, stats) {
               let links = 0;
               try {
                 const db = await getDatabase();
+                const oldFactText = factText(selectedEntry);
+                const linkedDocs = await db
+                  .prepare("SELECT DISTINCT doc_id FROM knowledge_links WHERE fact_key = ? AND fact_text = ?")
+                  .all(key, oldFactText);
                 const runRes = await db
                   .prepare("UPDATE knowledge_links SET fact_text = ? WHERE fact_key = ? AND fact_text = ?")
-                  .run(newText, key, factText(selectedEntry));
+                  .run(newText, key, oldFactText);
                 links = runRes ? runRes.changes : 0;
+                if (links && linkedDocs.length) {
+                  const { queueDocumentSyncIfNeeded } = await import("../../graph/knowledge_linker.js");
+                  for (const row of linkedDocs) await queueDocumentSyncIfNeeded(db, row.doc_id);
+                }
               } catch (e) {}
               console.clear();
               console.log(`\n  [OK] Fact updated successfully${links ? `, ${links} doc link(s) updated` : ""}.\n`);
