@@ -38,12 +38,6 @@ function resolveEffectiveDirectory(directory, project, ctx) {
   return directory || project || ctx.directory || null;
 }
 
-async function ensureKnowledgeFresh() {
-  if (getConfig().mode !== "hybrid-sync") return;
-  const { ensureReverseSync } = await import("../../db/sync_queue.js");
-  await ensureReverseSync();
-}
-
 async function readRawWithCloudFallback(db, blobHash) {
   try {
     return await readBlob(blobHash);
@@ -68,7 +62,6 @@ export async function listKnowledgeDocuments(
   { scope = null, directory = null, project = null } = {},
   ctx = {}
 ) {
-  await ensureKnowledgeFresh();
   const db = await getDatabase();
   const scopeKeys = await resolveManageRagScopeKeys("list", scope, {
     worktree: ctx.worktree ?? null,
@@ -118,7 +111,6 @@ export async function readKnowledgeDocument(
 ) {
   if (!docId) throw new Error("docId parameter is required for read_document action");
 
-  await ensureKnowledgeFresh();
   const db = await getDatabase();
   const scopeKeys = await resolveManageRagScopeKeys("read_document", scope, {
     worktree: ctx.worktree ?? null,
