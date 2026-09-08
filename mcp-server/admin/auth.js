@@ -9,17 +9,23 @@ onSecretsChanged(() => { _cachedResolvedSecrets = undefined; _cachedResolvedAt =
 
 export const TURSO_API_BASE = () => process.env.TURSO_API_BASE || "https://api.turso.tech";
 
+export function browserLaunchSpec(url, platform = process.platform) {
+  if (platform === "win32") {
+    // Do not route URLs through cmd.exe. '&' is a command separator there and
+    // can truncate Turso's query string before redirect/state/type parameters.
+    return { command: "rundll32.exe", args: ["url.dll,FileProtocolHandler", url] };
+  }
+  if (platform === "darwin") return { command: "open", args: [url] };
+  return { command: "xdg-open", args: [url] };
+}
+
 function openBrowser(url) {
-  const platform = process.platform;
   try {
-    if (platform === "win32") {
-      spawn("cmd", ["/c", "start", "", url], { stdio: "ignore", detached: true }).unref();
-    } else if (platform === "darwin") {
-      spawn("open", [url], { stdio: "ignore", detached: true }).unref();
-    } else {
-      spawn("xdg-open", [url], { stdio: "ignore", detached: true }).unref();
-    }
-  } catch (err) {
+    const { command, args } = browserLaunchSpec(url);
+    const child = spawn(command, args, { stdio: "ignore", detached: true });
+    child.on("error", () => {});
+    child.unref();
+  } catch {
     // Browser auto-open is best-effort; the printed URL can be opened manually.
   }
 }
@@ -28,147 +34,173 @@ function openBrowser(url) {
 // Turso redirects the browser back to the root path:  /?jwt=<JWT>&username=<USERNAME>
 // `expectedState` protects against OAuth CSRF: the callback is only accepted
 // when it echoes the random `state` value that was embedded in the login URL.
-export function startAuthLoopbackServer(port = 48900, expectedState = null) {
-  return new Promise((resolve, reject) => {
-    const server = http.createServer((req, res) => {
-      const url = new URL(req.url, `http://${req.headers.host}`);
-      const token = url.searchParams.get("jwt") || url.searchParams.get("token");
-      const username = url.searchParams.get("username");
-      const error = url.searchParams.get("error");
-      const receivedState = url.searchParams.get("state");
-
-      if (token) {
-        if (expectedState && receivedState !== expectedState) {
-          res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
-          res.end("Invalid state parameter");
-          server.close(() => reject(new Error("OAuth callback rejected: state parameter mismatch (possible CSRF attempt).")));
-          return;
-        }
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(`
-          <!DOCTYPE html>
-          <html lang="en">
-            <head>
-              <meta charset="utf-8" />
-              <meta name="viewport" content="width=device-width, initial-scale=1" />
-              <title>Authorization Successful</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body {
-                  min-height: 100vh;
-                  display: flex;
-                  align-items: center;
-                  justify-content: center;
-                  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-                  -webkit-font-smoothing: antialiased;
-                  background: radial-gradient(1200px 600px at 50% -10%, #1c2028 0%, #101218 55%, #0c0e13 100%);
-                  color: #e8ebf2;
-                  padding: 24px;
-                }
-                .card {
-                  max-width: 420px;
-                  width: 100%;
-                  background: #161a21;
-                  border: 1px solid rgba(255, 255, 255, 0.07);
-                  border-radius: 20px;
-                  padding: 46px 38px;
-                  text-align: center;
-                  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
-                }
-                .badge {
-                  width: 76px;
-                  height: 76px;
-                  margin: 0 auto 26px;
-                  border-radius: 50%;
-                  display: flex;
-                  align-items: center;
-                  justify-content: center;
-                  background: rgba(94, 224, 154, 0.10);
-                  border: 1px solid rgba(94, 224, 154, 0.28);
-                }
-                .badge svg { width: 36px; height: 36px; }
-                h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.2px; color: #f2f4f8; margin-bottom: 12px; }
-                p { font-size: 14px; line-height: 1.65; color: #9aa3b2; }
-                .hint { margin-top: 24px; font-size: 12.5px; color: #6f7887; }
-              </style>
-            </head>
-            <body>
-              <div class="card">
-                <div class="badge">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="#5ee09a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M20 6 9 17l-5-5" />
-                  </svg>
-                </div>
-                <h1>Authorization successful</h1>
-                <p>Your credentials were received and stored securely on this device.</p>
-                <div class="hint">You can now close this tab and return to the terminal.</div>
-              </div>
-            </body>
-          </html>
-        `);
-
-        server.close(() => {
-          resolve({ token, username: username || "" });
-        });
-      } else if (error) {
-        res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(`
-          <!DOCTYPE html>
-          <html lang="en">
-            <head>
-              <meta charset="utf-8" />
-              <meta name="viewport" content="width=device-width, initial-scale=1" />
-              <title>Authorization Failed</title>
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body {
-                  min-height: 100vh;
-                  display: flex;
-                  align-items: center;
-                  justify-content: center;
-                  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-                  -webkit-font-smoothing: antialiased;
-                  background: radial-gradient(1200px 600px at 50% -10%, #1c2028 0%, #101218 55%, #0c0e13 100%);
-                  color: #e8ebf2;
-                  padding: 24px;
-                }
-                .card {
-                  max-width: 400px;
-                  width: 100%;
-                  background: #161a21;
-                  border: 1px solid rgba(255, 255, 255, 0.07);
-                  border-radius: 20px;
-                  padding: 40px 34px;
-                  text-align: center;
-                  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
-                }
-                h1 { font-size: 20px; font-weight: 600; color: #f2f4f8; margin-bottom: 12px; }
-                p { font-size: 14px; line-height: 1.65; color: #9aa3b2; }
-              </style>
-            </head>
-            <body>
-              <div class="card">
-                <h1>Authorization failed</h1>
-                <p>An error occurred during the login flow. Close this tab, return to the terminal, and try again.</p>
-              </div>
-            </body>
-          </html>
-        `);
-        server.close(() => reject(new Error(`Authentication error: ${error}`)));
-      } else {
-        res.writeHead(404, { "Content-Type": "text/plain" });
-        res.end("Not Found");
-      }
-    });
-
-    server.on("error", (err) => {
-      reject(err);
-    });
-
-    server.listen(port, "127.0.0.1", () => {
-      console.log(`\n  [*] Waiting for authorization on local port http://localhost:${port}/...`);
-    });
+export async function createAuthLoopbackServer(port = 0, expectedState = null) {
+  let resolveResult;
+  let rejectResult;
+  const result = new Promise((resolve, reject) => {
+    resolveResult = resolve;
+    rejectResult = reject;
   });
+
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const token = url.searchParams.get("jwt") || url.searchParams.get("token");
+    const username = url.searchParams.get("username");
+    const error = url.searchParams.get("error");
+    const receivedState = url.searchParams.get("state");
+
+    if (token) {
+      if (expectedState && receivedState !== expectedState) {
+        res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("Invalid state parameter");
+        server.close(() => rejectResult(new Error("OAuth callback rejected: state parameter mismatch (possible CSRF attempt).")));
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(`
+        <!DOCTYPE html>
+        <html lang="en">
+          <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>Authorization Successful</title>
+            <style>
+              * { margin: 0; padding: 0; box-sizing: border-box; }
+              body {
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+                -webkit-font-smoothing: antialiased;
+                background: radial-gradient(1200px 600px at 50% -10%, #1c2028 0%, #101218 55%, #0c0e13 100%);
+                color: #e8ebf2;
+                padding: 24px;
+              }
+              .card {
+                max-width: 420px;
+                width: 100%;
+                background: #161a21;
+                border: 1px solid rgba(255, 255, 255, 0.07);
+                border-radius: 20px;
+                padding: 46px 38px;
+                text-align: center;
+                box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+              }
+              .badge {
+                width: 76px;
+                height: 76px;
+                margin: 0 auto 26px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: rgba(94, 224, 154, 0.10);
+                border: 1px solid rgba(94, 224, 154, 0.28);
+              }
+              .badge svg { width: 36px; height: 36px; }
+              h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.2px; color: #f2f4f8; margin-bottom: 12px; }
+              p { font-size: 14px; line-height: 1.65; color: #9aa3b2; }
+              .hint { margin-top: 24px; font-size: 12.5px; color: #6f7887; }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <div class="badge">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#5ee09a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+              </div>
+              <h1>Authorization successful</h1>
+              <p>Your credentials were received and stored securely on this device.</p>
+              <div class="hint">You can now close this tab and return to the terminal.</div>
+            </div>
+          </body>
+        </html>
+      `);
+
+      server.close(() => {
+        resolveResult({ token, username: username || "" });
+      });
+    } else if (error) {
+      res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(`
+        <!DOCTYPE html>
+        <html lang="en">
+          <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>Authorization Failed</title>
+            <style>
+              * { margin: 0; padding: 0; box-sizing: border-box; }
+              body {
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+                -webkit-font-smoothing: antialiased;
+                background: radial-gradient(1200px 600px at 50% -10%, #1c2028 0%, #101218 55%, #0c0e13 100%);
+                color: #e8ebf2;
+                padding: 24px;
+              }
+              .card {
+                max-width: 400px;
+                width: 100%;
+                background: #161a21;
+                border: 1px solid rgba(255, 255, 255, 0.07);
+                border-radius: 20px;
+                padding: 40px 34px;
+                text-align: center;
+                box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+              }
+              h1 { font-size: 20px; font-weight: 600; color: #f2f4f8; margin-bottom: 12px; }
+              p { font-size: 14px; line-height: 1.65; color: #9aa3b2; }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <h1>Authorization failed</h1>
+              <p>An error occurred during the login flow. Close this tab, return to the terminal, and try again.</p>
+            </div>
+          </body>
+        </html>
+      `);
+      server.close(() => rejectResult(new Error(`Authentication error: ${error}`)));
+    } else {
+      res.writeHead(404, { "Content-Type": "text/plain" });
+      res.end("Not Found");
+    }
+  });
+
+  await new Promise((resolve, reject) => {
+    const onError = (err) => {
+      server.off("listening", onListening);
+      reject(err);
+    };
+    const onListening = () => {
+      server.off("error", onError);
+      resolve();
+    };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(port, "127.0.0.1");
+  });
+
+  const address = server.address();
+  const boundPort = typeof address === "object" && address ? address.port : port;
+  console.log(`\n  [*] Waiting for authorization on local port http://localhost:${boundPort}/...`);
+
+  return {
+    port: boundPort,
+    result,
+    close: () => new Promise((resolve) => server.close(() => resolve())),
+  };
+}
+
+// Backward-compatible helper used by tests/older internal callers.
+export function startAuthLoopbackServer(port = 48900, expectedState = null) {
+  return createAuthLoopbackServer(port, expectedState).then(({ result }) => result);
 }
 
 async function apiRequest(token, pathname, { method = "GET", body } = {}) {
@@ -372,7 +404,7 @@ async function finalizeCloudLogin({ token, username, org = null, databaseName = 
 //   4. Mint a full-access token for that database.
 //   5. Persist the encrypted token + dbUrl and mark the session as authorized.
 export async function loginToCloud({
-  customPort = 48900,
+  customPort = 0,
   simulated = false,
   simulatedParams = null,
   autoCreate = true,
@@ -380,29 +412,27 @@ export async function loginToCloud({
   org = null,
 } = {}) {
   const state = crypto.randomBytes(16).toString("hex");
-  const loginUrl = `${TURSO_API_BASE()}/?port=${customPort}&redirect=true&state=${state}&type=cli`;
+  const loopback = await createAuthLoopbackServer(customPort, state);
+  const loginUrl = `${TURSO_API_BASE()}/?port=${loopback.port}&redirect=true&state=${state}&type=cli`;
 
   console.log(`\n  [CLOUD] Please open your system browser to authorize:`);
   console.log(`  \x1b[36m${loginUrl}\x1b[0m\n`);
 
   let received;
   if (simulated && simulatedParams) {
-    received = await new Promise((resolve, reject) => {
-      const serverPromise = startAuthLoopbackServer(customPort, state);
-      const req = http.request(
-        `http://127.0.0.1:${customPort}/?jwt=${encodeURIComponent(simulatedParams.jwt)}&username=${encodeURIComponent(simulatedParams.username)}&state=${encodeURIComponent(state)}`,
-        { method: "GET" },
-        (res) => {
-          res.resume();
-        }
-      );
-      req.on("error", (e) => reject(e));
-      req.end();
-      serverPromise.then(resolve).catch(reject);
-    });
+    const req = http.request(
+      `http://127.0.0.1:${loopback.port}/?jwt=${encodeURIComponent(simulatedParams.jwt)}&username=${encodeURIComponent(simulatedParams.username)}&state=${encodeURIComponent(state)}`,
+      { method: "GET" },
+      (res) => {
+        res.resume();
+      }
+    );
+    req.on("error", () => {});
+    req.end();
+    received = await loopback.result;
   } else {
     openBrowser(loginUrl);
-    received = await startAuthLoopbackServer(customPort, state);
+    received = await loopback.result;
   }
 
   const { token, username } = received;
