@@ -13,8 +13,29 @@ let isSyncing = false;
 let syncRequested = false;
 let activeSyncPromise = null;
 let lastReverseSync = 0;
+let lastRagReverseSync = 0;
 let isReverseSyncing = false;
-const REVERSE_SYNC_INTERVAL_MS = 5000;
+const REVERSE_SYNC_INTERVAL_MS = 30_000;
+const RAG_REVERSE_SYNC_INTERVAL_MS = 5 * 60_000;
+const NOTEBOOK_SYNC_STATE_KEY = "reverse_sync:notebooks:last_success";
+const RAG_SYNC_STATE_KEY = "reverse_sync:rag:last_success";
+
+async function readSyncTimestamp(db, key) {
+  try {
+    const row = await db.prepare("SELECT value FROM sync_state WHERE key = ?;").get(key);
+    return Number(row?.value || 0);
+  } catch {
+    return 0;
+  }
+}
+
+async function writeSyncTimestamp(db, key, value) {
+  await db.prepare(`
+    INSERT INTO sync_state (key, value, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;
+  `).run(key, String(value), Date.now());
+}
 
 async function processSyncTask(db, task) {
   if (task.action === "write_memory") {
@@ -278,35 +299,62 @@ async function pullFromCloud(db) {
   return summary;
 }
 
-export async function syncFromCloud() {
+export async function syncFromCloud({ throttle = false } = {}) {
   if (isReverseSyncing) return { skipped: true };
   isReverseSyncing = true;
   try {
-    const { getDatabase } = await import("./database.js");
+    const { getDatabase, ensureCloudConnection } = await import("./database.js");
     const db = await getDatabase();
-    if (db.mode !== "hybrid-sync" || !db.cloudClient) return { skipped: true };
-    lastReverseSync = Date.now();
-    const notebook = await pullFromCloud(db);
-    const rag = await pullRagFromCloud(db);
-    return { ...notebook, rag };
+    if (db.mode !== "hybrid-sync") return { skipped: true };
+    await ensureCloudConnection(db);
+
+    const now = Date.now();
+    const persistedNotebookSync = throttle ? await readSyncTimestamp(db, NOTEBOOK_SYNC_STATE_KEY) : 0;
+    const persistedRagSync = throttle ? await readSyncTimestamp(db, RAG_SYNC_STATE_KEY) : 0;
+    const notebookLast = Math.max(lastReverseSync, persistedNotebookSync);
+    const ragLast = Math.max(lastRagReverseSync, persistedRagSync);
+    const notebookDue = !throttle || (now - notebookLast >= REVERSE_SYNC_INTERVAL_MS);
+    const ragDue = !throttle || (now - ragLast >= RAG_REVERSE_SYNC_INTERVAL_MS);
+
+    let notebook = { throttled: !notebookDue };
+    let rag = { throttled: !ragDue };
+
+    if (notebookDue) {
+      notebook = await pullFromCloud(db);
+      lastReverseSync = Date.now();
+      await writeSyncTimestamp(db, NOTEBOOK_SYNC_STATE_KEY, lastReverseSync);
+    }
+
+    if (ragDue) {
+      rag = await pullRagFromCloud(db);
+      lastRagReverseSync = Date.now();
+      await writeSyncTimestamp(db, RAG_SYNC_STATE_KEY, lastRagReverseSync);
+    }
+
+    return {
+      ...notebook,
+      rag,
+      throttled: !notebookDue && !ragDue,
+    };
   } finally {
     isReverseSyncing = false;
   }
 }
 
 export async function ensureReverseSync() {
-  if (Date.now() - lastReverseSync < REVERSE_SYNC_INTERVAL_MS) return { throttled: true };
-  return syncFromCloud();
+  return syncFromCloud({ throttle: true });
 }
 
 export function resetReverseSyncThrottle() {
   lastReverseSync = 0;
+  lastRagReverseSync = 0;
 }
 
 async function runBackgroundSyncPass() {
-    const { getDatabase } = await import("./database.js");
+    const { getDatabase, ensureCloudConnection } = await import("./database.js");
     const db = await getDatabase();
-    if (db.mode !== "hybrid-sync" || !db.cloudClient) return;
+    if (db.mode !== "hybrid-sync") return;
+    await ensureCloudConnection(db);
     await db.exec(`CREATE TABLE IF NOT EXISTS sync_queue (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       action TEXT NOT NULL,
@@ -329,7 +377,7 @@ async function runBackgroundSyncPass() {
         }
       }
     }
-    await syncFromCloud();
+    await syncFromCloud({ throttle: true });
 }
 
 export function triggerBackgroundSync() {
