@@ -173,7 +173,22 @@ const MIGRATIONS = [
       await db.exec(`CREATE INDEX IF NOT EXISTS idx_rag_tombstones_path ON rag_document_tombstones(path);`);
     },
   },
+  {
+    version: 9,
+    name: "009_local_sync_state",
+    up: async (db) => {
+      await db.exec(`
+        CREATE TABLE IF NOT EXISTS sync_state (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+      `);
+    },
+  },
 ];
+
+export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;
 
 export async function runMigrations(db) {
   let currentVersion = 0;
