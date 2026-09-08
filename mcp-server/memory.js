@@ -123,14 +123,8 @@ export async function readMemory(key) {
   }
 
   const fp = memoryPath(key);
-  if (config.mode === "hybrid-sync") {
-    try {
-      const { ensureReverseSync } = await import("./db/sync_queue.js");
-      await ensureReverseSync();
-    } catch (err) {
-      logger.error("Failed to reverse-sync before read:", err.message);
-    }
-  }
+  // Hybrid mode is local-first: reads must never wait for Turso. Background
+  // synchronization refreshes this local replica independently.
   if (existsSync(fp)) {
     const content = await readFile(fp, "utf-8");
     return content.split("\n").filter((l) => l.startsWith("- ["));
