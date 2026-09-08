@@ -9,6 +9,7 @@ const memoryDir = join(temp, "memory");
 const cloudPath = join(temp, "cloud.sqlite");
 const cloudUrl = `file:${cloudPath}`;
 process.env.MEMORY_DIR = memoryDir;
+process.env.MEMORY_DISABLE_BACKGROUND_SYNC = "1";
 
 const { getDatabase, closeDatabase, BLOBS_DIR } = await import("../../mcp-server/db/database.js");
 const { updateConfig, resetConfig } = await import("../../mcp-server/config/config_manager.js");
@@ -56,6 +57,7 @@ async function resetRemoteSchema() {
     DROP TABLE IF EXISTS project_identities;
     DROP TABLE IF EXISTS project_aliases;
     DROP TABLE IF EXISTS schema_migrations;
+    DROP TABLE IF EXISTS sync_state;
     PRAGMA foreign_keys = ON;
   `);
   remote.close();
@@ -118,9 +120,14 @@ export async function runRagCloudPortabilityTests() {
     assert.ok(restoredDoc, "fresh local SQLite contains restored cloud note");
     assert.strictEqual(restoredDoc.path, note.path);
     assert.strictEqual(restoredDoc.blob_hash, note.blobHash);
-    assert.strictEqual(await blobExists(note.blobHash, BLOBS_DIR), true, "fresh machine materializes raw gzip blob");
+    assert.strictEqual(
+      await blobExists(note.blobHash, BLOBS_DIR),
+      false,
+      "reverse sync keeps raw blob cold until the document body is requested"
+    );
 
     const restoredRaw = await readKnowledgeDocument({ docId: note.docId, scope: "global" });
+    assert.strictEqual(await blobExists(note.blobHash, BLOBS_DIR), true, "read_document lazily materializes the raw gzip blob");
     assert.strictEqual(restoredRaw.source_type, "note");
     assert.strictEqual(restoredRaw.note_kind, "handoff");
     assert.ok(restoredRaw.content.includes("RAW_PORTABLE_BODY"));
@@ -195,6 +202,7 @@ export async function runRagCloudPortabilityTests() {
   } finally {
     closeDatabase();
     resetConfig();
+    delete process.env.MEMORY_DISABLE_BACKGROUND_SYNC;
     if (existsSync(temp)) {
       try {
         rmSync(temp, {
