@@ -152,7 +152,7 @@ Claude Code, Gemini CLI, and Codex setup/uninstall use their native MCP lifecycl
 Codex uses a direct executable chain (`node` -> `mcp-server/boot.js`) instead of an `npx`/`.cmd` launcher, avoiding Windows stdio handshake failures. Setup safely migrates legacy registrations in `~/.codex/config.toml`.
 
 ```bash
-memory_plugin doctor --codex
+npx -y @lotargo/memory_plugin doctor --codex
 ```
 
 The doctor validates the configured Node runtime, MCP initialization, tool discovery, and real `memory_info` and `recall(scope: "all")` calls.
@@ -161,10 +161,10 @@ The doctor validates the configured Node runtime, MCP initialization, tool disco
 
 ```bash
 # Authenticate with a Turso account token and enable hybrid sync
-memory_plugin setup --api-key <TURSO_API_TOKEN> --mode hybrid-sync
+npx -y @lotargo/memory_plugin setup --api-key <TURSO_API_TOKEN> --mode hybrid-sync
 
 # Or change mode when credentials already exist
-memory_plugin setup --mode only-cloud
+npx -y @lotargo/memory_plugin setup --mode only-cloud
 ```
 
 Prefer `TURSO_API_TOKEN`, `TURSO_DB_URL`, and `TURSO_DB_TOKEN` environment variables over command-line secrets because shell arguments may appear in process lists and history.
@@ -597,7 +597,7 @@ The stored 32-document / 21-query technical corpus produced:
 ## Troubleshooting
 
 - **`No such built-in module: node:sqlite`**: install Node.js `22.5.0` or newer.
-- **Codex tools are missing**: run `memory_plugin setup --codex`, then `memory_plugin doctor --codex`, and open a new Codex task.
+- **Codex tools are missing**: run `npx -y @lotargo/memory_plugin setup --codex`, then `npx -y @lotargo/memory_plugin doctor --codex`, and open a new Codex task.
 - **OpenCode still runs old code**: restart OpenCode. For repository development, confirm `npm run dev:link` points its plugin entry to `opencode-plugin/main.js`.
 - **Persona changes are not visible**: run `memory-cli sync-persona`, then start a new CLI session/task. Use `memory-cli migrate-persona --dry-run` for legacy entries.
 - **Project recall is empty**: call `memory_info`; if a Git identity is `Registry: unlinked`, run `link_project_memory` or `memory-cli link --dir <repo>`.
