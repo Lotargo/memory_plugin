@@ -24,7 +24,7 @@ export async function runCli() {
 
 Usage:
   memory-cli                         Launch the interactive TUI
-  memory-cli login [--from-env|--api-token|--db-url <URL>]
+  memory-cli login [--from-env|--api-token|--api-key|--db-url <URL>]
   memory-cli logout [--api-key]
   memory-cli auth-status
   memory-cli link|unlink|relink|identity [--dir <path>] [--remote <url>]

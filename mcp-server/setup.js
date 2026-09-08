@@ -55,9 +55,9 @@ export async function runSetup() {
   const doGemini = !hasSpecificFlag || lowerArgs.includes("--gemini");
   const doCodex = !hasSpecificFlag || lowerArgs.includes("--codex");
 
-  // Headless cloud setup: --api-key <TURSO_API_TOKEN> and/or --mode <only-local|only-cloud|hybrid-sync>
+  // Headless cloud setup: --api-key (aliases: --api-token, --token) <TURSO_API_TOKEN> and/or --mode <only-local|only-cloud|hybrid-sync>
   const VALID_MODES = ["only-local", "only-cloud", "hybrid-sync"];
-  const apiKeyArg = flagValue(args, "--api-key");
+  const apiKeyArg = flagValue(args, "--api-key") || flagValue(args, "--api-token") || flagValue(args, "--token");
   const modeArg = flagValue(args, "--mode");
   if (modeArg && !VALID_MODES.includes(modeArg)) {
     console.log(`  [WARN] Unknown --mode "${modeArg}". Allowed: ${VALID_MODES.join(", ")}`);
@@ -78,7 +78,7 @@ export async function runSetup() {
         promptLabel: "Turso API token",
         interactive: false,
       });
-      if (!apiKey) throw new Error("Missing API token. Set TURSO_API_TOKEN or pass --api-key <TOKEN>.");
+      if (!apiKey) throw new Error("Missing API token. Set TURSO_API_TOKEN or pass --api-key <TOKEN> (--api-token, --token also work).");
       const { loginWithApiToken } = await import("./admin/auth.js");
       const secrets = await loginWithApiToken({ token: apiKey });
       if (modeArg && VALID_MODES.includes(modeArg)) {

@@ -102,7 +102,7 @@ Usage:
   memory_plugin uninstall [options]
   memory_plugin setup --uninstall [options]
   memory-cli uninstall [options]
-  npx @lotargo/memory_plugin uninstall [options]
+  npx -y @lotargo/memory_plugin uninstall [options]
 
 Options:
   --opencode            Only remove OpenCode plugin entry

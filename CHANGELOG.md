@@ -5,6 +5,12 @@ All notable changes to `@lotargo/memory_plugin` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.10] - 2026-09-08
+
+### Fixed
+
+- Fixed OAuth callback rejecting every real Turso login: Turso redirects to `/?jwt=<JWT>&username=<USERNAME>` without echoing `state`, so a missing state is now accepted with a warning (the token is still validated against the Turso API); only a present-but-mismatched state is rejected as CSRF.
+
 ## [1.6.9] - 2026-09-08
 
 ### Fixed
@@ -294,6 +300,7 @@ a critical retrieval regression introduced after `v1.5.3`.
 - `BENCHMARKS.md` tables were re-derived from the stored JSON artifacts; the
   bge-m3 section had carried e5-small numbers shifted by a column.
 
+[1.6.10]: https://github.com/Lotargo/memory_plugin/releases/tag/v1.6.10
 [1.6.9]: https://github.com/Lotargo/memory_plugin/releases/tag/v1.6.9
 [1.6.8]: https://github.com/Lotargo/memory_plugin/releases/tag/v1.6.8
 [1.6.7]: https://github.com/Lotargo/memory_plugin/releases/tag/v1.6.7

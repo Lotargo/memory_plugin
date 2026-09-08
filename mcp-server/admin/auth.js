@@ -50,11 +50,18 @@ export async function createAuthLoopbackServer(port = 0, expectedState = null) {
     const receivedState = url.searchParams.get("state");
 
     if (token) {
-      if (expectedState && receivedState !== expectedState) {
+      if (expectedState && receivedState && receivedState !== expectedState) {
         res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
         res.end("Invalid state parameter");
         server.close(() => rejectResult(new Error("OAuth callback rejected: state parameter mismatch (possible CSRF attempt).")));
         return;
+      }
+      if (expectedState && !receivedState) {
+        // Turso's CLI callback redirects to /?jwt=<JWT>&username=<USERNAME>
+        // without echoing our `state` (see tursodatabase/turso-cli#634).
+        // Rejecting here would break every real login, so accept the token
+        // (it is still validated against the Turso API afterwards) and warn.
+        console.warn("  [!] OAuth callback arrived without a state parameter; accepting it (Turso does not echo state).");
       }
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(`

@@ -142,6 +142,24 @@ export async function runPhase1CloudTests() {
     assert.strictEqual(mismatchStatus, 400, "Mismatched OAuth state should be rejected");
     const mismatchError = await mismatchResult;
     assert.match(mismatchError?.message || "", /state parameter mismatch/i);
+
+    // Real Turso CLI callbacks redirect to /?jwt=<JWT>&username=<USERNAME>
+    // without echoing `state` — this must be accepted (token is validated
+    // against the API afterwards), not rejected.
+    const noStateLoopback = await createAuthLoopbackServer(0, expectedState);
+    const noStateStatus = await new Promise((resolve, reject) => {
+      const req = http.get(
+        `http://127.0.0.1:${noStateLoopback.port}/?jwt=test-oauth-jwt&username=testuser`,
+        (res) => {
+          res.resume();
+          res.on("end", () => resolve(res.statusCode));
+        }
+      );
+      req.on("error", reject);
+    });
+    assert.strictEqual(noStateStatus, 200, "Missing OAuth state (real Turso behavior) should be accepted");
+    const noStateResult = await noStateLoopback.result;
+    assert.strictEqual(noStateResult.token, "test-oauth-jwt");
     console.log("  [PASS]");
 
     // 3. Headless API-Token Login (loginWithApiToken)

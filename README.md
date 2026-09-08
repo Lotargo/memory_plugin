@@ -161,6 +161,7 @@ The doctor validates the configured Node runtime, MCP initialization, tool disco
 
 ```bash
 # Authenticate with a Turso account token and enable hybrid sync
+# (--api-token and --token are accepted as aliases for --api-key)
 npx -y @lotargo/memory_plugin setup --api-key <TURSO_API_TOKEN> --mode hybrid-sync
 
 # Or change mode when credentials already exist

@@ -45,11 +45,11 @@ function printUsage() {
 
 Usage:
   memory_plugin                      Start the MCP server on stdio (default)
-  memory_plugin setup [--opencode|--claude|--codex|--gemini|--antigravity] [--mode <MODE>]
+  memory_plugin setup [--opencode|--claude|--codex|--gemini|--antigravity] [--api-key <TOKEN>] [--mode <MODE>]
   memory_plugin setup --uninstall [--purge] [--purge-cache] [--dry-run] [--yes]
   memory_plugin uninstall [--purge] [--purge-cache] [--dry-run] [--yes] [--opencode|--claude|--codex|--gemini|--antigravity]
   memory_plugin cli                  Interactive terminal UI
-  memory_plugin login [--from-env|--api-token|--db-url <URL>]
+  memory_plugin login [--from-env|--api-token|--api-key|--db-url <URL>]
   memory_plugin logout [--api-key]
   memory_plugin auth-status
   memory_plugin link|unlink|relink|identity [--dir <path>] [--remote <url>]
