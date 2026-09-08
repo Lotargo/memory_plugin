@@ -5,6 +5,21 @@ All notable changes to `@lotargo/memory_plugin` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Made `hybrid-sync` strictly local-first for normal memory, RAG, knowledge-base, and CLI statistic reads. Turso initialization, remote migrations, reverse sync, and legacy blob backfill now run only on the background or explicit sync path.
+- Added persistent local sync state with a 30-second Notebook pull cadence and a 5-minute RAG pull cadence across short-lived CLI processes.
+- Made RAG reverse sync incremental: unchanged or locally newer documents are rejected from the expensive remote bundle fetch before sections, chunks, scopes, links, and graph edges are queried.
+- Raw RAG blobs are now materialized lazily only when `read_document` needs missing local content instead of during every reverse sync.
+- Added opt-in `MEMORY_SYNC_TRACE=1` timing diagnostics for cloud initialization, Notebook pull, RAG pull, and total sync duration.
+
+### Fixed
+
+- RAG scope, knowledge-link, graph-link, and embedding reindex mutations now advance the parent document version before sync so incremental reverse sync cannot mistake changed bundles for unchanged documents.
+- Updated reverse-sync and cloud-portability integration coverage for local-first reads and lazy raw-blob restoration.
+
 ## [1.6.10] - 2026-09-08
 
 ### Fixed
