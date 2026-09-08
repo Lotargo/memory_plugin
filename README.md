@@ -76,66 +76,76 @@ The same engine adds Git-based project isolation, semantic search, full raw-sour
 
 CPU execution with `Xenova/multilingual-e5-small` is the recommended stable default. WebGPU execution is experimental.
 
-### Install and Configure
+### Install / Uninstall All Clients
 
-Configure every supported client location:
+The normal installation path is one command. It configures every supported client directly, so there is no separate package-only installation step:
 
 ```bash
-npm install -g @lotargo/memory_plugin
-memory_plugin setup
+npx -y @lotargo/memory_plugin setup
 ```
 
-Or run setup without a permanent global installation:
+This registers memory_plugin in OpenCode, Codex, Claude Code, Gemini CLI, and Antigravity, installs the bundled `using-memory` skill, and adds managed memory instructions where supported. Existing unrelated configuration is preserved.
+
+Remove the integration from all clients while keeping Notebook/RAG data:
 
 ```bash
-npx @lotargo/memory_plugin setup
+npx -y @lotargo/memory_plugin uninstall
 ```
 
-Target one client when needed:
+Remove the integrations and delete local memory data:
 
 ```bash
-memory_plugin setup --opencode
-memory_plugin setup --codex
-memory_plugin setup --claude
-memory_plugin setup --antigravity
-memory_plugin setup --gemini        # Gemini CLI (~/.gemini/settings.json)
+npx -y @lotargo/memory_plugin uninstall --purge --yes
 ```
 
-Use `--local` with Antigravity setup to create the workspace-local `.agents/mcp_config.json` even when `.agents/` does not yet exist.
-
-Claude Code, Gemini CLI, and Codex setup/uninstall use their native MCP lifecycle commands when available. An ownership-checked config edit is retained as a compatibility fallback for missing, older, or non-functional client CLIs. Antigravity remains a separate integration because it uses a different config layout.
-
-Setup also installs the bundled `using-memory` skill and managed memory instructions for the selected clients. Existing unrelated configuration is preserved.
-
-### Uninstall
-
-Remove the plugin from one or all clients without deleting Notebook/RAG data:
+Preview the uninstall without changing anything:
 
 ```bash
-memory_plugin uninstall --dry-run      # preview
-memory_plugin uninstall                # remove all clients, keep data
-memory_plugin uninstall --purge --yes  # also delete local data
-memory_plugin uninstall --opencode --purge-cache
-memory_plugin uninstall --opencode --claude
-npx @lotargo/memory_plugin uninstall --dry-run
-memory_plugin setup --uninstall --purge  # alias
+npx -y @lotargo/memory_plugin uninstall --dry-run
 ```
 
 What `uninstall` removes by default (without `--purge`):
 
-- `~/.config/opencode/opencode.json` — plugin entry, including `file://` dev links.
-- `~/.claude.json` — `mcpServers.memory-agent`.
-- `~/.gemini/settings.json` — Gemini CLI `mcpServers.memory-agent`.
-- `~/.gemini/config/mcp_config.json` and `.agents/mcp_config.json` — Antigravity `mcpServers.memory-agent`.
-- `~/.codex/config.toml` — `[mcp_servers.memory-agent]` only when owned by this plugin.
+- `~/.config/opencode/opencode.json` - plugin entry, including `file://` dev links.
+- `~/.claude.json` - `mcpServers.memory-agent`.
+- `~/.gemini/settings.json` - Gemini CLI `mcpServers.memory-agent`.
+- `~/.gemini/config/mcp_config.json` and `.agents/mcp_config.json` - Antigravity `mcpServers.memory-agent`.
+- `~/.codex/config.toml` - `[mcp_servers.memory-agent]` only when owned by this plugin.
 - Managed prompt blocks from Codex, Claude Code, Gemini CLI, and Antigravity instruction files.
 - The bundled `using-memory` skill from each client's managed `skills/` directory.
 
 Existing user content outside plugin-owned markers is preserved. Foreign `memory-agent` registrations, modified/non-owned skills, unrelated file plugins, and other packages in the `@lotargo` OpenCode cache namespace are left untouched.
 
-Normal uninstall keeps OpenCode's package cache. `--purge-cache` removes only exact cache directories owned by this package. With `--purge`, the plugin also deletes `MEMORY_DIR` and its prompt state after resolving and validating every target, rejecting dangerous roots and broad parent paths, and displaying the targets before confirmation. The npm package itself is removed separately with `npm uninstall -g @lotargo/memory_plugin`.
+Normal uninstall keeps OpenCode's package cache. `--purge-cache` removes only exact cache directories owned by this package. With `--purge`, the plugin also deletes `MEMORY_DIR` and its prompt state after resolving and validating every target, rejecting dangerous roots and broad parent paths, and displaying the targets before confirmation.
 
 On Linux/macOS, `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` are respected. `OPENCODE_CONFIG_DIR` and `MEMORY_DIR` remain explicit overrides on every platform.
+
+### Install One Client
+
+Use the same one-shot setup command with a client flag when you only want one integration:
+
+```bash
+npx -y @lotargo/memory_plugin setup --opencode
+npx -y @lotargo/memory_plugin setup --codex
+npx -y @lotargo/memory_plugin setup --claude
+npx -y @lotargo/memory_plugin setup --antigravity
+npx -y @lotargo/memory_plugin setup --gemini
+```
+
+Use `--local` with Antigravity to create the workspace-local `.agents/mcp_config.json` even when `.agents/` does not yet exist:
+
+```bash
+npx -y @lotargo/memory_plugin setup --antigravity --local
+```
+
+The same client flags can be used for targeted removal, for example:
+
+```bash
+npx -y @lotargo/memory_plugin uninstall --opencode
+npx -y @lotargo/memory_plugin uninstall --codex
+```
+
+Claude Code, Gemini CLI, and Codex setup/uninstall use their native MCP lifecycle commands when available. An ownership-checked config edit is retained as a compatibility fallback for missing, older, or non-functional client CLIs. Antigravity remains a separate integration because it uses a different config layout.
 
 ### Verify Codex
 
@@ -439,7 +449,7 @@ The MCP server exposes **16 tools**. The native OpenCode plugin exposes the same
 
 ## CLI Reference
 
-`memory_plugin` and `memory-agent` are MCP stdio entry points. `memory_plugin setup` performs client installation, while `memory_plugin cli` or `memory-cli` opens the interactive control panel. Direct administration commands should use `memory-cli`.
+`memory_plugin` and `memory-agent` are MCP stdio entry points. The Quick Start uses `npx -y @lotargo/memory_plugin ...`, so a separate global npm installation is not required. If the package is installed globally for development or administration, `memory_plugin setup` performs client installation, while `memory_plugin cli` or `memory-cli` opens the interactive control panel. Direct administration commands should use `memory-cli`.
 
 | Command | Purpose |
 | :--- | :--- |
