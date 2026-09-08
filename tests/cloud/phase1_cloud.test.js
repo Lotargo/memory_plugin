@@ -74,7 +74,7 @@ export async function runPhase1CloudTests() {
 
   const { loadSecrets, saveSecrets, deleteSecrets } = await import("../../mcp-server/config/auth_store.js");
   const { getConfig, resetConfig } = await import("../../mcp-server/config/config_manager.js");
-  const { loginWithApiToken, logoutFromCloud, getAuthStatus } = await import("../../mcp-server/admin/auth.js");
+  const { browserLaunchSpec, createAuthLoopbackServer, loginWithApiToken, logoutFromCloud, getAuthStatus } = await import("../../mcp-server/admin/auth.js");
 
   try {
     // 1. Secrets Vault round-trip & encryption
@@ -99,8 +99,53 @@ export async function runPhase1CloudTests() {
     assert.strictEqual(loaded.dbUrl, secretsToSave.dbUrl, "Decrypted dbUrl match");
     console.log("  [PASS]");
 
-    // 2. Headless API-Token Login (loginWithApiToken)
-    console.log("2. Headless API-Token Login Workflow...");
+    // 2. Browser OAuth loopback must preserve state and the full Windows URL.
+    console.log("2. Browser OAuth loopback and Windows URL handling...");
+    const oauthUrl = "https://api.turso.tech/?port=48900&redirect=true&state=abc123&type=cli";
+    const winLaunch = browserLaunchSpec(oauthUrl, "win32");
+    assert.strictEqual(winLaunch.command, "rundll32.exe", "Windows browser launch must avoid cmd.exe");
+    assert.deepStrictEqual(winLaunch.args, ["url.dll,FileProtocolHandler", oauthUrl], "Windows browser launch must preserve the full query string");
+
+    const expectedState = "state-ok";
+    const loopback = await createAuthLoopbackServer(0, expectedState);
+    assert.ok(loopback.port > 0, "OAuth loopback should bind an available port before browser launch");
+    const callbackResponse = await new Promise((resolve, reject) => {
+      const req = http.get(
+        `http://127.0.0.1:${loopback.port}/?jwt=test-oauth-jwt&username=testuser&state=${expectedState}`,
+        (res) => {
+          res.resume();
+          res.on("end", () => resolve(res.statusCode));
+        }
+      );
+      req.on("error", reject);
+    });
+    assert.strictEqual(callbackResponse, 200, "Matching OAuth state should be accepted");
+    const callbackResult = await loopback.result;
+    assert.strictEqual(callbackResult.token, "test-oauth-jwt");
+    assert.strictEqual(callbackResult.username, "testuser");
+
+    const mismatchLoopback = await createAuthLoopbackServer(0, expectedState);
+    const mismatchResult = mismatchLoopback.result.then(
+      () => null,
+      (err) => err
+    );
+    const mismatchStatus = await new Promise((resolve, reject) => {
+      const req = http.get(
+        `http://127.0.0.1:${mismatchLoopback.port}/?jwt=test-oauth-jwt&username=testuser&state=wrong-state`,
+        (res) => {
+          res.resume();
+          res.on("end", () => resolve(res.statusCode));
+        }
+      );
+      req.on("error", reject);
+    });
+    assert.strictEqual(mismatchStatus, 400, "Mismatched OAuth state should be rejected");
+    const mismatchError = await mismatchResult;
+    assert.match(mismatchError?.message || "", /state parameter mismatch/i);
+    console.log("  [PASS]");
+
+    // 3. Headless API-Token Login (loginWithApiToken)
+    console.log("3. Headless API-Token Login Workflow...");
     deleteSecrets();
     resetConfig();
 
@@ -120,8 +165,8 @@ export async function runPhase1CloudTests() {
     assert.strictEqual(status.username, "testuser", "Auth status username match");
     console.log("  [PASS]");
 
-    // 3. Logout Workflow (logoutFromCloud)
-    console.log("3. Logout Workflow...");
+    // 4. Logout Workflow (logoutFromCloud)
+    console.log("4. Logout Workflow...");
     logoutFromCloud();
     assert.strictEqual(getAuthStatus().authorized, false, "Post-logout isAuthorized is false");
     assert.strictEqual(getConfig().mode, "only-local", "Mode reverts to only-local on logout");
