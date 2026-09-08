@@ -20,6 +20,12 @@ const RAG_REVERSE_SYNC_INTERVAL_MS = 5 * 60_000;
 const NOTEBOOK_SYNC_STATE_KEY = "reverse_sync:notebooks:last_success";
 const RAG_SYNC_STATE_KEY = "reverse_sync:rag:last_success";
 
+function traceSync(label, startedAt, details = "") {
+  if (process.env.MEMORY_SYNC_TRACE !== "1") return;
+  const suffix = details ? ` ${details}` : "";
+  console.error(`[SYNC TRACE] ${label} ${Date.now() - startedAt}ms${suffix}`);
+}
+
 async function readSyncTimestamp(db, key) {
   try {
     const row = await db.prepare("SELECT value FROM sync_state WHERE key = ?;").get(key);
@@ -302,11 +308,15 @@ async function pullFromCloud(db) {
 export async function syncFromCloud({ throttle = false } = {}) {
   if (isReverseSyncing) return { skipped: true };
   isReverseSyncing = true;
+  const totalStartedAt = Date.now();
   try {
     const { getDatabase, ensureCloudConnection } = await import("./database.js");
     const db = await getDatabase();
     if (db.mode !== "hybrid-sync") return { skipped: true };
+
+    const cloudStartedAt = Date.now();
     await ensureCloudConnection(db);
+    traceSync("cloud_init", cloudStartedAt);
 
     const now = Date.now();
     const persistedNotebookSync = throttle ? await readSyncTimestamp(db, NOTEBOOK_SYNC_STATE_KEY) : 0;
@@ -320,22 +330,28 @@ export async function syncFromCloud({ throttle = false } = {}) {
     let rag = { throttled: !ragDue };
 
     if (notebookDue) {
+      const notebookStartedAt = Date.now();
       notebook = await pullFromCloud(db);
+      traceSync("notebook_pull", notebookStartedAt, `changed=${(notebook.pulled || 0) + (notebook.merged || 0) + (notebook.cloudWins || 0)}`);
       lastReverseSync = Date.now();
       await writeSyncTimestamp(db, NOTEBOOK_SYNC_STATE_KEY, lastReverseSync);
     }
 
     if (ragDue) {
+      const ragStartedAt = Date.now();
       rag = await pullRagFromCloud(db);
+      traceSync("rag_pull", ragStartedAt, `remote=${rag.remoteDocuments || 0} changed=${(rag.pulled || 0) + (rag.updated || 0)} unchanged=${rag.unchanged || 0}`);
       lastRagReverseSync = Date.now();
       await writeSyncTimestamp(db, RAG_SYNC_STATE_KEY, lastRagReverseSync);
     }
 
-    return {
+    const result = {
       ...notebook,
       rag,
       throttled: !notebookDue && !ragDue,
     };
+    traceSync("sync_total", totalStartedAt, `notebookDue=${notebookDue} ragDue=${ragDue}`);
+    return result;
   } finally {
     isReverseSyncing = false;
   }
