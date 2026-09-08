@@ -1,6 +1,5 @@
 import { toVectorBytes } from "../retrieval/retriever.js";
 import { deleteBlob } from "../storage/blob_store.js";
-import { materializeBlobFromCloud } from "./rag_blob_transport.js";
 
 async function executeCloud(db, sql, args = []) {
   if (!db?.cloudClient && !db?.failoverClient) {
@@ -263,6 +262,23 @@ export async function pullRagFromCloud(db) {
         continue;
       }
 
+      // Compare cheap document metadata before fetching the six-table remote
+      // bundle. Every local mutation that changes scopes/links/graph content
+      // touches documents.updated_at, so an exact metadata match means the
+      // complete local bundle is already current.
+      const local = await db.prepare(
+        "SELECT id, path, blob_hash, updated_at FROM documents WHERE id = ?;"
+      ).get(doc.id);
+      if (
+        local &&
+        Number(local.updated_at || 0) === Number(doc.updated_at || 0) &&
+        local.blob_hash === doc.blob_hash &&
+        local.path === doc.path
+      ) {
+        summary.unchanged++;
+        continue;
+      }
+
       const bundle = await fetchRemoteDocumentBundle(db, doc);
       const result = await applyRemoteDocumentBundle(db, bundle);
       if (result.action === "pulled") summary.pulled++;
@@ -271,9 +287,8 @@ export async function pullRagFromCloud(db) {
       else if (result.action === "local_newer") summary.localNewer++;
       else if (result.action === "path_conflict_local_newer") summary.pathConflicts++;
 
-      const blobResult = await materializeBlobFromCloud(db, doc.blob_hash);
-      if (blobResult.materialized) summary.blobsMaterialized++;
-      else if (blobResult.reason === "cloud_blob_missing") summary.missingBlobs++;
+      // Raw content is cold data. It is materialized lazily by read_document
+      // only when the local content-addressed blob is actually requested.
     } catch (err) {
       summary.errors++;
       console.warn(`Failed to reverse-sync RAG document ${doc.id}: ${err.message}`);
