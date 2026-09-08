@@ -34,21 +34,21 @@ test('mobile explore CTA reaches features', async ({ page }) => {
   await expect(page.locator('#features')).toBeInViewport();
 });
 
-test('Quick Start exposes every setup command with icon copy controls', async ({ page }) => {
+test('Quick Start separates all-client lifecycle commands from individual client setup', async ({ page }) => {
   await page.goto('/memory_plugin/');
   const copyButtons = page.locator('.hero-terminal [data-copy]');
-  await expect(copyButtons).toHaveCount(11);
+  await expect(copyButtons).toHaveCount(9);
   await expect(page.locator('#install [data-copy]')).toHaveCount(0);
-  await expect(page.locator('[data-copy="npm install -g @lotargo/memory_plugin"]')).toBeVisible();
-  await expect(page.locator('[data-copy="npx @lotargo/memory_plugin setup"]')).toBeVisible();
-  await expect(page.locator('[data-copy="memory_plugin setup --opencode"]')).toBeVisible();
-  await expect(page.locator('[data-copy="memory_plugin setup --codex"]')).toBeVisible();
-  await expect(page.locator('[data-copy="memory_plugin setup --claude"]')).toBeVisible();
-  await expect(page.locator('[data-copy="memory_plugin setup --antigravity"]')).toBeVisible();
-  await expect(page.locator('[data-copy="memory_plugin setup --antigravity --local"]')).toBeVisible();
-  await expect(page.locator('[data-copy="memory_plugin setup --gemini"]')).toBeVisible();
-  await expect(page.locator('[data-copy="memory_plugin uninstall"]')).toBeVisible();
-  await expect(page.locator('[data-copy="memory_plugin uninstall --purge --yes"]')).toBeVisible();
+  await expect(page.locator('[data-copy="npx -y @lotargo/memory_plugin setup"]')).toBeVisible();
+  await expect(page.locator('[data-copy="npx -y @lotargo/memory_plugin uninstall"]')).toBeVisible();
+  await expect(page.locator('[data-copy="npx -y @lotargo/memory_plugin uninstall --purge --yes"]')).toBeVisible();
+  await expect(page.getByText('INDIVIDUAL CLIENTS')).toBeVisible();
+  await expect(page.locator('[data-copy="npx -y @lotargo/memory_plugin setup --opencode"]')).toBeVisible();
+  await expect(page.locator('[data-copy="npx -y @lotargo/memory_plugin setup --codex"]')).toBeVisible();
+  await expect(page.locator('[data-copy="npx -y @lotargo/memory_plugin setup --claude"]')).toBeVisible();
+  await expect(page.locator('[data-copy="npx -y @lotargo/memory_plugin setup --antigravity"]')).toBeVisible();
+  await expect(page.locator('[data-copy="npx -y @lotargo/memory_plugin setup --antigravity --local"]')).toBeVisible();
+  await expect(page.locator('[data-copy="npx -y @lotargo/memory_plugin setup --gemini"]')).toBeVisible();
   await expect(page.getByRole('link', { name: /Setup & uninstall notes/i })).toBeVisible();
   await expect(copyButtons.first().locator('.copy-icon-stack')).toBeVisible();
 });
