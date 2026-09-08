@@ -44,6 +44,8 @@ async function readRawWithCloudFallback(db, blobHash) {
   } catch (localErr) {
     if (getConfig().mode === "only-local") throw localErr;
 
+    const { ensureCloudConnection } = await import("../../db/database.js");
+    await ensureCloudConnection(db);
     const { materializeBlobFromCloud } = await import("../../db/rag_blob_transport.js");
     const result = await materializeBlobFromCloud(db, blobHash);
     if (!result.materialized && !result.existing) {
