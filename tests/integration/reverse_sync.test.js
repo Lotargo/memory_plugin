@@ -9,11 +9,12 @@ export async function runReverseSyncTests() {
   const TEST_DIR = join(tmpdir(), `memory_test_reverse_sync_${Date.now()}`);
   mkdirSync(TEST_DIR, { recursive: true });
   process.env.MEMORY_DIR = TEST_DIR;
+  process.env.MEMORY_DISABLE_BACKGROUND_SYNC = "1";
 
   const CLOUD_DB_PATH = `file:${join(TEST_DIR, "cloud_memory.sqlite")}`;
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  const { getDatabase, closeDatabase } = await import("../../mcp-server/db/database.js");
+  const { getDatabase, closeDatabase, ensureCloudConnection } = await import("../../mcp-server/db/database.js");
   const { readMemory, writeMemory, writeMemoryFile } = await import("../../mcp-server/memory.js");
   const { updateConfig, resetConfig } = await import("../../mcp-server/config/config_manager.js");
   const { syncFromCloud, triggerBackgroundSync, resetReverseSyncThrottle } = await import("../../mcp-server/db/sync_queue.js");
@@ -48,6 +49,7 @@ export async function runReverseSyncTests() {
     // --- 1. Cloud-only store gets pulled down locally ---
     console.log("1. Cloud-only store pulled down to local...");
     const dbCloudSeed = await getDatabase();
+    await ensureCloudConnection(dbCloudSeed);
     await dbCloudSeed.cloudClient.execute({
       sql: "INSERT OR REPLACE INTO notebooks (key, content, updated_at) VALUES (?, ?, ?);",
       args: ["cloud_only_key", "# Memory: cloud_only_key\n\n- [2026-08-02 10:00] Cloud only fact <!-- id:c1 -->\n", Date.now()],
@@ -88,6 +90,7 @@ export async function runReverseSyncTests() {
     updateConfig({ conflictStrategy: "merge" });
     await writeMemoryFile("conflict_key", "# Memory: conflict_key\n\n- [2026-08-02 12:00] Local fact A <!-- id:a -->\n");
     const dbCloudSeed2 = await getDatabase();
+    await ensureCloudConnection(dbCloudSeed2);
     await dbCloudSeed2.cloudClient.execute({
       sql: "INSERT OR REPLACE INTO notebooks (key, content, updated_at) VALUES (?, ?, ?);",
       args: ["conflict_key", "# Memory: conflict_key\n\n- [2026-08-02 12:30] Cloud fact B <!-- id:b -->\n", Date.now()],
@@ -120,6 +123,7 @@ export async function runReverseSyncTests() {
     updateConfig({ conflictStrategy: "cloud-wins" });
     await writeMemoryFile("cw_key", "# Memory: cw_key\n\n- [2026-08-02 13:00] Local fact <!-- id:a -->\n");
     const dbCloudSeed3 = await getDatabase();
+    await ensureCloudConnection(dbCloudSeed3);
     await dbCloudSeed3.cloudClient.execute({
       sql: "INSERT OR REPLACE INTO notebooks (key, content, updated_at) VALUES (?, ?, ?);",
       args: ["cw_key", "# Memory: cw_key\n\n- [2026-08-02 13:30] Cloud fact wins <!-- id:b -->\n", Date.now()],
@@ -138,6 +142,7 @@ export async function runReverseSyncTests() {
     updateConfig({ conflictStrategy: "local-wins" });
     await writeMemoryFile("lw_key", "# Memory: lw_key\n\n- [2026-08-02 14:00] Local fact wins <!-- id:a -->\n");
     const dbCloudSeed4 = await getDatabase();
+    await ensureCloudConnection(dbCloudSeed4);
     await dbCloudSeed4.cloudClient.execute({
       sql: "INSERT OR REPLACE INTO notebooks (key, content, updated_at) VALUES (?, ?, ?);",
       args: ["lw_key", "# Memory: lw_key\n\n- [2026-08-02 14:30] Cloud fact <!-- id:b -->\n", Date.now()],
@@ -157,11 +162,12 @@ export async function runReverseSyncTests() {
     closeDatabase();
     console.log("  [PASS]");
 
-    // --- 6. Recall in hybrid mode sees cloud records after readMemory reverse-sync ---
-    console.log("6. recall/readMemory reverse-syncs automatically in hybrid mode...");
+    // --- 6. Hybrid reads stay local; explicit sync refreshes the replica ---
+    console.log("6. hybrid read stays local until background/explicit sync refreshes it...");
     updateConfig({ conflictStrategy: "merge" });
     await writeMemoryFile("auto_pull_key", "");
     const dbCloudSeed5 = await getDatabase();
+    await ensureCloudConnection(dbCloudSeed5);
     await dbCloudSeed5.cloudClient.execute({
       sql: "INSERT OR REPLACE INTO notebooks (key, content, updated_at) VALUES (?, ?, ?);",
       args: ["auto_pull_key", "# Memory: auto_pull_key\n\n- [2026-08-02 15:00] Auto pulled fact <!-- id:a -->\n", Date.now()],
@@ -169,9 +175,13 @@ export async function runReverseSyncTests() {
     closeDatabase();
 
     resetReverseSyncThrottle();
-    const autoFacts = await readMemory("auto_pull_key");
-    assert.strictEqual(autoFacts.length, 1, "readMemory should reverse-sync and find cloud fact");
-    assert(autoFacts[0].includes("Auto pulled fact"), "Auto pulled fact content should match");
+    const beforeSyncFacts = await readMemory("auto_pull_key");
+    assert.strictEqual(beforeSyncFacts.length, 0, "readMemory must not block on or implicitly pull from cloud");
+
+    await syncFromCloud();
+    const afterSyncFacts = await readMemory("auto_pull_key");
+    assert.strictEqual(afterSyncFacts.length, 1, "explicit sync should refresh the local replica");
+    assert(afterSyncFacts[0].includes("Auto pulled fact"), "Synced fact content should match");
     console.log("  [PASS]");
 
     // --- 7. RAG sync preserves vectors, policies, scopes, graph edges and Notebook links ---
@@ -251,6 +261,7 @@ export async function runReverseSyncTests() {
     console.log("✅ ALL REVERSE SYNC & CONFLICT RESOLUTION TESTS PASSED!");
   } finally {
     closeDatabase();
+    delete process.env.MEMORY_DISABLE_BACKGROUND_SYNC;
     if (existsSync(TEST_DIR)) {
       try {
         rmSync(TEST_DIR, { recursive: true, force: true });
