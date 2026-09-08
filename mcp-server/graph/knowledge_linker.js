@@ -4,6 +4,10 @@ import { GLOBAL_KEY } from "../memory.js";
 
 export async function queueDocumentSyncIfNeeded(db, docId) {
   try {
+    // Bundle-level metadata is the cheap reverse-sync version marker. Touch the
+    // parent document whenever scopes, links, or graph relations change.
+    await db.prepare("UPDATE documents SET updated_at = ? WHERE id = ?;").run(Date.now(), docId);
+
     const { getConfig } = await import("../config/config_manager.js");
     if (getConfig().mode !== "hybrid-sync") return;
     const { exportDocumentData } = await import("../ingest/exporter.js");
