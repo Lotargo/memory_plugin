@@ -13,12 +13,6 @@ function formatTimestamp(value) {
   return Number.isNaN(date.getTime()) ? String(value) : date.toISOString();
 }
 
-async function ensureRagFresh() {
-  if (getConfig().mode !== "hybrid-sync") return;
-  const { ensureReverseSync } = await import("../../db/sync_queue.js");
-  await ensureReverseSync();
-}
-
 function formatIdentityLines(result) {
   const lines = [];
   if (result.doc_id) lines.push(`Doc ID: ${result.doc_id}`);
@@ -90,7 +84,6 @@ export async function runSingleRagQuery(
 ) {
   const mode = normalizeResultMode(resultMode);
   const activeConfig = getConfig();
-  await ensureRagFresh();
 
   const effectiveDirectory = directory || project || ctx.directory || null;
   const scopeKeys = await resolveRagScopeKeys(scope || "all", {
@@ -135,7 +128,6 @@ export async function runBatchRagQuery(
 ) {
   const mode = normalizeResultMode(resultMode);
   const activeConfig = getConfig();
-  await ensureRagFresh();
 
   const effectiveDirectory = directory || project || ctx.directory || null;
   const scopeKeys = await resolveRagScopeKeys(scope || "all", {
