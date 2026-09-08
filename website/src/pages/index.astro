@@ -18,7 +18,7 @@ import CopyIcon from '../components/CopyIcon.astro';
         <p class="hero-lead">Persistent memory, hybrid RAG, and personalization for AI coding agents.</p>
         <div class="client-line"><span>OpenCode</span><span>Codex</span><span>Claude Code</span><span>Gemini CLI</span><span>Antigravity</span><span>MCP</span></div>
       </div>
-      <aside class="hero-terminal" aria-label="Quick start installation commands">
+      <aside class="hero-terminal" aria-label="Quick start setup and uninstall commands">
         <div class="terminal-top"><span>QUICK START</span><span class="terminal-status">LOCAL</span></div>
         <div class="quickstart-list">
           <div class="quickstart-command"><span class="quickstart-label">GLOBAL INSTALL</span><code>npm install -g @lotargo/memory_plugin</code><button class="icon-copy-button" type="button" data-copy="npm install -g @lotargo/memory_plugin" aria-label="Copy global install command"><CopyIcon /></button></div>
@@ -30,8 +30,10 @@ import CopyIcon from '../components/CopyIcon.astro';
           <div class="quickstart-command"><span class="quickstart-label">ANTIGRAVITY</span><code>memory_plugin setup --antigravity</code><button class="icon-copy-button" type="button" data-copy="memory_plugin setup --antigravity" aria-label="Copy Antigravity setup command"><CopyIcon /></button></div>
           <div class="quickstart-command"><span class="quickstart-label">ANTIGRAVITY / LOCAL</span><code>memory_plugin setup --antigravity --local</code><button class="icon-copy-button" type="button" data-copy="memory_plugin setup --antigravity --local" aria-label="Copy local Antigravity setup command"><CopyIcon /></button></div>
           <div class="quickstart-command"><span class="quickstart-label">GEMINI CLI</span><code>memory_plugin setup --gemini</code><button class="icon-copy-button" type="button" data-copy="memory_plugin setup --gemini" aria-label="Copy Gemini CLI setup command"><CopyIcon /></button></div>
+          <div class="quickstart-command"><span class="quickstart-label">UNINSTALL / KEEP DATA</span><code>memory_plugin uninstall</code><button class="icon-copy-button" type="button" data-copy="memory_plugin uninstall" aria-label="Copy uninstall command that keeps local data"><CopyIcon /></button></div>
+          <div class="quickstart-command"><span class="quickstart-label">UNINSTALL / DELETE DATA</span><code>memory_plugin uninstall --purge --yes</code><button class="icon-copy-button" type="button" data-copy="memory_plugin uninstall --purge --yes" aria-label="Copy uninstall and delete local data command"><CopyIcon /></button></div>
         </div>
-        <a href="https://github.com/Lotargo/memory_plugin#quick-start" target="_blank" rel="noreferrer">Full setup notes <span>↗</span></a>
+        <a href="https://github.com/Lotargo/memory_plugin#quick-start" target="_blank" rel="noreferrer">Setup &amp; uninstall notes <span>↗</span></a>
       </aside>
     </div>
     <MemoryMatrix />
@@ -168,12 +170,12 @@ import CopyIcon from '../components/CopyIcon.astro';
       <header>
         <p class="section-index">09 / GET STARTED</p>
         <h2>Give your agent<br />a memory.</h2>
-        <p class="install-copy">Pick the setup path you need from Quick Start above, copy it with one click, and keep the full README nearby for configuration details.</p>
+        <p class="install-copy">Pick the setup or uninstall path you need from Quick Start above, copy it with one click, and keep the full README nearby for configuration details.</p>
       </header>
       <div class="install-summary">
         <span class="install-summary-label">QUICK START</span>
-        <strong>9 setup paths.<br />One memory layer.</strong>
-        <p>Global install, npx, per-client setup, and workspace-local Antigravity are all available at the top of the page.</p>
+        <strong>9 setup paths.<br />2 uninstall paths.</strong>
+        <p>Global install, npx, per-client setup, workspace-local Antigravity, and safe uninstall options are all available at the top of the page.</p>
         <a href="#top">Back to Quick Start <span>↑</span></a>
       </div>
     </div>
