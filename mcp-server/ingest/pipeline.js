@@ -411,6 +411,9 @@ export async function reindexEmbeddings({
   try {
     const stmt = db.prepare("UPDATE micro_chunks SET vector = ? WHERE id = ?;");
     for (const vector of vectors) await stmt.run(vector.vector, vector.id);
+    const touchedAt = Date.now();
+    const touchDoc = db.prepare("UPDATE documents SET updated_at = ? WHERE id = ?;");
+    for (const docId of affectedDocIds) await touchDoc.run(touchedAt, docId);
     await db.exec("COMMIT;");
   } catch (err) {
     try { await db.exec("ROLLBACK;"); } catch {}
