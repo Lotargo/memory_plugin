@@ -21,17 +21,16 @@ import CopyIcon from '../components/CopyIcon.astro';
       <aside class="hero-terminal" aria-label="Quick start setup and uninstall commands">
         <div class="terminal-top"><span>QUICK START</span><span class="terminal-status">LOCAL</span></div>
         <div class="quickstart-list">
-          <div class="quickstart-command"><span class="quickstart-label">GLOBAL INSTALL</span><code>npm install -g @lotargo/memory_plugin</code><button class="icon-copy-button" type="button" data-copy="npm install -g @lotargo/memory_plugin" aria-label="Copy global install command"><CopyIcon /></button></div>
-          <div class="quickstart-command command-primary"><span class="quickstart-label">ALL CLIENTS</span><code>memory_plugin setup</code><button class="icon-copy-button" type="button" data-copy="memory_plugin setup" aria-label="Copy setup command"><CopyIcon /></button></div>
-          <div class="quickstart-command"><span class="quickstart-label">NPX / NO GLOBAL INSTALL</span><code>npx @lotargo/memory_plugin setup</code><button class="icon-copy-button" type="button" data-copy="npx @lotargo/memory_plugin setup" aria-label="Copy npx setup command"><CopyIcon /></button></div>
-          <div class="quickstart-command"><span class="quickstart-label">OPENCODE</span><code>memory_plugin setup --opencode</code><button class="icon-copy-button" type="button" data-copy="memory_plugin setup --opencode" aria-label="Copy OpenCode setup command"><CopyIcon /></button></div>
-          <div class="quickstart-command"><span class="quickstart-label">CODEX</span><code>memory_plugin setup --codex</code><button class="icon-copy-button" type="button" data-copy="memory_plugin setup --codex" aria-label="Copy Codex setup command"><CopyIcon /></button></div>
-          <div class="quickstart-command"><span class="quickstart-label">CLAUDE CODE</span><code>memory_plugin setup --claude</code><button class="icon-copy-button" type="button" data-copy="memory_plugin setup --claude" aria-label="Copy Claude Code setup command"><CopyIcon /></button></div>
-          <div class="quickstart-command"><span class="quickstart-label">ANTIGRAVITY</span><code>memory_plugin setup --antigravity</code><button class="icon-copy-button" type="button" data-copy="memory_plugin setup --antigravity" aria-label="Copy Antigravity setup command"><CopyIcon /></button></div>
-          <div class="quickstart-command"><span class="quickstart-label">ANTIGRAVITY / LOCAL</span><code>memory_plugin setup --antigravity --local</code><button class="icon-copy-button" type="button" data-copy="memory_plugin setup --antigravity --local" aria-label="Copy local Antigravity setup command"><CopyIcon /></button></div>
-          <div class="quickstart-command"><span class="quickstart-label">GEMINI CLI</span><code>memory_plugin setup --gemini</code><button class="icon-copy-button" type="button" data-copy="memory_plugin setup --gemini" aria-label="Copy Gemini CLI setup command"><CopyIcon /></button></div>
-          <div class="quickstart-command"><span class="quickstart-label">UNINSTALL / KEEP DATA</span><code>memory_plugin uninstall</code><button class="icon-copy-button" type="button" data-copy="memory_plugin uninstall" aria-label="Copy uninstall command that keeps local data"><CopyIcon /></button></div>
-          <div class="quickstart-command"><span class="quickstart-label">UNINSTALL / DELETE DATA</span><code>memory_plugin uninstall --purge --yes</code><button class="icon-copy-button" type="button" data-copy="memory_plugin uninstall --purge --yes" aria-label="Copy uninstall and delete local data command"><CopyIcon /></button></div>
+          <div class="quickstart-command command-primary command-global"><span class="quickstart-label">ALL CLIENTS / INSTALL</span><code>npx -y @lotargo/memory_plugin setup</code><button class="icon-copy-button" type="button" data-copy="npx -y @lotargo/memory_plugin setup" aria-label="Copy all-clients install command"><CopyIcon /></button></div>
+          <div class="quickstart-command command-global"><span class="quickstart-label">ALL CLIENTS / UNINSTALL</span><code>npx -y @lotargo/memory_plugin uninstall</code><button class="icon-copy-button" type="button" data-copy="npx -y @lotargo/memory_plugin uninstall" aria-label="Copy all-clients uninstall command that keeps local data"><CopyIcon /></button></div>
+          <div class="quickstart-command command-global"><span class="quickstart-label">ALL CLIENTS / DELETE DATA</span><code>npx -y @lotargo/memory_plugin uninstall --purge --yes</code><button class="icon-copy-button" type="button" data-copy="npx -y @lotargo/memory_plugin uninstall --purge --yes" aria-label="Copy all-clients uninstall and delete local data command"><CopyIcon /></button></div>
+          <div class="quickstart-group-label">INDIVIDUAL CLIENTS</div>
+          <div class="quickstart-command"><span class="quickstart-label">OPENCODE</span><code>npx -y @lotargo/memory_plugin setup --opencode</code><button class="icon-copy-button" type="button" data-copy="npx -y @lotargo/memory_plugin setup --opencode" aria-label="Copy OpenCode setup command"><CopyIcon /></button></div>
+          <div class="quickstart-command"><span class="quickstart-label">CODEX</span><code>npx -y @lotargo/memory_plugin setup --codex</code><button class="icon-copy-button" type="button" data-copy="npx -y @lotargo/memory_plugin setup --codex" aria-label="Copy Codex setup command"><CopyIcon /></button></div>
+          <div class="quickstart-command"><span class="quickstart-label">CLAUDE CODE</span><code>npx -y @lotargo/memory_plugin setup --claude</code><button class="icon-copy-button" type="button" data-copy="npx -y @lotargo/memory_plugin setup --claude" aria-label="Copy Claude Code setup command"><CopyIcon /></button></div>
+          <div class="quickstart-command"><span class="quickstart-label">ANTIGRAVITY</span><code>npx -y @lotargo/memory_plugin setup --antigravity</code><button class="icon-copy-button" type="button" data-copy="npx -y @lotargo/memory_plugin setup --antigravity" aria-label="Copy Antigravity setup command"><CopyIcon /></button></div>
+          <div class="quickstart-command"><span class="quickstart-label">ANTIGRAVITY / LOCAL</span><code>npx -y @lotargo/memory_plugin setup --antigravity --local</code><button class="icon-copy-button" type="button" data-copy="npx -y @lotargo/memory_plugin setup --antigravity --local" aria-label="Copy local Antigravity setup command"><CopyIcon /></button></div>
+          <div class="quickstart-command"><span class="quickstart-label">GEMINI CLI</span><code>npx -y @lotargo/memory_plugin setup --gemini</code><button class="icon-copy-button" type="button" data-copy="npx -y @lotargo/memory_plugin setup --gemini" aria-label="Copy Gemini CLI setup command"><CopyIcon /></button></div>
         </div>
         <a href="https://github.com/Lotargo/memory_plugin#quick-start" target="_blank" rel="noreferrer">Setup &amp; uninstall notes <span>↗</span></a>
       </aside>
@@ -170,12 +169,12 @@ import CopyIcon from '../components/CopyIcon.astro';
       <header>
         <p class="section-index">09 / GET STARTED</p>
         <h2>Give your agent<br />a memory.</h2>
-        <p class="install-copy">Pick the setup or uninstall path you need from Quick Start above, copy it with one click, and keep the full README nearby for configuration details.</p>
+        <p class="install-copy">Install or remove memory_plugin across all supported clients in one shot, or choose a single client from Quick Start above.</p>
       </header>
       <div class="install-summary">
         <span class="install-summary-label">QUICK START</span>
-        <strong>9 setup paths.<br />2 uninstall paths.</strong>
-        <p>Global install, npx, per-client setup, workspace-local Antigravity, and safe uninstall options are all available at the top of the page.</p>
+        <strong>All clients first.<br />Fine-grained below.</strong>
+        <p>The first block handles every supported client. The second block keeps per-client setup explicit when you only want one integration.</p>
         <a href="#top">Back to Quick Start <span>↑</span></a>
       </div>
     </div>
