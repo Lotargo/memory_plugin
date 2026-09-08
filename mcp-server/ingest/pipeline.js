@@ -407,6 +407,8 @@ export async function reindexEmbeddings({
     if (progressCallback) progressCallback({ done: vectors.length, total });
   }
 
+  const affectedDocIds = [...new Set(items.map((item) => item.doc_id).filter(Boolean))];
+
   await db.exec("BEGIN IMMEDIATE;");
   try {
     const stmt = db.prepare("UPDATE micro_chunks SET vector = ? WHERE id = ?;");
@@ -420,7 +422,6 @@ export async function reindexEmbeddings({
     throw new Error(`Re-index transaction failed: ${err.message}`);
   }
 
-  const affectedDocIds = [...new Set(items.map((item) => item.doc_id).filter(Boolean))];
   if (config.mode === "hybrid-sync") {
     try {
       const { enqueueSyncTask } = await import("../db/sync_queue.js");
