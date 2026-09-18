@@ -383,14 +383,16 @@ export async function embedBatch(texts, isQuery = false, modelName = null, progr
   }
 }
 
-export async function getReranker(modelName = "Xenova/bge-reranker-base", progressCallback = null) {
+export const DEFAULT_RERANKER_MODEL = "SugoLabs/mmarco-mMiniLMv2-L12-H384-v1";
+
+export async function getReranker(modelName = DEFAULT_RERANKER_MODEL, progressCallback = null) {
   if (rerankerInstance && loadedRerankerName === modelName) {
     return rerankerInstance;
   }
 
   const cacheDir = ensureValidModelDirectory();
 
-  const { pipeline, env } = await import("@huggingface/transformers");
+  const { AutoTokenizer, AutoModelForSequenceClassification, env } = await import("@huggingface/transformers");
   env.cacheDir = cacheDir;
   env.allowLocalModels = true;
   env.allowRemoteModels = true;
@@ -418,18 +420,24 @@ export async function getReranker(modelName = "Xenova/bge-reranker-base", progre
     }
   }
 
-  const pipelineOpts = {
+  const modelOpts = {
     quantized: true,
     dtype: "q8",
     device: targetDevice,
     session_options: sessionOptions,
   };
   if (progressCallback) {
-    pipelineOpts.progress_callback = progressCallback;
+    modelOpts.progress_callback = progressCallback;
   }
 
   try {
-    rerankerInstance = await pipeline("text-classification", modelName, pipelineOpts);
+    // NOTE: no text-classification pipeline here on purpose. The pipeline
+    // applies softmax + top_k=1, which saturates single-logit cross-encoders
+    // to score 1.0 for every candidate and makes reranking a no-op.
+    // Raw sequence-classification logits are the actual ranking signal.
+    const tokenizer = await AutoTokenizer.from_pretrained(modelName, progressCallback ? { progress_callback: progressCallback } : {});
+    const model = await AutoModelForSequenceClassification.from_pretrained(modelName, modelOpts);
+    rerankerInstance = { tokenizer, model };
     loadedRerankerName = modelName;
   } catch (err) {
     console.warn(`Failed to load reranker model ${modelName}: ${err.message}. Purging corrupt files...`);
@@ -446,28 +454,47 @@ export async function preloadModel(modelName, type = "embedding", progressCallba
   return await getExtractor(modelName, progressCallback);
 }
 
-export async function rerankHits(query, hits, rerankerModelName = "Xenova/bge-reranker-base") {
+export async function rerankHits(query, hits, rerankerModelName = DEFAULT_RERANKER_MODEL, options = {}) {
   if (!hits || hits.length === 0) return hits;
-  const classifier = await getReranker(rerankerModelName);
-  if (!classifier) return hits;
-
-  const reranked = [];
-  for (const hit of hits) {
-    try {
-      const input = `${query} | ${hit.content}`;
-      const res = await classifier(input);
-      const score = res && res[0] ? res[0].score : hit.rsf_score || hit.rrf_score || 0;
-      reranked.push({
-        ...hit,
-        rerank_score: score,
-      });
-    } catch (err) {
-      reranked.push(hit);
-    }
+  // Bound latency: cross-encoder scores pairs one ONNX pass per batch, so
+  // only the head of the fused list is reranked; the tail keeps its order.
+  const topN = Math.max(1, Number(options.topN ?? getConfig().rerankerTopN ?? 20) || 20);
+  const head = hits.slice(0, topN);
+  const tail = hits.slice(topN);
+  let reranker = null;
+  try {
+    reranker = await getReranker(rerankerModelName);
+  } catch {
+    reranker = null;
   }
+  if (!reranker?.tokenizer || !reranker?.model) return hits;
 
-  reranked.sort((a, b) => (b.rerank_score || 0) - (a.rerank_score || 0));
-  return reranked;
+  try {
+    const { tokenizer, model } = reranker;
+    const inputs = tokenizer(
+      head.map(() => query),
+      {
+        text_pair: head.map((hit) => hit.content),
+        padding: true,
+        truncation: true,
+        max_length: 512,
+      }
+    );
+    const outputs = await model(inputs);
+    const data = Array.from(outputs.logits.data, Number);
+    const perRow = data.length / head.length;
+    if (!Number.isInteger(perRow) || perRow <= 0) return hits;
+    const scored = head.map((hit, i) => ({
+      ...hit,
+      // Single-logit models (bge-reranker-base, mmarco MiniLM): the only
+      // logit. Two-label models: the positive-class logit.
+      rerank_score: data[i * perRow + (perRow - 1)],
+    }));
+    scored.sort((a, b) => (b.rerank_score || 0) - (a.rerank_score || 0));
+    return [...scored, ...tail];
+  } catch {
+    return hits;
+  }
 }
 
 export function vectorToBuffer(float32Array) {

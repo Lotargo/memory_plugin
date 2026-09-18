@@ -509,8 +509,9 @@ Configuration is stored in `<memory-dir>/config.json`.
 | `embeddingModel` | `Xenova/multilingual-e5-small` | Local Hugging Face/ONNX embedding model |
 | `vectorDimension` | `0` | Fixed vector size; `0` auto-detects model output |
 | `vectorScanLimit` | `50000` | Maximum vector candidates; `0` is unlimited |
-| `rerankerModel` | `none` | Optional cross-encoder model |
+| `rerankerModel` | `none` | Optional cross-encoder; recommended multilingual: `SugoLabs/mmarco-mMiniLMv2-L12-H384-v1` |
 | `rerankerEnabled` | `false` | Enable cross-encoder reranking |
+| `rerankerTopN` | `20` | Fused-list head rescored per query (one batched ONNX pass) |
 | `batchSize` | `12` | Ingestion embedding batch size |
 | `policyExpansion` | `true` | Expand matched table summaries/code signatures |
 | `executionDevice` | `cpu` | `cpu` or experimental `webgpu` |

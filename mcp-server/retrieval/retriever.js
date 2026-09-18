@@ -285,6 +285,7 @@ export async function batchHybridQuery(queries, options = {}) {
     embeddingModel = null,
     rerankerModel = null,
     rerankerEnabled = null,
+    rerankerTopN = null,
     instruction = null,
     generateEmbeddings = true,
     policyExpansion = null,
@@ -299,6 +300,7 @@ export async function batchHybridQuery(queries, options = {}) {
   const embModel = embeddingModel || activeConfig.embeddingModel || "Xenova/multilingual-e5-small";
   const usePolicyExpansion = policyExpansion !== null && policyExpansion !== undefined ? policyExpansion : (activeConfig.policyExpansion ?? true);
   const useReranker = rerankerEnabled !== null ? rerankerEnabled : (activeConfig.rerankerEnabled ?? false);
+  const useRerankerTopN = rerankerTopN !== null && rerankerTopN !== undefined ? rerankerTopN : (activeConfig.rerankerTopN ?? 20);
 
   // Batch embed all queries in one ONNX pass (major latency saving)
   const queryVectors = generateEmbeddings
@@ -319,6 +321,7 @@ export async function batchHybridQuery(queries, options = {}) {
         embeddingModel: embModel,
         rerankerModel,
         rerankerEnabled: useReranker,
+        rerankerTopN: useRerankerTopN,
         instruction,
         generateEmbeddings,
         policyExpansion: usePolicyExpansion,
@@ -342,6 +345,7 @@ export async function hybridQuery({
   embeddingModel = null,
   rerankerModel = null,
   rerankerEnabled = null,
+  rerankerTopN = null,
   instruction = null,
   generateEmbeddings = true,
   policyExpansion = null, // null = use config default
@@ -361,7 +365,8 @@ export async function hybridQuery({
   const alphaWeight = alpha !== null && alpha !== undefined ? alpha : (activeConfig.alpha ?? 0.5);
   const embModel = embeddingModel || activeConfig.embeddingModel || "Xenova/multilingual-e5-small";
   const useReranker = rerankerEnabled !== null ? rerankerEnabled : (activeConfig.rerankerEnabled ?? false);
-  const rerankModelName = rerankerModel || activeConfig.rerankerModel || "Xenova/bge-reranker-base";
+  const rerankModelName = rerankerModel || activeConfig.rerankerModel || "SugoLabs/mmarco-mMiniLMv2-L12-H384-v1";
+  const useRerankerTopN = rerankerTopN !== null && rerankerTopN !== undefined ? rerankerTopN : (activeConfig.rerankerTopN ?? 20);
   const usePolicyExpansion = policyExpansion !== null && policyExpansion !== undefined ? policyExpansion : (activeConfig.policyExpansion ?? true);
 
   // Resolve query vector: use precomputed (from batch) or embed on demand
@@ -399,7 +404,7 @@ export async function hybridQuery({
   }
 
   if (useReranker && rerankModelName !== "none") {
-    fusedHits = await rerankHits(query, fusedHits, rerankModelName);
+    fusedHits = await rerankHits(query, fusedHits, rerankModelName, { topN: useRerankerTopN });
   }
 
   // Parent-Child Rollup: Deduplicate hits sharing the same medium_id or section_id to prevent noise.
@@ -536,6 +541,9 @@ export async function hybridQuery({
         rsf_score: hit.rsf_score ? parseFloat(hit.rsf_score.toFixed(4)) : null,
         rrf_score: hit.rrf_score ? parseFloat(hit.rrf_score.toFixed(4)) : null,
         cosine_sim: hit.cosine_sim ? parseFloat(hit.cosine_sim.toFixed(4)) : null,
+        rerank_score: hit.rerank_score !== undefined && hit.rerank_score !== null
+          ? parseFloat(Number(hit.rerank_score).toFixed(4))
+          : null,
         defined_symbols: symbols,
         retrieval_policy: (usePolicyExpansion ? (detail.retrieval_policy || "micro_chunk") : "micro_chunk"),
       });

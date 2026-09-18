@@ -9,8 +9,9 @@ export const DEFAULT_CONFIG = {
   alpha: 0.5,             // Weight for vector similarity in RSF [0.0 - 1.0] (50/50 balance)
   embeddingModel: "Xenova/multilingual-e5-small",
   vectorDimension: 0,     // Fixed embedding dimension (0 = auto-detect from model output)
-  rerankerModel: "none",   // "none" | "Xenova/bge-reranker-base" | custom HF model
+  rerankerModel: "none",   // "none" | "SugoLabs/mmarco-mMiniLMv2-L12-H384-v1" (multilingual, recommended) | "Xenova/bge-reranker-base" | custom HF cross-encoder
   rerankerEnabled: false,
+  rerankerTopN: 20,       // Head of the fused list rescored per query [1 - 100] (one batched ONNX pass)
   batchSize: 12,           // Ingestion vector batch size [1 - 256] (default 12)
   vectorScanLimit: 50000,  // Max micro-chunks scanned per vector query (0 = unlimited)
   gpuAttentionBudget: 2000000, // GPU micro-batch attention budget [1M - 16M] (default 2.0M ~1.5GB VRAM)

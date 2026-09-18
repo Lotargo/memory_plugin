@@ -101,7 +101,7 @@ export async function handleEngineAction(value, config) {
         } else {
           let chosenRk = subRes.value;
           if (subRes.value === "custom") {
-            const inputRes = await readTextInput("Enter HuggingFace Reranker Model ID", "Xenova/bge-reranker-base");
+            const inputRes = await readTextInput("Enter HuggingFace Reranker Model ID", "SugoLabs/mmarco-mMiniLMv2-L12-H384-v1");
             if (inputRes.action === "submit" && inputRes.value) {
               chosenRk = inputRes.value;
             } else {

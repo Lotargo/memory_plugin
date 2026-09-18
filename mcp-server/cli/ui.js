@@ -17,6 +17,7 @@ export const EMBEDDING_PRESETS = [
 
 export const RERANKER_PRESETS = [
   "none",
+  "SugoLabs/mmarco-mMiniLMv2-L12-H384-v1",
   "Xenova/bge-reranker-base",
   "Xenova/bge-reranker-large",
   "Xenova/ms-marco-MiniLM-L-6-v2",
