@@ -1,9 +1,39 @@
 import { basename, extname } from "node:path";
 import { isIP } from "node:net";
 import { lookup } from "node:dns/promises";
-import { PDFParse } from "pdf-parse";
-import mammoth from "mammoth";
-import * as xlsx from "xlsx";
+
+// Heavy binary/format parsers (pdf-parse pulls @napi-rs/canvas which needs
+// DOMMatrix/native bindings) must stay lazy: text-only ingestion (remember_note,
+// ingest text/url) should never touch them at import time. Otherwise merely
+// importing normalizer.js crashes restricted runtimes with
+// "DOMMatrix is not defined" even when no PDF/DOCX/XLSX is processed.
+let _pdfParseCtor = null;
+let _mammoth = null;
+let _xlsx = null;
+
+async function getPdfParseCtor() {
+  if (!_pdfParseCtor) {
+    const mod = await import("pdf-parse");
+    _pdfParseCtor = mod.PDFParse || mod.default?.PDFParse || mod.default;
+  }
+  return _pdfParseCtor;
+}
+
+async function getMammoth() {
+  if (!_mammoth) {
+    const mod = await import("mammoth");
+    _mammoth = mod.default || mod;
+  }
+  return _mammoth;
+}
+
+async function getXlsx() {
+  if (!_xlsx) {
+    const mod = await import("xlsx");
+    _xlsx = mod.default && mod.default.read ? mod.default : mod;
+  }
+  return _xlsx;
+}
 
 export function cleanHtml(html) {
   if (!html) return "";
@@ -224,15 +254,46 @@ export function stripMarkdownBadgesAndNoise(text) {
   return cleaned;
 }
 
-export function parseSpreadsheet(content, fileName, isCsv = false) {
+export function humanizeHeader(name) {
+  const s = String(name ?? "").trim();
+  if (!s) return s;
+  return s.replace(/[_-]+/g, " ").replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/\s+/g, " ").trim();
+}
+
+function headerKey(name) {
+  return String(name ?? "").toLowerCase().replace(/[\s_\-]+/g, "");
+}
+
+// Tiny search-oriented verbalization for table cells (no dictionaries to
+// maintain): boolean-ish values get yes/no aliases, stock-like columns get
+// in/out-of-stock aliases in both languages so queries like
+// "product out of stock" hit "InStock: false".
+export function verbalizeCell(header, value) {
+  const v = String(value ?? "").trim().toLowerCase();
+  const hk = headerKey(header);
+  const isStock = /(instock|stock|avail|наличи)/.test(hk);
+  const truthy = ["true", "yes", "y", "да", "в наличии", "in stock"].includes(v);
+  const falsy = ["false", "no", "n", "нет", "не в наличии", "out of stock"].includes(v);
+  if (isStock) {
+    if (falsy) return " (out of stock / нет в наличии)";
+    if (truthy) return " (in stock / в наличии)";
+    return null;
+  }
+  if (truthy) return " (yes / да)";
+  if (falsy) return " (no / нет)";
+  return null;
+}
+
+export async function parseSpreadsheet(content, fileName, isCsv = false) {
+  const xlsxLib = await getXlsx();
   const options = isCsv && (typeof content === "string") ? { type: "string" } : { type: "buffer" };
-  const workbook = xlsx.read(content, options);
+  const workbook = xlsxLib.read(content, options);
   let markdownParts = [];
 
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
     // Convert to JSON 2D array
-    const rows = xlsx.utils.sheet_to_json(sheet, { header: 1 });
+    const rows = xlsxLib.utils.sheet_to_json(sheet, { header: 1 });
     if (rows.length === 0) continue;
 
     markdownParts.push(`## Sheet: ${sheetName}\n`);
@@ -266,9 +327,9 @@ export function parseSpreadsheet(content, fileName, isCsv = false) {
 
       markdownParts.push(`Record ${i} from sheet ${sheetName}:`);
       for (let j = 0; j < maxCols; j++) {
-        const headerName = headers[j]?.trim() || `Column_${j + 1}`;
+        const headerName = humanizeHeader(headers[j]) || `Column_${j + 1}`;
         const val = row[j]?.trim() || "";
-        markdownParts.push(`- ${headerName}: ${val}`);
+        markdownParts.push(`- ${headerName}: ${val}${verbalizeCell(headers[j], row[j]) || ""}`);
       }
       markdownParts.push("");
     }
@@ -313,7 +374,8 @@ export async function normalizeContent({ content, type = "text", path = null, ti
     if (ext === ".pdf") {
       try {
         const pdfBuffer = Buffer.isBuffer(content) ? content : Buffer.from(content);
-        const parser = new PDFParse({ data: pdfBuffer });
+        const PDFParseCtor = await getPdfParseCtor();
+        const parser = new PDFParseCtor({ data: pdfBuffer });
         const result = await parser.getText();
         markdown = result.text || "";
         docTitle = title || fileName;
@@ -323,15 +385,19 @@ export async function normalizeContent({ content, type = "text", path = null, ti
     } else if (ext === ".docx") {
       try {
         const docxBuffer = Buffer.isBuffer(content) ? content : Buffer.from(content);
-        const result = await mammoth.convertToMarkdown({ buffer: docxBuffer });
-        markdown = result.value || "";
+        const mammothLib = await getMammoth();
+        const result = await mammothLib.convertToMarkdown({ buffer: docxBuffer });
+        // Mammoth escapes markdown specials (docx\-decision, 2026\-10\-01, \.)
+        // which breaks exact-token search in RAG. For retrieval we want plain
+        // text, so unescape the standard set.
+        markdown = String(result.value || "").replace(/\\([\\.\-*_+#!(){}\[\]])/g, "$1");
         docTitle = title || fileName;
       } catch (err) {
         throw new Error(`Failed to parse DOCX file '${fileName}': ${err.message}`);
       }
     } else if (ext === ".xlsx" || ext === ".xls" || ext === ".csv") {
       try {
-        markdown = parseSpreadsheet(content, fileName, ext === ".csv");
+        markdown = await parseSpreadsheet(content, fileName, ext === ".csv");
         docTitle = title || fileName;
       } catch (err) {
         throw new Error(`Failed to parse spreadsheet file '${fileName}': ${err.message}`);

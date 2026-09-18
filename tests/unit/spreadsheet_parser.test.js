@@ -16,7 +16,7 @@ function buildWorkbookBuffer() {
 async function main() {
   const buffer = buildWorkbookBuffer();
 
-  const markdown = parseSpreadsheet(buffer, "sample.xlsx");
+  const markdown = await parseSpreadsheet(buffer, "sample.xlsx");
   assert.match(markdown, /## Sheet: Data/);
   assert.match(markdown, /\| Name \| Value \|/);
   assert.match(markdown, /- Name: alpha/);
@@ -33,7 +33,7 @@ async function main() {
   assert.match(normalized.markdown, /- Value: ok/);
 
   const csv = "Name,Value\ngamma,7\n";
-  const csvMarkdown = parseSpreadsheet(csv, "sample.csv", true);
+  const csvMarkdown = await parseSpreadsheet(csv, "sample.csv", true);
   assert.match(csvMarkdown, /- Name: gamma/);
   assert.match(csvMarkdown, /- Value: 7/);
 
