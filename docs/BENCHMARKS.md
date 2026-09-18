@@ -155,3 +155,95 @@ _Key Insight_: In the Google Jules cloud sandbox, Relative Score Fusion (RSF) re
 2. **Model-Aware Prefixing & Protocol Handling**: Enforcing precise asymmetric prefixing (`passage: ` for indexing, `query: ` for search in standard E5 models, prompt prefixes for BGE, and dynamic `Instruct: ` blocks specifically for `*-instruct` models) eliminates task drift, raising dense vector MRR@5 from 0.6048 to 0.8135 on the reference corpus.
 3. **Hybrid RSF Convergence**: Relative Score Fusion ($\alpha=0.5$) achieves **0.9286 MRR@5** at **100.00% Recall@5** with e5-small on the reference corpus, and **0.4817 MRR@5** at **61.90% Recall@5** with bge-m3 (q8) on the 30-document corpus.
 4. **Cloud Environment Validation (Google Jules)**: Verified that headless MCP server deployment in constrained cloud hypervisors (Google Jules KVM container) achieves **100.00% Recall@5** and **0.9286 MRR@5** under CPU-only vector execution.
+
+---
+
+## 8. Local Dev-Time Retrieval Gate (2026-09, 7-Document Doctest Corpus)
+
+> **Scope honesty note.** This section is a *development-time quality gate*, not a ground-truth benchmark.
+> The corpus below is 7 hand-made files, the 12 relevance judgments are the author's own, and the
+> sample is far too small and too easy to support any SOTA claim (note the MRR 1.0 ceiling).
+> It exists to catch regressions during development (ingest breakage, chunking, linking, rerank wiring).
+> Authoritative numbers must come from the backlog in §9 (MIRACL and friends).
+
+### 8.1 Gate corpus
+
+| File | Type | Chars (normalized) | Sections | Micro-chunks | Notes |
+| :--- | :--- | ---: | ---: | ---: | :--- |
+| `architecture_report.pdf` | PDF (fpdf2) | 375 | 1 | 2 | Decision, budget, risks, timeline |
+| `meeting_notes.docx` | DOCX (python-docx) | 489 | 2 | 14 | Headings + Staff table |
+| `inventory.xlsx` | XLSX, 2 sheets | 924 | 4 | 10 | Staff + Inventory, `table_summary` x2 |
+| `code_sample.js` | code | 371 | 1 | 3 | `code_signature` policy chunks |
+| `guide.md` | markdown | 406 | 3 | 3 | EN paraphrase of PDF content |
+| `data.csv` | CSV | 422 | 2 | 5 | Same data as Inventory sheet |
+| `notes.txt` | plain text (RU) | 230 | 1 | 1 | RU paraphrase of decision |
+
+38 micro-chunks total, 384-dim vectors (~58 KB). Model: `Xenova/multilingual-e5-small` (q8, CPU).
+Reranker where used: `SugoLabs/mmarco-mMiniLMv2-L12-H384-v1` (q8, ~129 MB), top-15 head, one batched ONNX pass.
+
+### 8.2 Track 1 — automated gate (12 queries, doc-level Recall@5 / MRR@5 / NDCG@5 / top-1 rate)
+
+| Config | Recall@5 | MRR@5 | NDCG@5 | Top-1 rate | Query latency |
+| :--- | ---: | ---: | ---: | ---: | :--- |
+| lexical (BM25 only) | 0.819 | 1.000 | 0.854 | 12/12 | ~1 ms |
+| hybrid RSF (no rerank) | 0.910 | 1.000 | 0.909 | 12/12 | ~7 ms |
+| hybrid RSF + mmarco rerank | 0.931 | 0.958 | 0.908 | 11/12 | ~300 ms (first call ~1.2 s model load) |
+
+Reading: hybrid beats lexical on recall (+0.09); rerank adds a little recall (+0.02) but **loses one top-1**
+(`budget for billing migration` → `notes.txt`, which does mention the budget in Russian — a debatable
+judgment, not a clear failure). The MRR 1.0 ceiling means this gate **cannot** demonstrate reranker MRR gains.
+
+### 8.3 Track 2 — blind A/B judge (6 fresh adversarial queries, rubric top-1 0/1 + top-3 0/1/2 − junk)
+
+Systems shuffled per query, mapping revealed after scoring. Totals: **hybrid 14 vs hybrid+rerank 16**.
+
+| Query | Hybrid | +Rerank | Decisive detail |
+| :--- | ---: | ---: | :--- |
+| `Postgres or Mongo for billing` | 3 | 3 | tie, both perfect |
+| `E201 employee` | 2 | 2 | tie; exact-ID distractor (E101) shown by both |
+| `Gadget X price` | 3 | 3 | tie; rerank prefers full table over record snippet |
+| `сроки отключения старой системы` (RU paraphrase, no shared tokens) | 0 | **3** | rerank top-1 = `Deadline is 2026-10-01`; base top-1 = dateless note + code junk |
+| `who coordinates the cutover` | 3 | 3 | tie |
+| `marketing staff member` | 3 | 2 | rerank swaps top-1 xlsx record → guide sentence (both answer; strict rubric −1) |
+
+Reading: the reranker's value is concentrated in **hard paraphrase / cross-lingual queries where lexical+vector
+put junk in the head** (Q4: 0 → 3). Everywhere else it ties. Cost: ~300 ms per query and occasional top-1
+swaps on ambiguous queries. This is why reranking stays **opt-in, default off**.
+
+### 8.4 Latency profile (cold model load 1.2 s, cached)
+
+| Stage | PDF | DOCX | XLSX | md/js/txt |
+| :--- | ---: | ---: | ---: | ---: |
+| normalize | ~330 ms | ~260 ms | ~60 ms | 0–5 ms |
+| ingest w/ embeddings (≤14 chunks) | ~80 ms | ~240 ms | ~210 ms | 70–260 ms |
+| hybrid query | ~7 ms | — | — | — |
+| hybrid + rerank (top-15) | ~300 ms | — | — | — |
+
+Binary-format parsing dominates small-file ingest, not ONNX.
+
+### 8.5 Bugs this gate actually caught
+
+1. `remember_note`/`ingest_document` crashed with `DOMMatrix is not defined` in restricted runtimes:
+   top-level `pdf-parse → @napi-rs/canvas` import. Fixed by lazy-loading parsers.
+2. DOCX exact-token search broken: Mammoth escapes (`docx\-decision`); fixed by unescaping on ingest.
+3. `InStock: false` unfindable via `out of stock`: fixed by header humanization + value verbalization.
+4. Reranker was a silent no-op: `text-classification` pipeline returns softmax top-1 (≈1.0 for every
+   single-logit candidate). Reworked to raw-logit batched scoring.
+
+---
+
+## 9. Benchmark Backlog (Ground Truth)
+
+Each claimed capability needs an external benchmark before any SOTA-adjacent claim. Status legend:
+`gate-only` = covered by §8 dev gate; `open` = no external measurement yet.
+
+| # | Claimed capability | Required bench | Status |
+| ---: | :--- | :--- | :--- |
+| 1 | Multilingual doc/passage retrieval (EN+RU) | **MIRACL** ru+en sample (~200 queries): MRR@10 / NDCG@10 / recall | open |
+| 2 | Reranker head reordering | Same MIRACL harness, rerank on/off delta | open |
+| 3 | Code search (symbols, signatures) | **CodeSearchNet** (6 langs) MRR or **CoSQA**; report per-lang | open |
+| 4 | Knowledge-graph accuracy (symbols, edges, fact↔doc links) | No standard bench fits; build annotated set: symbol precision/recall + link accuracy on fixed fixtures | open |
+| 5 | Table/CSV retrieval (records vs summaries) | MIRACL-style slice over table corpus or custom annotated sheets | open |
+| 6 | Long-context / multi-hop | **LoCoMo** (matches published mmarco-reranker reference numbers) | open |
+
+Rule: §8 stays a regression gate; any quality claim stronger than "no worse than last run" must cite a row above.

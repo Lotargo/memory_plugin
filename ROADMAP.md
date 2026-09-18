@@ -164,6 +164,70 @@ The exact transport, framework, authentication model, and local binding strategy
 
 ---
 
+### Provider-based embeddings & reranking (local / API / sidecar)
+
+Graduate the retrieval engine from local-only ONNX to a provider model without breaking
+local-first defaults. Local inference stays the default; API and sidecar are opt-in.
+
+#### Why
+
+The model-agnostic base (chunking policies, RSF fusion, table verbalization, fact↔doc links)
+already carries the budget stack. Swapping the engine underneath multiplies those gains instead
+of replacing them. Verified 2026-09: `gemini-embedding-001` (MMTEB SOTA, Matryoshka 768/1536/3072,
+`task_type` incl. `RETRIEVAL_QUERY/DOCUMENT`, `CODE_RETRIEVAL_QUERY`) needs no dedicated reranker —
+Google's own pattern is LLM reranking (Flash-Lite/Flash permutation), which community ablations put
+~+7% NDCG over cross-encoders at pool 25.
+
+#### Provider abstraction (build once)
+
+- `embeddingProvider: { name, model, dim }` and a separate `rerankerProvider` — several vendors
+  offer only one side (OpenAI/Gemini: embeddings only → pair with local mmarco or Cohere/Jina rerank).
+- One `embedBatch(texts)` / `rerank(query, pairs)` interface with retries, backoff, RPM respect.
+  The existing `embedFn` hook in reindex + batched rerank path are the insertion points.
+
+#### Candidate providers (verified 2026-09-18; model IDs MUST be re-verified at implementation time — they rot fast)
+
+| Provider | Embeddings | Rerank | Notes |
+| :--- | :--- | :--- | :--- |
+| Gemini | `gemini-embedding-001`, MRL 768/1536/3072, `task_type` (`RETRIEVAL_QUERY/DOCUMENT`, `CODE_RETRIEVAL_QUERY`), 100+ langs | LLM-rerank via Flash-Lite/Flash, no dedicated model | Multilingual SOTA; `text-embedding-004` deprecated Jan 2026 — do not use |
+| Cohere | `embed-v4.0` (MRL 256–1536, 128k ctx, text+image) or `embed-multilingual-v3.0` (1024d) / light (384d) | `rerank-v4.0-pro/fast`, `rerank-v3.5`, `rerank-multilingual-v3.0` (100+ langs, JSON docs) | Only vendor besides Jina with both sides + 100-lang coverage |
+| Jina AI | `jina-embeddings-v5-text-small` (1024d MRL, 32k) / nano (768d) / v4 multimodal; `task: retrieval.query/passage, code.query/passage`; free tier ~10M tokens | `jina-reranker-v3.5` (listwise, 131k ctx, BEIR 63.2) or v2-multilingual; `jina-colbert-v2` for late interaction | Richest single provider: embed + rerank + ColBERT + Reader; note v2 weight license is CC-BY-NC (API use fine) |
+| OpenAI | `text-embedding-3-small` ($0.02/M, 1536d, MTEB 62.3) / `3-large` ($0.13/M, 3072d, MTEB 64.6), `dimensions` param, 8k ctx | none — pair externally | Most requested, half a solution alone |
+| OpenRouter | gateway, versioned presets | gateway | One key, but model IDs/pricing drift — pin versions |
+
+#### Flagship picks (2026-09-18 — the models to integrate first per provider)
+
+| Provider | Flagship embedding | Flagship rerank | Why this one |
+| :--- | :--- | :--- | :--- |
+| Gemini | `gemini-embedding-001` (MRL 768/1536/3072) | Flash-Lite/Flash LLM-rerank (no dedicated model exists) | MMTEB SOTA; `embedding-2` only if multimodal input is needed |
+| OpenAI | `text-embedding-3-large` (small = budget fallback) | — (pair with local mmarco or Cohere/Jina) | Only flagship they have; no rerank API at all |
+| Cohere | `embed-v4.0` (MRL, 128k ctx) | `rerank-v4.0-pro` (`-fast` for latency) | Both sides, 100+ langs, JSON docs |
+| Jina AI | `jina-embeddings-v5-text-small` (`v4` if multimodal) | `jina-reranker-v3.5` (listwise, 131k ctx) | Both sides + ColBERT + Reader; freest tier |
+
+#### Secrets & CLI (the actual work)
+
+- Reuse the existing encrypted secret store (same AES-GCM envelope as Turso); never persist keys
+  in `config.json` plaintext.
+- Per provider: set-key, test-connection (single probe embed), model presets with dims, status badges.
+- Provider switch MUST offer reindex: vectors from different models are incomparable
+  (cosine over mixed spaces is garbage). `reindex_knowledge_base` already exists — wire the prompt.
+
+#### Honest costs
+
+- API adds ~100–500 ms per call vs ~7 ms local hybrid queries; bulk ingest over API hurts,
+  on-demand rerank does not. Keep local default.
+- API = privacy trade-off against the plugin's local-first identity. Opt-in only, never required.
+
+#### Phases
+
+1. Abstraction + secrets + first providers (suggested: Cohere + Jina — both sides, one key each).
+2. LLM-rerank path (RankGPT-style permutation over the top-N head, pool sized by model capacity).
+3. GPU sidecar (self-hosted `bge-m3`, SPLADE sparse instead of BM25, ColBERT late interaction).
+   ColBERT needs token-level vector storage — a storage-schema change, do not bundle with 1–2.
+4. Each phase measured on the §9 benchmark backlog (MIRACL slice first), never on the §8 toy gate alone.
+
+---
+
 ## Exploratory
 
 ### Browser Memory Playground
