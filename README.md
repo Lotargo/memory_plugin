@@ -402,6 +402,20 @@ Stored tokens live in `auth_secrets.enc`, not `config.json`. They are encrypted 
 
 This is not an OS keychain. It protects against casual inspection/file-only exfiltration, not a compromised local user account. Encrypted secrets are machine-bound. The headless `.env` fallback stores credentials in plaintext by design.
 
+### ML Model Memory Management
+
+Embedding and reranker models run inside the long-lived MCP server process and load on **CPU/RAM by default** (`executionDevice: "cpu"`). The CLI can inspect, move, and unload them without restarting the server:
+
+```bash
+memory-cli models status [--json]          # where models live (CPU/RAM vs GPU/VRAM), VRAM usage, timer
+memory-cli models load --device gpu        # switch to GPU (DirectML/CUDA) and preload models into the server
+memory-cli models load --device cpu        # move models back to RAM
+memory-cli models unload                   # instantly free model RAM/VRAM, prints before/after usage
+memory-cli models timer 10                 # auto-unload after 10 min idle (off = never)
+```
+
+Commands reach the running MCP server through a file-based control channel (`<memory-dir>/control/`); AI agents use the same CLI, e.g. "unload the models and check memory is freed" → `memory-cli models unload`. When no server is running, `device`/`timer` changes simply persist and apply on next start.
+
 ---
 
 ## Tool Reference
@@ -514,7 +528,8 @@ Configuration is stored in `<memory-dir>/config.json`.
 | `rerankerTopN` | `20` | Fused-list head rescored per query (one batched ONNX pass) |
 | `batchSize` | `12` | Ingestion embedding batch size |
 | `policyExpansion` | `true` | Expand matched table summaries/code signatures |
-| `executionDevice` | `cpu` | `cpu` or experimental `webgpu` |
+| `executionDevice` | `cpu` | `cpu` (RAM, default) or experimental `webgpu` (GPU/VRAM) |
+| `modelUnloadTimeoutMinutes` | `0` | Idle auto-unload of ML models; `0` keeps them loaded |
 | `gpuAttentionBudget` | `2000000` | Experimental GPU micro-batch budget |
 | `onnxThreads` | `0` | WASM thread count; `0` auto-detects |
 | `tursoUrl` | `""` | Primary LibSQL endpoint populated by login |
@@ -605,6 +620,7 @@ The stored 32-document / 21-query technical corpus produced:
 - **Project recall is empty**: call `memory_info`; if a Git identity is `Registry: unlinked`, run `link_project_memory` or `memory-cli link --dir <repo>`.
 - **A raw note/document exists only in cloud**: `manage_knowledge_base(action: "read_document")` automatically materializes and verifies its CAS blob locally when cloud credentials are available.
 - **Embedding model changed**: run `reindex_knowledge_base` or use the TUI `[REINDEX]` action.
+- **Models are sitting in VRAM**: run `memory-cli models device cpu` to move them to RAM, `memory-cli models unload` to free memory immediately, or `memory-cli models timer 10` for automatic idle unload.
 
 ---
 

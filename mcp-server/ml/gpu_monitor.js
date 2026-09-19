@@ -27,6 +27,42 @@ export async function getGpuUtilizationAsync() {
   return null;
 }
 
+export async function getGpuMemoryInfoAsync() {
+  try {
+    const { stdout } = await execFileAsync("nvidia-smi",
+      ["--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"],
+      { timeout: 1500 }
+    );
+    const [used, total] = stdout.trim().split(",").map((v) => parseInt(v.trim(), 10));
+    if (!isNaN(used) && !isNaN(total)) return { usedMB: used, totalMB: total };
+  } catch {}
+  return null;
+}
+
+export async function getProcessMemoryMB(pid) {
+  if (!pid) return null;
+  if (pid === process.pid) {
+    return Math.round(process.memoryUsage().rss / (1024 * 1024));
+  }
+  if (process.platform === "win32") {
+    try {
+      const { stdout } = await execFileAsync("powershell",
+        ["-NoProfile", "-Command", `(Get-Process -Id ${pid} -ErrorAction Stop).WorkingSet64`],
+        { timeout: 2500 }
+      );
+      const bytes = parseInt(stdout.trim(), 10);
+      if (!isNaN(bytes)) return Math.round(bytes / (1024 * 1024));
+    } catch {}
+    return null;
+  }
+  try {
+    const { stdout } = await execFileAsync("ps", ["-o", "rss=", "-p", String(pid)], { timeout: 2000 });
+    const kb = parseInt(stdout.trim(), 10);
+    if (!isNaN(kb)) return Math.round(kb / 1024);
+  } catch {}
+  return null;
+}
+
 export class GpuMonitor {
   constructor(sampleIntervalMs = 100) {
     this.intervalMs = sampleIntervalMs;

@@ -18,6 +18,11 @@ export async function handleDirectCommands(cliArgs) {
     return true;
   }
 
+  if (cliArgs[0] === "models" || cliArgs[0] === "model") {
+    const { handleModelCommands } = await import("./model_commands.js");
+    return await handleModelCommands(cliArgs);
+  }
+
   if (cliArgs[0] === "dev-link" || cliArgs[0] === "dev_link") {
     const { runDevLink } = await import("../dev_link.js");
     await runDevLink();

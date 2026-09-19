@@ -38,6 +38,8 @@ const CLI_COMMANDS = new Set([
   "enable-prompt",
   "disable-prompt",
   "doctor",
+  "models",
+  "model",
 ]);
 
 function printUsage() {
@@ -55,6 +57,7 @@ Usage:
   memory_plugin link|unlink|relink|identity [--dir <path>] [--remote <url>]
   memory_plugin migrate_titles [--key <key>]
   memory_plugin enable-prompt | disable-prompt
+  memory_plugin models status [--json] | unload | load [--device cpu|gpu] | device cpu|gpu | timer off|<minutes>
   memory_plugin doctor --codex
 
 Options:
@@ -116,6 +119,11 @@ const server = new McpServer({
   name: "memory-agent",
   version: readPackageVersion(),
 });
+
+// Arm the file-based model control channel so `memory-cli models ...`
+// commands can unload/reload ONNX sessions owned by this process.
+const { startModelControlLoop } = await import("./ml/model_manager.js");
+startModelControlLoop();
 
 registerAllTools(server);
 

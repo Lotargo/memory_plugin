@@ -34,6 +34,7 @@ Usage:
   memory-cli migrate-persona [--dry-run]
                                      Mark legacy global persona entries as directives
   memory-cli enable-prompt | disable-prompt
+  memory-cli models status [--json] | unload | load [--device cpu|gpu] | device cpu|gpu | timer off|<minutes>
   memory-cli uninstall [--purge] [--purge-cache] [--dry-run] [--yes] [--opencode|--claude|--codex|--gemini|--antigravity]
   memory-cli doctor --codex
 
@@ -193,6 +194,20 @@ async function showCategorySubmenu(category, config, stats, initialIndex = 0) {
           info: config.executionDevice === "webgpu" || config.executionDevice === "gpu"
             ? "⚠️ EXPERIMENTAL: ONNX DirectML GPU execution (high VRAM/padding overhead, CPU AVX2 recommended)"
             : "CPU inference via AVX2 / WASM SIMD (Recommended for stability & speed)",
+        },
+        {
+          label: "Model Auto-Unload Timer",
+          badge: (config.modelUnloadTimeoutMinutes || 0) > 0 ? `${config.modelUnloadTimeoutMinutes} MIN` : "OFF",
+          value: "model_unload_timer",
+          info: (config.modelUnloadTimeoutMinutes || 0) > 0
+            ? `Embedding & reranker models unload after ${config.modelUnloadTimeoutMinutes} min of inactivity (frees RAM/VRAM)`
+            : "Idle timeout for unloading ML models from RAM/VRAM (OFF = keep loaded)",
+        },
+        {
+          label: "Unload Models Now",
+          badge: "FREE RAM/VRAM",
+          value: "unload_models_now",
+          info: "Instantly drop embedding & reranker ONNX sessions from memory in this process (they reload lazily on next use)",
         },
       ];
       break;

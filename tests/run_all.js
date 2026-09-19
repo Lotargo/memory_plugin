@@ -23,6 +23,7 @@ const testSuites = [
   { category: "Unit", name: "chunker", file: "tests/unit/chunker.test.js" },
   { category: "Unit", name: "policy_retrieval", file: "tests/unit/policy_retrieval.test.js" },
   { category: "Unit", name: "spreadsheet_parser", file: "tests/unit/spreadsheet_parser.test.js" },
+  { category: "Unit", name: "model_control", file: "tests/unit/model_control.test.js" },
 
   // --- 2. INTEGRATION TESTS ---
   { category: "Integration", name: "expanded_features", file: "tests/integration/expanded_features.test.js" },

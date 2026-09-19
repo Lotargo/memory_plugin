@@ -247,8 +247,61 @@ export async function handleEngineAction(value, config) {
         initialIndex: initialDevIdx,
       });
       if (subRes.action === "select") {
+        const previousDevice = config.executionDevice || "cpu";
         updateConfig({ executionDevice: subRes.value });
+        // If this very process already holds ONNX sessions on the old device
+        // (e.g. after a model download/preload from this TUI), drop them so
+        // they reload on the newly selected device.
+        if (previousDevice !== subRes.value) {
+          const { unloadModels } = await import("../../ml/model_manager.js");
+          await unloadModels("device-switch");
+          console.log(`\n  [OK] Device switched to ${subRes.value === "cpu" ? "CPU (RAM)" : "GPU (DirectML/WebGPU)"}; loaded model instances were unloaded and will reload on the new device.\n`);
+          console.log("  [TIP] To move models inside a running MCP server, use: memory-cli models device cpu|gpu\n");
+          await waitForEnter();
+        }
       }
+      break;
+    }
+    case "model_unload_timer": {
+      const timerItems = [
+        { label: "OFF (Keep Models Loaded)", value: 0, info: "Models stay in RAM/VRAM until manually unloaded" },
+        { label: "1 Minute (Aggressive)", value: 1, info: "Unload after 1 min idle — max memory savings, reload cost on every pause" },
+        { label: "5 Minutes", value: 5, info: "Unload after 5 min idle" },
+        { label: "10 Minutes (Balanced)", value: 10, info: "Unload after 10 min idle — good default for shared GPUs" },
+        { label: "30 Minutes", value: 30, info: "Unload after 30 min idle" },
+        { label: "60 Minutes (Relaxed)", value: 60, info: "Unload after 1 hour idle" },
+      ];
+      const currentTimer = config.modelUnloadTimeoutMinutes || 0;
+      const initialTimerIdx = Math.max(0, timerItems.findIndex((i) => i.value === currentTimer));
+      const subRes = await selectSimpleMenu({
+        title: "MODEL AUTO-UNLOAD IDLE TIMER",
+        subtitle: "Drop embedding & reranker models from RAM/VRAM after inactivity (applies in the MCP server process)",
+        items: timerItems,
+        initialIndex: initialTimerIdx,
+      });
+      if (subRes.action === "select") {
+        updateConfig({ modelUnloadTimeoutMinutes: subRes.value });
+      }
+      break;
+    }
+    case "unload_models_now": {
+      const { unloadModels } = await import("../../ml/model_manager.js");
+      console.clear();
+      console.log("\n  [MODELS] Unloading ML model sessions from this process...");
+      const result = await unloadModels("cli-tui");
+      if (result.wasLoaded) {
+        for (const m of result.unloaded) {
+          console.log(`  [OK] Unloaded ${m.type} model "${m.model}" (was on ${m.device || "cpu"})`);
+        }
+      } else {
+        console.log("  [*] No models are loaded in this CLI process.");
+      }
+      console.log(`  [MEMORY] Process RAM (RSS) now: ${result.processRssMB} MB`);
+      if (result.gpuMemory) {
+        console.log(`  [VRAM] GPU memory in use: ${result.gpuMemory.usedMB} / ${result.gpuMemory.totalMB} MB`);
+      }
+      console.log("\n  [TIP] To unload models held by the running MCP server, use: memory-cli models unload\n");
+      await waitForEnter();
       break;
     }
   }

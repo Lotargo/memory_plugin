@@ -7,14 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- Restructured the `using-memory` agent skill to follow the canonical Agent Skills layout with progressive disclosure: `SKILL.md` is now a compact router (frontmatter, layer overview, mandatory session-initialization sequence, tool decision matrix, and core directives), while detailed tool documentation moved into on-demand reference files under `references/` — `notebook.md`, `rag.md`, `knowledge-graph.md`, `mcp-helpers.md`, and `models.md`. Agents now load only the references relevant to the current task instead of the full monolithic instruction.
-
-### Fixed
-
-- Skill uninstall ownership check (`isOwnedSkillDir`) now recursively compares the whole installed skill directory against the packaged one, so the new `references/` subfolder no longer marks the plugin-owned skill as user-modified; customized skills remain protected from deletion.
-
 ## [1.7.0] - 2026-09-20
 
 ### Added
@@ -24,12 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Interactive CLI: "Model Auto-Unload Timer" and "Unload Models Now" entries under ENGINE & HYBRID SEARCH SETTINGS; switching "Execution Hardware" now also unloads model sessions held by the CLI process itself.
 - Agent skill (`using-memory`) documents how to answer user requests like "load models into the GPU" or "unload models and verify memory is freed" using `memory-cli models ...`.
 
-### Fixed
-
-- The reranker ONNX session now tracks its execution device and is reloaded when `executionDevice` changes (previously it silently stayed on the first device it was loaded on).
-
 ### Changed
 
+- Restructured the `using-memory` agent skill to follow the canonical Agent Skills layout with progressive disclosure: `SKILL.md` is now a compact router (frontmatter, layer overview, mandatory session-initialization sequence, tool decision matrix, and core directives), while detailed tool documentation moved into on-demand reference files under `references/` — `notebook.md`, `rag.md`, `knowledge-graph.md`, `mcp-helpers.md`, and `models.md`. Agents now load only the references relevant to the current task instead of the full monolithic instruction.
 - Made `hybrid-sync` strictly local-first for normal memory, RAG, knowledge-base, and CLI statistic reads. Turso initialization, remote migrations, reverse sync, and legacy blob backfill now run only on the background or explicit sync path.
 - Added persistent local sync state with a 30-second Notebook pull cadence and a 5-minute RAG pull cadence across short-lived CLI processes.
 - Made RAG reverse sync incremental: unchanged or locally newer documents are rejected from the expensive remote bundle fetch before sections, chunks, scopes, links, and graph edges are queried.
@@ -38,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The reranker ONNX session now tracks its execution device and is reloaded when `executionDevice` changes (previously it silently stayed on the first device it was loaded on).
+- Skill uninstall ownership check (`isOwnedSkillDir`) now recursively compares the whole installed skill directory against the packaged one, so the new `references/` subfolder no longer marks the plugin-owned skill as user-modified; customized skills remain protected from deletion.
 - RAG scope, knowledge-link, graph-link, and embedding reindex mutations now advance the parent document version before sync so incremental reverse sync cannot mistake changed bundles for unchanged documents.
 - Updated reverse-sync and cloud-portability integration coverage for local-first reads and lazy raw-blob restoration.
 

@@ -9,10 +9,39 @@ let loadedDevice = null;
 
 let rerankerInstance = null;
 let loadedRerankerName = null;
+let loadedRerankerDevice = null;
+
+// Idle auto-unload state: models are dropped from RAM/VRAM after
+// `modelUnloadTimeoutMinutes` of inactivity (0 = disabled). The timer is
+// re-armed on every embedding/rerank call.
+let lastModelActivity = null;
+let unloadTimer = null;
+let controlLoopTimer = null;
+let lastHandledCommandId = null;
 
 import { getConfig } from "../config/config_manager.js";
-import { GpuMonitor, ExecutionTracer } from "./gpu_monitor.js";
+import { GpuMonitor, ExecutionTracer, getGpuMemoryInfoAsync } from "./gpu_monitor.js";
+import {
+  pollModelCommand,
+  writeCommandAck,
+  writeRuntimeState,
+} from "./model_control.js";
 export { GpuMonitor, ExecutionTracer };
+
+// Resolve the configured execution device to a concrete ONNX backend.
+export function resolveTargetDevice(rawDeviceValue = null) {
+  const rawDevice = String(
+    rawDeviceValue !== null && rawDeviceValue !== undefined
+      ? rawDeviceValue
+      : (getConfig().executionDevice || "cpu")
+  ).toLowerCase();
+  if (rawDevice === "webgpu" || rawDevice === "gpu" || rawDevice === "dml" || rawDevice === "cuda") {
+    if (process.platform === "win32") return "dml";
+    if (process.platform === "linux") return "cuda";
+    return "webgpu";
+  }
+  return "cpu";
+}
 
 function getOptimalThreadCount() {
   const userSetting = getConfig().onnxThreads;
@@ -46,19 +75,10 @@ export async function getExtractor(modelName = null, progressCallback = null) {
   const targetModel = modelName || getConfig().embeddingModel || "Xenova/multilingual-e5-small";
 
   // Resolve target device BEFORE cache check so comparison works correctly
-  const rawDevice = (getConfig().executionDevice || "cpu").toLowerCase();
-  let targetDevice = "cpu";
-  if (rawDevice === "webgpu" || rawDevice === "gpu" || rawDevice === "dml" || rawDevice === "cuda") {
-    if (process.platform === "win32") {
-      targetDevice = "dml";
-    } else if (process.platform === "linux") {
-      targetDevice = "cuda";
-    } else {
-      targetDevice = "webgpu";
-    }
-  }
+  const targetDevice = resolveTargetDevice();
 
   if (extractorInstance && loadedModelName === targetModel && loadedDevice === targetDevice) {
+    touchModelActivity();
     return extractorInstance;
   }
 
@@ -140,6 +160,7 @@ export async function getExtractor(modelName = null, progressCallback = null) {
         extractorInstance = await pipeline("feature-extraction", targetModel, pipelineOpts);
         loadedModelName = targetModel;
         loadedDevice = "cpu";
+        touchModelActivity();
         return extractorInstance;
       } catch (err2) {
         if (!isNetworkError) deleteModelCache(targetModel);
@@ -170,7 +191,179 @@ export async function getExtractor(modelName = null, progressCallback = null) {
     }
   }
 
+  touchModelActivity();
   return extractorInstance;
+}
+
+// Best-effort release of an ONNX-backed pipeline/model instance. Different
+// @huggingface/transformers versions expose different teardown surfaces, so
+// probe defensively and swallow individual failures.
+async function disposeInstance(instance) {
+  if (!instance) return;
+  const candidates = [
+    instance,
+    instance.model,
+    instance.session,
+    instance.tokenizer,
+  ].filter(Boolean);
+  for (const target of candidates) {
+    if (typeof target.dispose === "function") {
+      try { await target.dispose(); } catch {}
+    } else if (typeof target.release === "function") {
+      try { await target.release(); } catch {}
+    }
+  }
+}
+
+export async function unloadModels(reason = "manual") {
+  const unloaded = [];
+  let unloadedDevice = null;
+
+  if (extractorInstance) {
+    await disposeInstance(extractorInstance);
+    unloaded.push({ type: "embedding", model: loadedModelName, device: loadedDevice });
+    unloadedDevice = loadedDevice;
+    extractorInstance = null;
+    loadedModelName = null;
+    loadedDevice = null;
+  }
+
+  if (rerankerInstance) {
+    await disposeInstance(rerankerInstance);
+    unloaded.push({ type: "reranker", model: loadedRerankerName, device: loadedRerankerDevice });
+    if (!unloadedDevice) unloadedDevice = loadedRerankerDevice;
+    rerankerInstance = null;
+    loadedRerankerName = null;
+    loadedRerankerDevice = null;
+  }
+
+  // Let the JS heap (and with it the ONNX WASM buffers) shrink back.
+  if (global.gc) {
+    try { global.gc(); } catch {}
+  }
+
+  return {
+    unloaded,
+    wasLoaded: unloaded.length > 0,
+    reason,
+    device: unloadedDevice,
+    processRssMB: Math.round(process.memoryUsage().rss / (1024 * 1024)),
+    gpuMemory: await getGpuMemoryInfoAsync(),
+  };
+}
+
+export function getModelRuntimeStatus() {
+  const config = getConfig();
+  const unloadTimeoutMinutes = Number(config.modelUnloadTimeoutMinutes) || 0;
+  return {
+    configuredDevice: config.executionDevice || "cpu",
+    resolvedDevice: resolveTargetDevice(),
+    embedding: {
+      configuredModel: config.embeddingModel || "Xenova/multilingual-e5-small",
+      loaded: Boolean(extractorInstance),
+      loadedModel: loadedModelName,
+      device: loadedDevice,
+    },
+    reranker: {
+      enabled: Boolean(config.rerankerEnabled),
+      configuredModel: config.rerankerModel || "none",
+      loaded: Boolean(rerankerInstance),
+      loadedModel: loadedRerankerName,
+      device: loadedRerankerDevice,
+    },
+    lastActivity: lastModelActivity ? new Date(lastModelActivity).toISOString() : null,
+    idleForSeconds: lastModelActivity ? Math.round((Date.now() - lastModelActivity) / 1000) : null,
+    unloadTimeoutMinutes,
+    autoUnloadArmed: Boolean(unloadTimer),
+    serverPid: process.pid,
+    serverRssMB: Math.round(process.memoryUsage().rss / (1024 * 1024)),
+  };
+}
+
+export function touchModelActivity() {
+  lastModelActivity = Date.now();
+  const timeoutMinutes = Number(getConfig().modelUnloadTimeoutMinutes) || 0;
+  if (timeoutMinutes <= 0) return;
+  if (unloadTimer) clearTimeout(unloadTimer);
+  unloadTimer = setTimeout(async () => {
+    unloadTimer = null;
+    if (!extractorInstance && !rerankerInstance) return;
+    const idleMs = Date.now() - (lastModelActivity || 0);
+    if (idleMs < timeoutMinutes * 60 * 1000) {
+      touchModelActivity();
+      return;
+    }
+    console.error(`[Model Manager] Models idle for ${timeoutMinutes} min — auto-unloading from memory...`);
+    await unloadModels("idle-timeout");
+    publishRuntimeState();
+  }, timeoutMinutes * 60 * 1000);
+  if (typeof unloadTimer.unref === "function") unloadTimer.unref();
+}
+
+export function publishRuntimeState() {
+  writeRuntimeState(getModelRuntimeStatus());
+}
+
+async function handleModelControlCommand(parsed) {
+  const { id, cmd, payload = {} } = parsed;
+  let result = { ok: false, error: `Unknown model command: ${cmd}` };
+
+  try {
+    if (cmd === "unload") {
+      result = { ok: true, ...(await unloadModels(payload.reason || "cli-request")) };
+    } else if (cmd === "load") {
+      const { updateConfig } = await import("../config/config_manager.js");
+      if (payload.device) updateConfig({ executionDevice: payload.device });
+      await unloadModels("device-switch");
+      const embedding = await getExtractor(null, null);
+      let rerankerLoaded = false;
+      const cfg = getConfig();
+      if (cfg.rerankerEnabled && cfg.rerankerModel && cfg.rerankerModel !== "none") {
+        rerankerLoaded = Boolean(await getReranker(cfg.rerankerModel));
+      }
+      result = {
+        ok: Boolean(embedding),
+        device: resolveTargetDevice(),
+        embeddingLoaded: Boolean(extractorInstance),
+        rerankerLoaded,
+      };
+    } else if (cmd === "apply-device") {
+      const { updateConfig } = await import("../config/config_manager.js");
+      if (payload.device) updateConfig({ executionDevice: payload.device });
+      const hadLoaded = Boolean(extractorInstance || rerankerInstance);
+      await unloadModels("device-switch");
+      // If nothing was loaded, keep it lazy: the next inference will pick up
+      // the new device without paying the model load cost right now.
+      result = { ok: true, device: resolveTargetDevice(), reloaded: false, wasLoaded: hadLoaded };
+    } else if (cmd === "status") {
+      result = { ok: true, status: getModelRuntimeStatus() };
+    }
+  } catch (err) {
+    result = { ok: false, error: err.message };
+  }
+
+  writeCommandAck(id, result);
+  publishRuntimeState();
+}
+
+// Long-lived MCP servers call this once at startup. It polls the control
+// directory so short-lived CLI processes (memory-cli models ...) can trigger
+// unloads/reloads inside the process that actually owns the ONNX sessions.
+export function startModelControlLoop(intervalMs = 2500) {
+  if (controlLoopTimer) return;
+  publishRuntimeState();
+  controlLoopTimer = setInterval(async () => {
+    try {
+      const parsed = pollModelCommand(lastHandledCommandId);
+      if (parsed) {
+        lastHandledCommandId = parsed.id;
+        await handleModelControlCommand(parsed);
+      } else {
+        publishRuntimeState();
+      }
+    } catch {}
+  }, intervalMs);
+  if (typeof controlLoopTimer.unref === "function") controlLoopTimer.unref();
 }
 
 export function resetExtractor() {
@@ -386,8 +579,19 @@ export async function embedBatch(texts, isQuery = false, modelName = null, progr
 export const DEFAULT_RERANKER_MODEL = "SugoLabs/mmarco-mMiniLMv2-L12-H384-v1";
 
 export async function getReranker(modelName = DEFAULT_RERANKER_MODEL, progressCallback = null) {
-  if (rerankerInstance && loadedRerankerName === modelName) {
+  const targetDevice = resolveTargetDevice();
+
+  if (rerankerInstance && loadedRerankerName === modelName && loadedRerankerDevice === targetDevice) {
+    touchModelActivity();
     return rerankerInstance;
+  }
+
+  // Device or model changed: drop the previous session before loading a new one.
+  if (rerankerInstance) {
+    await disposeInstance(rerankerInstance);
+    rerankerInstance = null;
+    loadedRerankerName = null;
+    loadedRerankerDevice = null;
   }
 
   const cacheDir = ensureValidModelDirectory();
@@ -399,12 +603,6 @@ export async function getReranker(modelName = DEFAULT_RERANKER_MODEL, progressCa
   env.remoteHost = "https://huggingface.co";
   env.remotePathTemplate = "{model}/resolve/{revision}/";
   env.sharp = false;
-
-  const rawDevice = (getConfig().executionDevice || "cpu").toLowerCase();
-  let targetDevice = "cpu";
-  if (rawDevice === "webgpu" || rawDevice === "gpu" || rawDevice === "dml" || rawDevice === "cuda") {
-    targetDevice = process.platform === "win32" ? "dml" : (process.platform === "linux" ? "cuda" : "webgpu");
-  }
 
   const sessionOptions = {
     graphOptimizationLevel: "all",
@@ -439,11 +637,13 @@ export async function getReranker(modelName = DEFAULT_RERANKER_MODEL, progressCa
     const model = await AutoModelForSequenceClassification.from_pretrained(modelName, modelOpts);
     rerankerInstance = { tokenizer, model };
     loadedRerankerName = modelName;
+    loadedRerankerDevice = targetDevice;
   } catch (err) {
     console.warn(`Failed to load reranker model ${modelName}: ${err.message}. Purging corrupt files...`);
     deleteModelCache(modelName);
     return null;
   }
+  touchModelActivity();
   return rerankerInstance;
 }
 
