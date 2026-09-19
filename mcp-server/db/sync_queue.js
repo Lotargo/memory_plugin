@@ -1,5 +1,6 @@
 import { readFile, readdir } from "fs/promises";
 import { join } from "path";
+import { createHash } from "node:crypto";
 import { MEMORY_DIR, GLOBAL_KEY, buildMemoryContent, extractFacts, writeMemoryFile } from "../memory.js";
 import { toVectorBytes } from "../retrieval/retriever.js";
 import { pushBlobToCloud, deleteCloudBlobIfUnreferenced } from "./rag_blob_transport.js";
@@ -43,6 +44,45 @@ async function writeSyncTimestamp(db, key, value) {
   `).run(key, String(value), Date.now());
 }
 
+// Three-way notebook reconciliation helpers.
+//
+// `pullFromCloud` used to compare only local vs cloud content. Any difference
+// was treated as a conflict and merged by union — so a fact deleted locally
+// (via `forget` before its push completed, or by hand-editing the .md file,
+// which bypasses the sync queue) was resurrected from the cloud copy on the
+// next pull. To tell "changed locally" apart from "changed in cloud" we keep
+// the hash of the last synchronized content per notebook key in the LOCAL
+// sync_state table (`notebook_base:<key>`). Manual .md edits are therefore
+// honored: if only the local side moved since the base, the local content
+// (including deletions) is pushed up instead of being merged back.
+const NOTEBOOK_BASE_PREFIX = "notebook_base:";
+
+function contentHash(content) {
+  return createHash("sha256").update(String(content ?? ""), "utf8").digest("hex");
+}
+
+async function readBaseHash(db, key) {
+  try {
+    const row = await db.prepare("SELECT value FROM sync_state WHERE key = ?;").get(NOTEBOOK_BASE_PREFIX + key);
+    return row?.value ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeBaseHash(db, key, hash) {
+  try {
+    await db.prepare(`
+      INSERT INTO sync_state (key, value, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;
+    `).run(NOTEBOOK_BASE_PREFIX + key, String(hash), Date.now());
+  } catch {
+    // Base tracking is best-effort: sync must not fail because the local
+    // sync_state table is unavailable.
+  }
+}
+
 async function processSyncTask(db, task) {
   if (task.action === "write_memory") {
     await db.cloudClient.execute({
@@ -51,6 +91,8 @@ async function processSyncTask(db, task) {
             ON CONFLICT(key) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at;`,
       args: [task.key_or_id, task.payload, task.created_at],
     });
+    // What we just pushed is now the synchronized base for 3-way pulls.
+    await writeBaseHash(db, task.key_or_id, contentHash(task.payload));
     return;
   }
 
@@ -105,6 +147,18 @@ async function processSyncTask(db, task) {
   if (task.action === "ingest_document") {
     const data = JSON.parse(task.payload);
     const doc = data.document;
+    // Ghost-task guard: the payload may reference a document that no longer
+    // exists locally (deleted before its push ran). Pushing it is meaningless
+    // and a missing blob would fail forever, wedging the queue behind it —
+    // drop such tasks instead of retrying. (In hybrid mode db.prepare routes
+    // to the local replica, which is exactly the existence check we need.)
+    try {
+      const localDoc = await db.prepare("SELECT id FROM documents WHERE id = ?;").get(doc.id);
+      if (!localDoc) {
+        console.warn(`Skipping stale ingest task ${task.id}: document ${doc.id} no longer exists locally.`);
+        return;
+      }
+    } catch {}
     await pushBlobToCloud(db, doc.blob_hash);
 
     const existingDocRow = await db.cloudClient.execute({
@@ -228,7 +282,10 @@ async function enumerateLocalStores() {
     const fp = join(MEMORY_DIR, f);
     let content = "";
     try { content = await readFile(fp, "utf-8"); } catch { continue; }
-    const meta = content.match(/<!-- path: (.+?) -->/);
+    // Stores are written with <!-- key: ... --> (see buildMemoryContent);
+    // legacy stores may still carry <!-- path: ... -->. Support both so
+    // hybrid-sync pull/push reconcile git: keys instead of slug filenames.
+    const meta = content.match(/<!-- key: (.+?) -->/) || content.match(/<!-- path: (.+?) -->/);
     const key = f === `${GLOBAL_KEY}.md` ? GLOBAL_KEY : (meta ? meta[1].trim() : f.slice(0, -3));
     stores.push({ key, path: fp, file: f });
   }
@@ -264,25 +321,74 @@ async function pullFromCloud(db) {
     const cloudHas = cloudFacts !== null && cloudFacts.length > 0;
     const localHas = localFacts.length > 0;
     if (cloudFacts === null) {
-      if (localHas) { await upsertCloud(key, localContent); summary.pushed++; }
+      if (localHas) {
+        await upsertCloud(key, localContent);
+        await writeBaseHash(db, key, contentHash(localContent));
+        summary.pushed++;
+      }
       continue;
     }
     if (!localHas) {
       if (cloudHas) {
-        await writeMemoryFile(key, cloudContent);
-        if (key === GLOBAL_KEY) globalChanged = true;
-        summary.pulled++;
+        // Local side is empty. With no sync history this is a first-seen
+        // cloud store — pull it down (legacy behavior). With history, an
+        // empty local side whose cloud copy is unchanged since the base
+        // means the user deleted the facts by hand (or removed the file):
+        // honor the deletion instead of resurrecting it.
+        const base = await readBaseHash(db, key);
+        if (base !== null && contentHash(cloudContent) === base) {
+          await upsertCloud(key, localContent);
+          await writeBaseHash(db, key, contentHash(localContent));
+          if (key === GLOBAL_KEY) globalChanged = true;
+          summary.pushed++;
+        } else {
+          await writeMemoryFile(key, cloudContent);
+          await writeBaseHash(db, key, contentHash(cloudContent));
+          if (key === GLOBAL_KEY) globalChanged = true;
+          summary.pulled++;
+        }
       }
       continue;
     }
-    if (localContent === cloudContent) { summary.unchanged++; continue; }
+    if (localContent === cloudContent) {
+      await writeBaseHash(db, key, contentHash(localContent));
+      summary.unchanged++;
+      continue;
+    }
+    // Three-way reconciliation when we know the last synchronized base.
+    // Without history (base === null) fall through to the legacy
+    // compare-and-apply-strategy behavior below.
+    const base = await readBaseHash(db, key);
+    if (base !== null) {
+      const localHash = contentHash(localContent);
+      const cloudHash = contentHash(cloudContent);
+      if (cloudHash === base && localHash !== base) {
+        // Only the local side moved (tool write racing a pull, or a manual
+        // .md edit) — push it up, deletions included, instead of merging
+        // the deleted facts back in.
+        await upsertCloud(key, localContent);
+        await writeBaseHash(db, key, localHash);
+        if (key === GLOBAL_KEY) globalChanged = true;
+        summary.pushed++;
+        continue;
+      }
+      if (localHash === base && cloudHash !== base) {
+        // Only the cloud side moved — pull it down.
+        await writeMemoryFile(key, cloudContent);
+        await writeBaseHash(db, key, cloudHash);
+        if (key === GLOBAL_KEY) globalChanged = true;
+        summary.pulled++;
+        continue;
+      }
+    }
     summary.conflicts++;
     if (strategy === "cloud-wins") {
       await writeMemoryFile(key, cloudContent);
+      await writeBaseHash(db, key, contentHash(cloudContent));
       if (key === GLOBAL_KEY) globalChanged = true;
       summary.cloudWins++;
     }
-    else if (strategy === "local-wins") { await upsertCloud(key, localContent); summary.localWins++; }
+    else if (strategy === "local-wins") { await upsertCloud(key, localContent); await writeBaseHash(db, key, contentHash(localContent)); summary.localWins++; }
     else {
       const seen = new Set();
       const mergedFacts = [];
@@ -293,6 +399,7 @@ async function pullFromCloud(db) {
       await writeMemoryFile(key, mergedContent);
       if (key === GLOBAL_KEY) globalChanged = true;
       await upsertCloud(key, mergedContent);
+      await writeBaseHash(db, key, contentHash(mergedContent));
       summary.merged++;
     }
   }
@@ -378,6 +485,12 @@ async function runBackgroundSyncPass() {
       payload TEXT,
       created_at INTEGER NOT NULL
     );`);
+    // Best-effort attempts counter for dead-lettering poison tasks. A single
+    // permanently failing task (e.g. ingest_document with a missing local
+    // blob) used to wedge the whole queue forever: every pass broke on it and
+    // all write_memory pushes behind it never reached the cloud.
+    try { await db.exec(`ALTER TABLE sync_queue ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;`); } catch {}
+    const MAX_TASK_ATTEMPTS = 5;
     let syncFailed = false;
     while (!syncFailed) {
       const tasks = await db.prepare("SELECT * FROM sync_queue ORDER BY id ASC LIMIT 50;").all();
@@ -387,6 +500,15 @@ async function runBackgroundSyncPass() {
           await processSyncTask(db, task);
           await db.prepare("DELETE FROM sync_queue WHERE id = ?;").run(task.id);
         } catch (err) {
+          const attempts = Number(task.attempts || 0) + 1;
+          if (attempts >= MAX_TASK_ATTEMPTS) {
+            console.error(`Dropping poison sync task ${task.id} (${task.action}) after ${attempts} attempts:`, err.message);
+            await db.prepare("DELETE FROM sync_queue WHERE id = ?;").run(task.id);
+            continue;
+          }
+          try {
+            await db.prepare("UPDATE sync_queue SET attempts = ? WHERE id = ?;").run(attempts, task.id);
+          } catch {}
           console.error(`Failed to process sync task ${task.id} (${task.action}):`, err.message, err.stack);
           syncFailed = true;
           break;

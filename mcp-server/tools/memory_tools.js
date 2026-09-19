@@ -94,7 +94,8 @@ export function registerMemoryTools(server) {
     {
       description:
         "Delete a fact by number (from recall), by range (e.g. '3-30', inclusive), or by text search. " +
-        "Protected facts (remember with keep=true) are skipped unless force=true.",
+        "Protected facts (remember with keep=true) are skipped unless force=true. " +
+        "Prefer this tool over editing .md store files by hand; manual file edits (including deletions) are picked up on the next background sync.",
       inputSchema: z.object({
         query: z.string().describe("Number, range like '3-30', or text to search for"),
         scope: defStr("project").describe("'project' (default) or 'global'"),

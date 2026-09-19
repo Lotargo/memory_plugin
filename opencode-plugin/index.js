@@ -118,6 +118,9 @@ const MEMORY_INSTRUCTION =
   "DO NOT save: transient details, one-off statements, full conversation turns, or anything unlikely to be useful in future sessions.\n" +
   "When saving, translate the fact into clear, concise English.\n" +
   "Use `scope: \"global\"` for personal facts, `scope: \"project\"` for project-specific facts.\n" +
+  "STORE EDITING DIRECTIVE:\n" +
+  "Prefer the Notebook tools (remember/forget/update_fact) over editing memory .md store files with file tools, so changes sync to the cloud immediately. " +
+  "If the user edits the .md files by hand, do not revert their edits: manual additions and deletions are honored on the next background sync.\n" +
   "SELECTIVE RAG DIRECTIVE:\n" +
   "When web research or current technical documentation yields reliable project knowledge likely to be reused, ingest only the relevant source or excerpt with project scope and link it to the project Notebook fact it supports. Use global RAG only for intentionally cross-project sources. Prefer authoritative and newer-than-training documentation; do not dump everything encountered into RAG.";
 
@@ -402,7 +405,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
         },
       },
       "forget": {
-        description: "Удалить факт по номеру (см. recall), по диапазону (например '3-30', включительно) или тексту. Защищённые факты (remember с keep=true) пропускаются, если не передан force=true",
+        description: "Удалить факт по номеру (см. recall), по диапазону (например '3-30', включительно) или тексту. Защищённые факты (remember с keep=true) пропускаются, если не передан force=true. Предпочитай этот инструмент ручному редактированию .md файлов; ручные правки (включая удаления) подхватываются следующим фоновым синком.",
         args: {
           query: { type: "string", description: "Номер факта, диапазон вида '3-30' или текст для поиска" },
           scope: {
