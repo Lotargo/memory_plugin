@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Restructured the `using-memory` agent skill to follow the canonical Agent Skills layout with progressive disclosure: `SKILL.md` is now a compact router (frontmatter, layer overview, mandatory session-initialization sequence, tool decision matrix, and core directives), while detailed tool documentation moved into on-demand reference files under `references/` — `notebook.md`, `rag.md`, `knowledge-graph.md`, `mcp-helpers.md`, and `models.md`. Agents now load only the references relevant to the current task instead of the full monolithic instruction.
+
+### Fixed
+
+- Skill uninstall ownership check (`isOwnedSkillDir`) now recursively compares the whole installed skill directory against the packaged one, so the new `references/` subfolder no longer marks the plugin-owned skill as user-modified; customized skills remain protected from deletion.
+
+## [1.7.0] - 2026-09-20
+
+### Added
+
+- ML model lifecycle control: new `memory-cli models` command family — `status [--json]` (where models live: CPU/RAM vs GPU/VRAM, VRAM usage, timer state), `unload` (instantly drops embedding + reranker ONNX sessions from the running MCP server and reports freed RAM/VRAM), `load [--device cpu|gpu]` (preload into the server, optionally switching device), `device cpu|gpu` (move models between RAM and VRAM), `timer off|<minutes>` (idle auto-unload). Commands reach the long-lived MCP server through a file-based control channel (`<memory>/control/`), so agents can drive them via the CLI.
+- Idle auto-unload: new `modelUnloadTimeoutMinutes` config (default `0` = off); the MCP server drops both models after the configured inactivity period and reloads them lazily on next use.
+- Interactive CLI: "Model Auto-Unload Timer" and "Unload Models Now" entries under ENGINE & HYBRID SEARCH SETTINGS; switching "Execution Hardware" now also unloads model sessions held by the CLI process itself.
+- Agent skill (`using-memory`) documents how to answer user requests like "load models into the GPU" or "unload models and verify memory is freed" using `memory-cli models ...`.
+
+### Fixed
+
+- The reranker ONNX session now tracks its execution device and is reloaded when `executionDevice` changes (previously it silently stayed on the first device it was loaded on).
+
+### Changed
+
 - Made `hybrid-sync` strictly local-first for normal memory, RAG, knowledge-base, and CLI statistic reads. Turso initialization, remote migrations, reverse sync, and legacy blob backfill now run only on the background or explicit sync path.
 - Added persistent local sync state with a 30-second Notebook pull cadence and a 5-minute RAG pull cadence across short-lived CLI processes.
 - Made RAG reverse sync incremental: unchanged or locally newer documents are rejected from the expensive remote bundle fetch before sections, chunks, scopes, links, and graph edges are queried.

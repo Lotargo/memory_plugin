@@ -39,17 +39,36 @@ export async function discoverOpenCodeCacheTargets(cachePackages) {
   return [...targets];
 }
 
-const PACKAGED_SKILL_FILE = fileURLToPath(new URL("../skills/using-memory/SKILL.md", import.meta.url));
+const PACKAGED_SKILL_DIR = fileURLToPath(new URL("../skills/using-memory", import.meta.url));
+
+async function directoryContentsEqual(left, right) {
+  const [leftEntries, rightEntries] = await Promise.all([
+    readdir(left, { withFileTypes: true }),
+    readdir(right, { withFileTypes: true }),
+  ]);
+  if (leftEntries.length !== rightEntries.length) return false;
+
+  const leftMap = new Map(leftEntries.map((entry) => [entry.name, entry]));
+  for (const rightEntry of rightEntries) {
+    const leftEntry = leftMap.get(rightEntry.name);
+    if (!leftEntry || leftEntry.isDirectory() !== rightEntry.isDirectory()) return false;
+    if (leftEntry.isDirectory()) {
+      const nestedEqual = await directoryContentsEqual(join(left, leftEntry.name), join(right, rightEntry.name));
+      if (!nestedEqual) return false;
+      continue;
+    }
+    const [leftData, rightData] = await Promise.all([
+      readFile(join(left, leftEntry.name)),
+      readFile(join(right, rightEntry.name)),
+    ]);
+    if (!leftData.equals(rightData)) return false;
+  }
+  return true;
+}
 
 export async function isOwnedSkillDir(skillDir) {
   try {
-    const entries = await readdir(skillDir, { withFileTypes: true });
-    if (entries.length !== 1 || !entries[0].isFile() || entries[0].name !== "SKILL.md") return false;
-    const [installed, packaged] = await Promise.all([
-      readFile(join(skillDir, "SKILL.md")),
-      readFile(PACKAGED_SKILL_FILE),
-    ]);
-    return installed.equals(packaged);
+    return await directoryContentsEqual(skillDir, PACKAGED_SKILL_DIR);
   } catch {
     return false;
   }
