@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createClient } from "@libsql/client";
 import JSZip from "jszip";
 
@@ -17,7 +17,7 @@ const { writeMemory, MEMORY_DIR } = await import("../../mcp-server/memory.js");
 const { rememberNote } = await import("../../mcp-server/tools/core/note_core.js");
 const { CloudSnapshots, isSnapshotQuotaError } = await import("../../mcp-server/admin/cloud_snapshots.js");
 const { captureLocal, stateHash, packPayload, unpackPayload, sha256 } = await import("../../mcp-server/admin/full_snapshot.js");
-const { olderThan } = await import("../../mcp-server/cli/snapshot_commands.js");
+const { olderThan, snapshotDate } = await import("../../mcp-server/cli/snapshot_commands.js");
 const { registerSnapshotTools } = await import("../../mcp-server/tools/snapshot_tools.js");
 const client = createClient({ url: `file:${path.join(temp, "cloud.sqlite")}` });
 const calls = []; let failure = null;
@@ -171,6 +171,30 @@ try {
   assert.equal(new Date(olderThan("1m", Date.parse("2026-03-31T12:00:00Z"))).toISOString(), "2026-02-28T12:00:00.000Z");
   assert.equal(new Date(olderThan("1y", Date.parse("2024-02-29T12:00:00Z"))).toISOString(), "2023-02-28T12:00:00.000Z");
   assert.throws(() => olderThan("0d"));
+  assert.equal(snapshotDate("2026-10-03T12:30:00"), Date.parse("2026-10-03T12:30:00Z"), "zone-free ISO timestamps always use UTC");
+  assert.equal(snapshotDate("2026-10-03T12:30:00+09:00"), Date.parse("2026-10-03T03:30:00Z"));
+  assert.equal(snapshotDate("2026-10-03"), Date.parse("2026-10-03T00:00:00Z"));
+  for (const invalidDate of ["2026-02-30", "2026-10-03T24:00:00", "10/03/2026", undefined]) assert.throws(() => snapshotDate(invalidDate), /Invalid/);
+  const catalogBeforeBadCli = fs.readFileSync(api.stateFile, "utf8");
+  for (const entry of ["mcp-server/index.js", "mcp-server/boot.js", "mcp-server/cli_boot.js"]) {
+    for (const badArgs of [
+      ["delete", "--form", "2026-01-01", "--to", "2027-01-01", "--yes"],
+      ["delete", "--to", "2027-01-01", "--yes"],
+      ["delete", "--older-than", "1d", "--location", "local", "--location", "cloud", "--yes"],
+      ["delete", "--older-than", "1d", "extra", "--yes"],
+      ["delete", "--older-than", "1d", "uninstall", "--yes"],
+      ["delete", "--older-than", "1d", "setup", "--yes"],
+      ["delete", "--older-than", "1d", "--version", "--yes"],
+      ["delete", "--older-than", "1d", "--yes", "--confirm", "token"],
+    ]) {
+      const result = spawnSync(process.execPath, [entry, "snapshots", ...badArgs], { env: process.env, encoding: "utf8", timeout: 30_000 });
+      assert.equal(result.status, 1, `${entry}: ${badArgs.join(" ")} must report failure`);
+      assert.match(result.stderr, /Snapshots:/);
+      assert.equal(fs.readFileSync(api.stateFile, "utf8"), catalogBeforeBadCli, "invalid CLI arguments leave snapshot history intact");
+    }
+    const help = execFileSync(process.execPath, [entry, "snapshots", "--help"], { env: process.env, encoding: "utf8", timeout: 30_000 });
+    assert.ok(help.includes("Snapshot commands (all projects"));
+  }
   assert.equal(isSnapshotQuotaError({ code: "SERVER_ERROR", message: "Server returned HTTP status 429" }), true);
   assert.equal(isSnapshotQuotaError({ cause: { statusCode: 402 } }), true);
   assert.equal(isSnapshotQuotaError({ cause: { code: "BLOCKED" } }), true);

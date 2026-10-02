@@ -13,6 +13,11 @@ import { handleDiagnosticsAction } from "./cli/handlers/diagnostics_actions.js";
 export async function runCli() {
   const cliArgs = process.argv.slice(2);
 
+  if (cliArgs[0] === "snapshots") {
+    await handleDirectCommands(cliArgs);
+    return;
+  }
+
   if (cliArgs.includes("uninstall") || cliArgs.includes("--uninstall")) {
     const { runUninstall } = await import("./uninstall.js");
     await runUninstall();

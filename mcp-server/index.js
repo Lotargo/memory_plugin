@@ -18,6 +18,14 @@ function readPackageVersion() {
 
 const cliArgs = process.argv.slice(2);
 
+// Snapshot arguments belong exclusively to that command, even if a value
+// happens to match a global command such as setup or uninstall.
+if (cliArgs[0] === "snapshots") {
+  const { handleSnapshotCommands } = await import("./cli/snapshot_commands.js");
+  await handleSnapshotCommands(cliArgs);
+  process.exit(process.exitCode || 0);
+}
+
 // Every command handled by cli.js/direct_commands.js must be routed here too,
 // otherwise `memory_plugin link` etc. would fall through and start an MCP
 // server that silently blocks on stdin.
@@ -99,7 +107,7 @@ if (cliArgs.includes("setup") || cliArgs.includes("install") || cliArgs.includes
 if (cliArgs.some((a) => CLI_COMMANDS.has(a))) {
   const { runCli } = await import("./cli.js");
   await runCli();
-  process.exit(0);
+  process.exit(process.exitCode || 0);
 }
 
 await ensureDir();

@@ -418,6 +418,8 @@ Restore previews current/replacement counts and returns a token tied to the curr
 
 Cleanup supports local, cloud or both locations, with a half-open date range `[from,to)` or `--older-than Nd|Nm|Ny` (calendar months/years). Preview shows count and compressed bytes; use its token or explicit `--yes` to apply. Pinned checkpoints and the latest successful/local pending checkpoint are protected by default. `pin --unpin` removes a pin; `--include-protected` explicitly overrides protection. Full archives have no dependency chain, so deleting older checkpoints cannot break newer ones. Local ZIP history is retained until cleanup; no silent retention policy is imposed.
 
+CLI dates use ISO format: `YYYY-MM-DD` or `YYYY-MM-DDTHH:mm[:ss[.sss]][Z|±HH:mm]`; values without a zone use UTC. Period deletion requires both `--from` and `--to`, or a single `--older-than` age. Unknown/duplicate flags and extra arguments fail before any operation.
+
 Agents can use the same actions through MCP and native OpenCode `manage_snapshots`. Restore/delete require the preview token after user approval. `--yes` is available for explicit CLI automation. The older RAG-only `export_snapshot` / `import_snapshot` still export/merge RAG data; they are separate from full checkpoint replacement.
 
 ### Authentication
