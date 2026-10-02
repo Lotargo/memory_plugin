@@ -20,8 +20,10 @@ Detailed reference for Layer 1 (Notebook Store) tools: `remember`, `recall`, `ge
 
 ## Targeting Project Directory (`directory`)
 
-- Pass `directory: "<project directory path>"` (or `project`) when calling `remember` or `recall` to ensure the call routes to the target project store even when the MCP server runs in an external folder or outside Git.
-- Example: `remember(title: "Backend Framework Preference", fact: "Use Fastify instead of Express for backend services", scope: "project", directory: "F:/projects/my-app")`
+- Pass `directory: "<project directory path>"` (or `project`) when calling `remember`, `recall`, `get_fact`, `update_fact`, `forget`, or `memory_info` to target the same project store from any working directory. An explicit target takes precedence over the host's current worktree.
+- `project` also accepts an existing Notebook store key listed by `recall(scope: "list_projects")`, including canonical `git:<remote>` and legacy `git_<remote>` keys. Use the key exactly as listed; unknown keys or nonexistent directories do not fall back to the current project.
+- Target global Notebook memory with `scope: "global"`, rather than passing `project: "global"`.
+- Example: `remember(title: "Backend Framework Preference", fact: "Use Fastify instead of Express for backend services", scope: "project", directory: "/path/to/my-app")`
 
 ## Linking to Knowledge Base Documents
 
@@ -97,6 +99,8 @@ When the user corrects an old fact, prefer `update_fact` over `forget`+`remember
 ## Protecting Facts (`forget` with `keep`)
 
 `forget` refuses to delete facts saved with `keep: true`; pass `force: true` to override. It still supports deleting by index number, range ("3-30"), or text.
+
+Use only `scope: "project"` or `scope: "global"` for mutations. Empty deletion queries and invalid scopes are rejected; `force` must be a boolean. The deletion response reports the selected store and the number of removed facts.
 
 ## Project Memory Identity Management (`link_project_memory`, `unlink_project_memory`, `relink_project_memory`)
 

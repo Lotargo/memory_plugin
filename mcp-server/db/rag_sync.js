@@ -12,7 +12,7 @@ async function executeCloud(db, sql, args = []) {
 }
 
 export async function recordCloudDocumentTombstone(db, { docId, path = null, deletedAt = Date.now() }) {
-  if (!docId || !db || db.mode === "only-local") return { recorded: false };
+  if (!docId || !db || !["hybrid-sync", "only-cloud"].includes(db.mode)) return { recorded: false };
   await executeCloud(
     db,
     `INSERT INTO rag_document_tombstones (doc_id, path, deleted_at)
@@ -24,7 +24,7 @@ export async function recordCloudDocumentTombstone(db, { docId, path = null, del
 }
 
 export async function clearCloudDocumentTombstone(db, { docId, path = null }) {
-  if (!db || db.mode === "only-local") return { cleared: false };
+  if (!db || !["hybrid-sync", "only-cloud"].includes(db.mode)) return { cleared: false };
   if (!docId && !path) return { cleared: false };
   await executeCloud(
     db,
@@ -257,7 +257,12 @@ export async function pullRagFromCloud(db) {
 
   for (const doc of docs) {
     try {
-      const tombstone = tombById.get(doc.id) || tombByPath.get(doc.path);
+      const localTombstone = await db.prepare(
+        "SELECT deleted_at FROM rag_document_tombstones WHERE doc_id = ? OR (? IS NOT NULL AND path = ?) ORDER BY deleted_at DESC LIMIT 1;"
+      ).get(doc.id, doc.path || null, doc.path || null);
+      const remoteTombstone = tombById.get(doc.id) || tombByPath.get(doc.path);
+      const tombstone = Number(localTombstone?.deleted_at || 0) > Number(remoteTombstone?.deleted_at || 0)
+        ? localTombstone : remoteTombstone;
       if (tombstone && Number(tombstone.deleted_at || 0) >= Number(doc.updated_at || 0)) {
         continue;
       }

@@ -8,11 +8,10 @@ export async function queueDocumentSyncIfNeeded(db, docId) {
     // parent document whenever scopes, links, or graph relations change.
     await db.prepare("UPDATE documents SET updated_at = ? WHERE id = ?;").run(Date.now(), docId);
 
-    const { getConfig } = await import("../config/config_manager.js");
-    if (getConfig().mode !== "hybrid-sync") return;
+    if (db.mode !== "hybrid-sync") return;
     const { exportDocumentData } = await import("../ingest/exporter.js");
     const { enqueueSyncTask } = await import("../db/sync_queue.js");
-    await enqueueSyncTask("ingest_document", docId, await exportDocumentData(docId, db));
+    await enqueueSyncTask("ingest_document", docId, await exportDocumentData(docId, db), { db });
   } catch (err) {
     console.warn(`Failed to queue linked RAG document sync for ${docId}: ${err.message}`);
   }

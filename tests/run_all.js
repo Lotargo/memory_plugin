@@ -1,6 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
@@ -18,6 +20,7 @@ const testSuites = [
   { category: "Unit", name: "rag_integrity", file: "tests/unit/rag_integrity.test.js" },
   { category: "Unit", name: "rag_memory_notes", file: "tests/unit/rag_memory_notes.test.js" },
   { category: "Unit", name: "project_identity", file: "tests/unit/project_identity.test.js" },
+  { category: "Unit", name: "notebook_targeting", file: "tests/unit/notebook_targeting.test.js" },
   { category: "Unit", name: "unit_audit_fixes", file: "tests/unit/unit_audit_fixes.test.js" },
   { category: "Unit", name: "benchmark_report", file: "tests/unit/benchmark_report.test.js" },
   { category: "Unit", name: "chunker", file: "tests/unit/chunker.test.js" },
@@ -26,6 +29,7 @@ const testSuites = [
   { category: "Unit", name: "model_control", file: "tests/unit/model_control.test.js" },
 
   // --- 2. INTEGRATION TESTS ---
+  { category: "Integration", name: "cloud_snapshots", file: "tests/integration/cloud_snapshots.test.js" },
   { category: "Integration", name: "expanded_features", file: "tests/integration/expanded_features.test.js" },
   { category: "Integration", name: "memory_verification", file: "tests/integration/memory_verification.test.js" },
   { category: "Integration", name: "mcp_tools", file: "tests/integration/mcp_tools.test.js" },
@@ -36,6 +40,7 @@ const testSuites = [
   { category: "Integration", name: "rag_memory_notes", file: "tests/integration/rag_memory_notes.test.js" },
   { category: "Integration", name: "rag_memory_notes_mcp", file: "tests/integration/rag_memory_notes_mcp.test.js" },
   { category: "Integration", name: "rag_cloud_portability", file: "tests/integration/rag_cloud_portability.test.js" },
+  { category: "Integration", name: "rag_pending_deletion", file: "tests/integration/rag_pending_deletion.test.js" },
 
   // --- 3. CLOUD TESTS ---
   { category: "Cloud", name: "phase1_cloud", file: "tests/cloud/phase1_cloud.test.js" },
@@ -56,14 +61,24 @@ async function main() {
     }
 
     const filePath = join(ROOT, suite.file);
+    const sandbox = mkdtempSync(join(tmpdir(), "memory-suite-"));
     try {
       execFileSync(process.execPath, [filePath], {
         stdio: "inherit",
-        env: { ...process.env, MEMORY_DISABLE_PERSONA_SYNC: "1" },
+        env: {
+          ...process.env,
+          MEMORY_DIR: join(sandbox, "memory"),
+          OPENCODE_CONFIG_DIR: join(sandbox, "opencode"),
+          MEMORY_DISABLE_PERSONA_SYNC: "1",
+          MEMORY_DISABLE_BACKGROUND_SYNC: "1",
+        },
       });
     } catch (err) {
       console.error(`\n❌ TEST SUITE FAILED: ${suite.name} (${suite.file})`);
-      process.exit(1);
+      process.exitCode = 1;
+      return;
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true, maxRetries: 5 });
     }
   }
 

@@ -1,5 +1,5 @@
 import * as z from "zod/v4";
-import { optStr, optNum, defStr, defBool } from "./helpers.js";
+import { optStr, optNum, defStr, defBool, defEnum } from "./helpers.js";
 import {
   rememberFact,
   recallFacts,
@@ -31,9 +31,9 @@ export function registerMemoryTools(server) {
         fact: z.string().describe("The fact to remember, written in English"),
         title: optStr().describe("Optional title for the fact. If not specified, one is auto-generated."),
         kind: z.enum(["fact", "directive"]).nullish().transform((v) => v || "fact").describe("'fact' (context) or 'directive' (active personalization/working instruction)"),
-        scope: defStr("project").describe("'project' (default) or 'global'"),
-        directory: optStr().describe("Optional workspace/project directory path to target when scope='project' (e.g. 'F:/projects/my-app')"),
-        project: optStr().describe("Alias for directory"),
+        scope: defEnum(["project", "global"], "project").describe("'project' (default) or 'global'"),
+        directory: optStr().describe("Optional workspace/project directory path to target when scope='project' (e.g. '/path/to/my-app')"),
+        project: optStr().describe("Alias for directory; also accepts an existing Notebook store key from recall(scope='list_projects')"),
         docId: optStr().describe("Optional document ID, title, or path to link this fact to"),
         startLine: optNum().describe("Optional starting line number in target document"),
         endLine: optNum().describe("Optional ending line number in target document"),
@@ -59,9 +59,9 @@ export function registerMemoryTools(server) {
         "Superseded facts are excluded by default; pass includeSuperseded=true to inspect history. " +
         "Expired facts are shown with [EXPIRED], protected ones with [KEEP]. The response includes the store file paths.",
       inputSchema: z.object({
-        scope: defStr("all").describe("'project', 'global', 'all', or 'list_projects'"),
-        directory: optStr().describe("Directory path of the project to read facts from (e.g. 'F:/projects/plugins/memory')"),
-        project: optStr().describe("Alias for directory"),
+        scope: defEnum(["project", "global", "all", "list_projects"], "all").describe("'project', 'global', 'all', or 'list_projects'"),
+        directory: optStr().describe("Directory path of the project to read facts from (e.g. '/path/to/project')"),
+        project: optStr().describe("Alias for directory; also accepts an existing Notebook store key from recall(scope='list_projects')"),
         query: optStr().describe("Optional keyword filter; all space-separated terms must match"),
         tags: optStr().describe("Optional comma-separated tag filter (any match)"),
         since: optStr().describe("Optional start date filter, YYYY-MM-DD (inclusive)"),
@@ -81,9 +81,9 @@ export function registerMemoryTools(server) {
       description: "Get the full text and metadata of a single fact by its metadata id.",
       inputSchema: z.object({
         id: z.string().describe("The unique metadata id of the fact (e.g. '8f3a2c')"),
-        scope: defStr("all").describe("'project', 'global', or 'all' (default)"),
+        scope: defEnum(["project", "global", "all"], "all").describe("'project', 'global', or 'all' (default)"),
         directory: optStr().describe("Optional workspace/project directory path"),
-        project: optStr().describe("Alias for directory"),
+        project: optStr().describe("Alias for directory; also accepts an existing Notebook store key from recall(scope='list_projects')"),
       }),
     },
     async (args) => ({ content: [{ type: "text", text: await getFactById(args) }] })
@@ -98,9 +98,9 @@ export function registerMemoryTools(server) {
         "Prefer this tool over editing .md store files by hand; manual file edits (including deletions) are picked up on the next background sync.",
       inputSchema: z.object({
         query: z.string().describe("Number, range like '3-30', or text to search for"),
-        scope: defStr("project").describe("'project' (default) or 'global'"),
+        scope: defEnum(["project", "global"], "project").describe("'project' (default) or 'global'"),
         directory: optStr().describe("Optional workspace/project directory path"),
-        project: optStr().describe("Alias for directory"),
+        project: optStr().describe("Alias for directory; also accepts an existing Notebook store key from recall(scope='list_projects')"),
         force: defBool(false).describe("Also delete protected (keep) facts"),
       }),
     },
@@ -118,9 +118,9 @@ export function registerMemoryTools(server) {
         newText: z.string().describe("New fact text"),
         title: optStr().describe("Optional new title for the fact"),
         kind: z.enum(["fact", "directive"]).nullish().describe("Optional new semantic kind: 'fact' or 'directive'"),
-        scope: defStr("project").describe("'project' (default) or 'global'"),
+        scope: defEnum(["project", "global"], "project").describe("'project' (default) or 'global'"),
         directory: optStr().describe("Optional workspace/project directory path"),
-        project: optStr().describe("Alias for directory"),
+        project: optStr().describe("Alias for directory; also accepts an existing Notebook store key from recall(scope='list_projects')"),
       }),
     },
     async (args) => ({ content: [{ type: "text", text: await updateFactText(args) }] })
@@ -134,7 +134,7 @@ export function registerMemoryTools(server) {
         "Knowledge Base stats, and the installed package version.",
       inputSchema: z.object({
         directory: optStr().describe("Optional workspace/project directory path to inspect (default: current directory)"),
-        project: optStr().describe("Alias for directory"),
+        project: optStr().describe("Alias for directory; also accepts an existing Notebook store key from recall(scope='list_projects')"),
       }),
     },
     async (args) => ({ content: [{ type: "text", text: await memoryInfo(args) }] })

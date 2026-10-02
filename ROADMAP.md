@@ -162,6 +162,106 @@ memory_plugin dashboard
 
 The exact transport, framework, authentication model, and local binding strategy are intentionally undecided at this stage.
 
+### Cline CLI & DeepSeek harness support
+
+Add first-class install/uninstall support for the Cline CLI harness and for the DeepSeek harness. Both hosts load skills successfully today but never receive the `memory-agent` MCP server, so the `using-memory` skill is visible while every tool it documents (`recall`, `remember`, `memory_info`, `query_knowledge_base`) is missing from the agent's toolset.
+
+#### Why
+
+This is not a missing-feature bug but a registration-format problem. `setup.js` currently targets OpenCode, Claude Code, Antigravity/Gemini and Codex, and writes only to the config locations those hosts read. Any host with a different config path or a different MCP entry schema is silently skipped.
+
+The observed failure mode is deceptive and worth preventing:
+
+- The skill is discovered because skills live in the shared `~/.agents/skills/` convention that many hosts read, so the UI shows `using-memory` as enabled.
+- The MCP server is absent because the host never reads `~/.agents/mcp_config.json`, so the agent loads a skill instructing it to call tools that do not exist.
+
+The agent then either silently skips memory initialization or hallucinates tool availability. Reporting an installed skill as "working" is worse than not registering the skill at all, so partial registration should be detected and surfaced.
+
+#### Observed client layouts
+
+Verified 2026-10-01 on Windows with Cline CLI. Treat these as the starting evidence, not as a final specification.
+
+| Host | MCP config path | Entry schema |
+| :--- | :--- | :--- |
+| Cline CLI | `~/.cline/data/settings/cline_mcp_settings.json` | `transport: { type, command, args }` + `disabled`, `autoApprove`, `timeout` |
+| Cline (VS Code extension) | `%APPDATA%/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json` | flat `type`, `command`, `args` + `disabled`, `autoApprove`, `timeout` |
+| Shared `~/.agents/mcp_config.json` (written today) | OpenCode / Codex / Antigravity convention | flat `command`, `args` |
+
+Two blockers follow:
+
+1. **Different config paths.** Cline reads its own files and never opens `~/.agents/mcp_config.json`, so the existing Antigravity/Codex write is invisible to it.
+2. **Different entry schemas.** The two Cline variants do not even agree with each other — the CLI nests the launch spec under `transport`, the extension keeps it flat. Copying the shared `~/.agents/mcp_config.json` content into either location would be rejected.
+
+A restart of the host is required for both Cline variants; MCP configuration is read at startup.
+
+#### DeepSeek harness
+
+Verified 2026-10-01 against `@deepseek-ai/dsh@0.2.0-rc.2` (DeepSeek Harness) on Windows. The harness does **not** read `~/.agents/mcp_config.json`, so it is affected by the same gap as Cline — but its model is different in kind.
+
+##### Harness layout
+
+| Concern | Value |
+| :--- | :--- |
+| Harness home | `~/.dsh` (`$DSH_HOME`, resolved by `@deepseek-ai/dsh-home-paths`) |
+| Profiles | `$DSH_HOME/profiles/<name>/` — `web` and `desktop` exist on this machine |
+| Composition | empty root → each bundle in `package.json` `dsh.profile.bundles` → profile `cordis.patch.yml` → `$DSH_HOME/cordis.patch.yml` → `--patch` overlays |
+| MCP config | not a separate server map; each MCP server is one `@deepseek-ai/dsh-mcp-client` plugin **instance** declared in a YAML patch layer |
+| Config validation | `dsh --dump-config` / `--dump-config-schema` |
+
+##### Mechanism
+
+`dsh-mcp-client` is a namespace plugin: no default export, one instance per server, several instances in the same patch layer. The entry schema is discriminated on `transport`:
+
+```yaml
+- insert:
+    - id: memory-agent
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: memory          # /^[A-Za-z0-9_-]{1,32}$/, unique per scope
+        transport: stdio            # or streamable-http
+        command: node
+        args: ['<path>/mcp-server/boot.js']
+        failOnStartupError: true
+```
+
+Fields that matter for this integration: `serverName` (namespace and the `mcp__<serverName>__<tool>` public-name prefix), `failOnStartupError`, `reconnect`, `toolCallTimeoutMs`, and for HTTP transports `url` / `headers`.
+
+Three properties matter for registration design:
+
+- **Not JSON.** The layer is YAML, so the existing `readJsonConfig`/`writeJsonConfig` helpers cannot be reused. A YAML writer and a merge that preserves comments and user edits is required.
+- **Not a server map.** There is no `mcpServers` object to merge into; setup must decide whether to use `- insert:` in the user's `cordis.patch.yml` or the home-level `$DSH_HOME/cordis.patch.yml`, which applies to every profile and so avoids touching each profile directory.
+- **Server names are reserved, not overwritten.** A duplicate `serverName` throws at boot rather than being silently merged, which changes the failure mode of the ownership checks used elsewhere.
+
+##### Environment and lifecycle
+
+- The child process environment is scrubbed: credential-shaped names and all `DSH_*` names are dropped. Anything the server needs must be passed through the instance's explicit `env` field, which merges after the scrub. Windows name matching is case-insensitive.
+- `~/.agents/skills` **is** a default skill root (`source: user-agents`), alongside `~/.dsh/skills` (`user-dsh`), `<project>/.dsh/skills` and `<project>/.agents/skills`. So the skill half of the integration already works for DeepSeek and only the MCP half is missing.
+- `dsh-hmr` watches the profile manifest and patch layers when enabled and recomposes on change; otherwise a restart is required. Confirm per profile before promising hot reload.
+
+##### Practical notes
+
+- `dsh-mcp-client` ships as a dependency of the `dsh` package itself, so it resolves from the dsh installation without a profile-local dependency. The package is not part of the default `web` bundle, so an explicit `insert` is required — this is exactly the opt-in pattern the README describes for memory MCP overlays.
+- `--dump-config` verified on this machine: the patch above composes correctly and the entry appears in the final tree.
+- The `dsh` package ships the plugin catalog but not the `config/examples/` overlay directory referenced by its README, so the documented memory-MCP example cannot be copied from the installed package; the entry must be authored from the plugin's own `Config` schema.
+
+#### Desired behavior
+
+- Support Cline CLI and the Cline VS Code extension as separate targets, each writing its native schema at its native path, with matching `--cline` / `--cline-cli` / `--cline-vscode` style flags consistent with the existing `--opencode`, `--claude`, `--codex`, `--antigravity`, `--gemini` surface.
+- Support the DeepSeek harness as a `--deepseek` target that writes an `@deepseek-ai/dsh-mcp-client` instance into a YAML patch layer. Prefer the home-level `$DSH_HOME/cordis.patch.yml` so every profile inherits it and no per-profile directory is touched; fall back to a specific profile's `cordis.patch.yml` only when the user asks for one.
+- Keep `uninstall` symmetric: every path written by setup must be restored to its original content, using the same ownership checks already used elsewhere.
+- Preserve all existing ownership and safety rules, including refusing to overwrite a foreign `memory-agent` entry and not touching unrelated client configuration.
+- Detect a host where the skill is registered but the MCP server is absent, and report it explicitly instead of leaving the agent with unusable instructions.
+- Keep one shared application layer so CLI, MCP tools and any dashboard do not diverge per host.
+- Update `using-memory` / client integration docs to state, per host, which config file is written and whether a restart is needed. The DeepSeek tool names are prefixed `mcp__memory__…`, which the skill documentation should reflect.
+
+#### Open questions
+
+- Does the Cline CLI support a native `cline mcp add` equivalent that should be preferred over direct JSON writes, as is already done for `codex mcp add`?
+- Should the two Cline variants be one logical client with two write targets, or independently selectable?
+- Should the YAML patch layer be edited in place, or should setup manage a dedicated include/patch file that the harness layers on top? In-place editing risks clobbering user comments; a separate file is cleaner but depends on which layers the user's profile already declares.
+- What `serverName` should the plugin register under for DeepSeek — the tool prefix is `mcp__<serverName>__<tool>`, so the choice becomes part of the public tool surface.
+- Should setup fail loudly when a requested target's schema is unknown, rather than skipping silently?
+
 ---
 
 ### Provider-based embeddings & reranking (local / API / sidecar)

@@ -28,6 +28,7 @@ import {
 } from "../mcp-server/memory.js";
 
 import { closeDatabase } from "../mcp-server/db/database.js";
+import { startSnapshotScheduler, stopSnapshotScheduler } from "../mcp-server/admin/cloud_snapshots.js";
 import { requireProjectKey } from "../mcp-server/tools/helpers.js";
 import { resolveRagScopeKey, resolveRagScopeKeys, resolveManageRagScopeKeys, removeDocumentScopes } from "../mcp-server/rag_scope.js";
 // Shared Notebook tool implementations — the same code the MCP server runs, so
@@ -49,6 +50,7 @@ function installExitHook() {
   exitHookInstalled = true;
   process.on("exit", () => {
     try {
+      stopSnapshotScheduler();
       closeDatabase();
     } catch {}
   });
@@ -250,6 +252,7 @@ const MCP_SERVERS = [
 
 export const MemoryPlugin = async ({ directory, worktree, client }) => {
   installExitHook();
+  startSnapshotScheduler();
   await ensureDir();
   let activeProjectKey = await scopeKey("project", worktree, directory);
   let identityResolveAt = 0;
@@ -341,7 +344,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
             description: "\x27project\x27 (default) or \x27global\x27",
             default: "project",
           },
-          directory: { type: "string", description: "Optional workspace/project directory path to target when scope='project' (e.g. 'F:/projects/my-app')" },
+          directory: { type: "string", description: "Optional workspace/project directory path to target when scope='project' (e.g. '/path/to/my-app')" },
           project: { type: "string", description: "Alias for directory" },
           docId: { type: "string", description: "Optional document ID, title, or path to link this fact to" },
           startLine: { type: "number", description: "Optional starting line number in target document" },
@@ -376,7 +379,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
             description: "project, global, all (по умолчанию) или list_projects",
             default: "all",
           },
-          directory: { type: "string", description: "Directory path of the project to read facts from (e.g. \x27F:/projects/plugins/memory\x27)" },
+          directory: { type: "string", description: "Directory path of the project to read facts from (e.g. \x27/path/to/project\x27)" },
           project: { type: "string", description: "Alias for directory" },
           query: { type: "string", description: "Optional keyword filter; all space-separated terms must match" },
           tags: { type: "string", description: "Optional comma-separated tag filter (any match)" },
@@ -767,7 +770,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
               .prepare(`SELECT d.id FROM documents d WHERE (d.id = ? OR d.path = ? OR d.title = ?) AND ${visibleDocWhere}`)
               .get(docId, docId, docId, ...scopeKeys);
             if (!visible) throw new Error(`Document not found in the selected RAG scope for docId: ${docId}`);
-            const scopeRemoval = await removeDocumentScopes(db, visible.id, scopeKeys);
+            const scopeRemoval = await removeDocumentScopes(db, visible.id, scopeKeys, { deferFinalRemoval: true });
             if (scopeRemoval.remainingScopes > 0) {
               return JSON.stringify({
                 deleted: false,

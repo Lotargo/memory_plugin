@@ -168,7 +168,7 @@ async function writeLocalSyncState(db, key, value) {
 
 export async function ensureCloudConnection(db = null, { runBackfill = true } = {}) {
   const target = db || await getDatabase();
-  if (target.mode === "only-local") return target;
+  if (target.mode === "only-local" || target.mode === "cloud-snapshots") return target;
   if (target.cloudClient || target.failoverClient) return target;
   if (target.cloudInitPromise) return await target.cloudInitPromise;
 
@@ -294,6 +294,7 @@ async function openDatabase(customPath, mode) {
   // remote migrations, and legacy blob backfill are initialized lazily by the
   // background sync path so local reads never wait on Turso.
   const wrappedDb = new DatabaseWrapper(localDb, cloudClient, mode, failoverClient);
+  wrappedDb.isDefault = !customPath;
   await runMigrations(wrappedDb);
 
   if (mode === "only-cloud" && cloudClient) {

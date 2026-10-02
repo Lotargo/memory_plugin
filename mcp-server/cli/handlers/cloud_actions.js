@@ -97,6 +97,7 @@ export async function handleCloudAction(value, config) {
     }
     case "cloud_mode": {
       const modeItems = [
+        { label: "cloud-snapshots (Recommended: local + ZIP checkpoints)", value: "cloud-snapshots", info: "Back up current local/legacy cloud, then use manual or hourly snapshots; local state is authoritative" },
         { label: "only-local (Local only)", value: "only-local", info: "Fully private, offline-first mode (everything stored on disk)" },
         { label: "only-cloud (Cloud only)", value: "only-cloud", info: "Fully serverless cloud mode with no local caching" },
         { label: "hybrid-sync (Local with background sync)", value: "hybrid-sync", info: "Instant local operations with a background sync daemon" },
@@ -110,7 +111,35 @@ export async function handleCloudAction(value, config) {
       });
 
       if (subRes.action === "select") {
-        updateConfig({ mode: subRes.value });
+        if (subRes.value === "cloud-snapshots" && config.mode !== "cloud-snapshots") {
+          try {
+            const { manageSnapshots } = await import("../../admin/cloud_snapshots.js");
+            console.log(JSON.stringify(await manageSnapshots({ action: "enable" }), null, 2));
+          } catch (error) { console.error(error.message); }
+          await waitForEnter();
+        } else updateConfig({ mode: subRes.value });
+      }
+      break;
+    }
+    case "cloud_snapshot_upload": {
+      const { manageSnapshots } = await import("../../admin/cloud_snapshots.js");
+      try { console.log(JSON.stringify(await manageSnapshots({ action: "upload" }), null, 2)); }
+      catch (error) { console.error(error.message); }
+      await waitForEnter(); break;
+    }
+    case "cloud_snapshot_schedule": {
+      const selection = await selectSimpleMenu({ title: "ZIP SNAPSHOT SCHEDULE", items: [
+        { label: "Manual", value: "manual", info: "Upload only on request" },
+        { label: "Scheduled (hours)", value: "scheduled", info: "Arbitrary hours, e.g. 0.5 / 24 / 168; no catch-up queue" },
+        { label: "Off", value: "off", info: "Disable automatic uploads" },
+      ] });
+      if (selection.action === "select") {
+        const { manageSnapshots } = await import("../../admin/cloud_snapshots.js");
+        try {
+          const hours = selection.value === "scheduled" ? Number(await promptText(`Interval in hours (e.g. 0.5, 24, 168; current ${config.snapshotIntervalHours})`)) : config.snapshotIntervalHours;
+          console.log(JSON.stringify(await manageSnapshots({ action: "configure", syncMode: selection.value, intervalHours: hours }), null, 2));
+        } catch (error) { console.error(error.message); }
+        await waitForEnter();
       }
       break;
     }

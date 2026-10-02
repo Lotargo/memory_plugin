@@ -17,7 +17,7 @@ async function executeCloud(db, sql, args = []) {
 
 export async function pushBlobToCloud(db, hash, baseDir = BLOBS_DIR) {
   if (!hash) return { skipped: true, reason: "missing_hash" };
-  if (!db || db.mode === "only-local") return { skipped: true, reason: "local_mode" };
+  if (!db || !["hybrid-sync", "only-cloud"].includes(db.mode)) return { skipped: true, reason: "local_mode" };
 
   const transport = await readBlobTransport(hash, baseDir);
   await executeCloud(
@@ -38,7 +38,7 @@ export async function pushBlobToCloud(db, hash, baseDir = BLOBS_DIR) {
  * deliberately deleted the document/note.
  */
 export async function backfillCloudBlobsFromLocal(db, baseDir = BLOBS_DIR) {
-  if (!db || db.mode === "only-local") return { skipped: true };
+  if (!db || !["hybrid-sync", "only-cloud"].includes(db.mode)) return { skipped: true };
 
   const docs = await db.prepare(`
     SELECT id, path, blob_hash, updated_at
@@ -99,7 +99,7 @@ export async function materializeBlobFromCloud(db, hash, baseDir = BLOBS_DIR) {
   if (await blobExists(hash, baseDir)) {
     return { materialized: false, existing: true, hash };
   }
-  if (!db || db.mode === "only-local") {
+  if (!db || !["hybrid-sync", "only-cloud"].includes(db.mode)) {
     return { materialized: false, reason: "local_mode", hash };
   }
 
@@ -123,7 +123,7 @@ export async function materializeBlobFromCloud(db, hash, baseDir = BLOBS_DIR) {
 }
 
 export async function deleteCloudBlobIfUnreferenced(db, hash) {
-  if (!hash || !db || db.mode === "only-local") return { deleted: false };
+  if (!hash || !db || !["hybrid-sync", "only-cloud"].includes(db.mode)) return { deleted: false };
   const refs = await executeCloud(
     db,
     "SELECT COUNT(*) AS cnt FROM documents WHERE blob_hash = ?;",
@@ -137,7 +137,7 @@ export async function deleteCloudBlobIfUnreferenced(db, hash) {
 }
 
 export async function cloudBlobExists(db, hash) {
-  if (!hash || !db || db.mode === "only-local") return false;
+  if (!hash || !db || !["hybrid-sync", "only-cloud"].includes(db.mode)) return false;
   const res = await executeCloud(db, "SELECT hash FROM rag_blobs WHERE hash = ?;", [hash]);
   return Boolean(res?.rows?.length);
 }

@@ -4,6 +4,7 @@ import { join, basename, resolve } from "path";
 import { homedir } from "os";
 import { resolveProjectIdentity } from "./identity.js";
 import { logger } from "./logger.js";
+import { atomicWrite, withSnapshotLock } from "./storage/snapshot_lock.js";
 
 function resolveMemoryDir() {
   if (process.env.MEMORY_DIR) return process.env.MEMORY_DIR;
@@ -153,7 +154,7 @@ export function extractFacts(content) {
 
 export async function writeMemoryFile(key, content) {
   if (!key) return;
-  await writeFile(memoryPath(key), content);
+  await withSnapshotLock(MEMORY_DIR, () => atomicWrite(memoryPath(key), content));
 }
 
 export async function writeMemory(key, entries) {
@@ -177,7 +178,7 @@ export async function writeMemory(key, entries) {
     return;
   }
 
-  await writeFile(memoryPath(key), content);
+  await writeMemoryFile(key, content);
 
   if (config.mode === "hybrid-sync") {
     try {

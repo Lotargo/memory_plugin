@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { MEMORY_DIR, ensureDirSync } from "../memory.js";
+import { atomicWrite } from "../storage/snapshot_lock.js";
 
 const CONFIG_FILE = path.join(MEMORY_DIR, "config.json");
 
@@ -18,7 +19,9 @@ export const DEFAULT_CONFIG = {
   onnxThreads: 0,          // ONNX WASM threads: 0 = auto-detect CPU cores, or 1-16
   executionDevice: "cpu",  // "cpu" | "webgpu"
   modelUnloadTimeoutMinutes: 0, // Idle auto-unload for ML models (0 = never unload)
-  mode: "only-local",     // "only-local" | "only-cloud" | "hybrid-sync"
+  mode: "only-local",     // "only-local" | "cloud-snapshots" | legacy "only-cloud" | "hybrid-sync"
+  snapshotSyncMode: "manual", // manual | scheduled | off; only cloud-snapshots schedules uploads
+  snapshotIntervalHours: 24, // Any positive finite number, e.g. 0.5 or 168
   conflictStrategy: "merge", // "merge" | "cloud-wins" | "local-wins"
   tursoUrl: "",           // Connection endpoint URL for Turso DB
   failoverUrl: "",        // Failover connection endpoint URL (Fly.io + LiteFS)
@@ -66,13 +69,10 @@ export function getConfig() {
 
 export function saveConfig(newConfig) {
   ensureDirSync();
-  cachedConfig = Object.freeze({ ...DEFAULT_CONFIG, ...newConfig });
-  try {
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(cachedConfig, null, 2), "utf-8");
-    cachedMtimeMs = fs.statSync(CONFIG_FILE).mtimeMs;
-  } catch (err) {
-    console.error("Failed to write config file:", err.message);
-  }
+  const next = Object.freeze({ ...DEFAULT_CONFIG, ...newConfig });
+  atomicWrite(CONFIG_FILE, JSON.stringify(next, null, 2));
+  cachedMtimeMs = fs.statSync(CONFIG_FILE).mtimeMs;
+  cachedConfig = next;
   return cachedConfig;
 }
 

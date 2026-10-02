@@ -59,7 +59,7 @@ The same engine adds Git-based project isolation, semantic search, full raw-sour
 - Three-tier document hierarchy, retrieval-policy expansion for tables/code, and GraphRAG Lite symbol extraction.
 - Git-identity project scopes that follow a repository across directories, machines, and operating systems.
 - Active persona overlays shared across OpenCode, Codex, Claude Code, Gemini CLI, and Antigravity.
-- Local-only, cloud-only, and bidirectional hybrid-sync modes, including portable raw RAG blobs and deletion tombstones.
+- Local-only storage, full ZIP cloud checkpoints, and legacy cloud-only / bidirectional hybrid-sync modes.
 - No Docker, external vector database, hosted embedding API, or telemetry.
 
 > This is a practical agent-memory system, not a claim of generalized benchmark superiority. Repository benchmark results describe the included evaluation corpus and configuration.
@@ -374,6 +374,7 @@ Cloud support uses Turso / LibSQL and is optional.
 | Mode | Behavior |
 | :--- | :--- |
 | `only-local` (default) | Markdown notebooks, SQLite index, CAS blobs, and models remain local. |
+| `cloud-snapshots` (recommended for cloud backup) | Local working state; immutable full ZIP checkpoints in Turso. Manual by default, optionally scheduled in hours. |
 | `only-cloud` | Notebook and database operations use Turso directly; raw RAG blobs are materialized into a verified local cache when read. |
 | `hybrid-sync` | Local-first reads/writes with background push, reverse synchronization, and conflict resolution. |
 
@@ -385,7 +386,39 @@ Notebook conflict strategies:
 - `cloud-wins`.
 - `local-wins`.
 
-Cloud operations retry with timeouts and can switch to `failoverUrl` after repeated primary failures. In `hybrid-sync`, local SQLite continues serving reads during an outage. In `only-cloud`, an unavailable primary with no failover surfaces as an error.
+Legacy live synchronization retries with timeouts and can switch to `failoverUrl` after repeated primary failures. In `hybrid-sync`, local SQLite continues serving reads during an outage. In `only-cloud`, an unavailable primary with no failover surfaces as an error.
+
+### Full ZIP checkpoints
+
+```bash
+memory-cli snapshots enable
+memory-cli snapshots upload
+memory-cli snapshots configure scheduled 168  # weekly; 0.5, 24 etc. also work
+memory-cli snapshots configure manual        # upload only on request
+memory-cli snapshots configure off           # disable automatic uploads
+memory-cli snapshots create                  # local backup without cloud access
+memory-cli snapshots list --location cloud
+memory-cli snapshots restore <id> --location cloud   # preview only
+memory-cli snapshots restore <id> --location cloud --confirm <token>
+memory-cli snapshots delete --older-than 3m --location both   # preview only
+memory-cli snapshots delete --from 2026-01-01 --to 2026-07-01 --location cloud --yes
+memory-cli snapshots pin <id> --location cloud
+memory-cli snapshots help
+```
+
+`enable` saves separate pinned local and legacy-cloud backups before switching modes. It leaves old cloud tables intact and aborts if a legacy cloud backup cannot be read completely. It never merges old cloud data into the local working state. On a fresh installation, choose a checkpoint explicitly with `list` and `restore`; even empty local memory is never automatically repopulated. Existing installations retain their selected mode until an explicit switch. Close other memory clients before switching/restoring so their in-flight operations cannot write stale results afterward.
+
+Every checkpoint is independent: one ZIP with DEFLATE level 9, containing Notebook stores for **all projects**, Git identity/alias registry, RAG documents and raw text, sections/chunks, vectors, scopes, graph/fact links and deletion tombstones. Embedding model/dimension settings travel with it. Authentication, machine secrets, original multimedia files, model caches and legacy synchronization queues do not. ZIP/state/blob hashes are checked on restore, with a bounded decompression limit. Compression reduces text size; embedding vectors can compress less.
+
+The cloud stores metadata and the complete binary ZIP in **one `memory_snapshots` row** per checkpoint. Ordinary memory writes have no cloud side effects in this mode. An unchanged content hash causes **zero cloud calls**. Metadata lists omit BLOBs; fetching a selected ID reads only that archive. After schema creation, a changed-state upload issues one INSERT, independent of the number of facts or RAG chunks inside. A batch cleanup issues one DELETE for the selected period; billing still counts deleted rows, rather than counting the SQL command as one write.
+
+The scheduler runs while an MCP/OpenCode host is active, checks the persisted deadline locally every 30 seconds, and accepts any positive finite hour interval. After downtime it sends one current checkpoint, without replaying missed intervals. Each attempt first saves a local ZIP under `<memory>/storage/snapshots/`. A 429, quota `BLOCKED`/402 or network failure leaves that ZIP intact; there is only a latest-pending pointer, not a queue of uploads. Network failures use persisted exponential backoff (2–24 hours). Quota errors suspend automatic cloud attempts until a successful manual `upload`; scheduled local captures continue. `status` shows deadlines, pending ID and the last error. Manual upload bypasses the backoff and sends the current state.
+
+Restore previews current/replacement counts and returns a token tied to the current state. Applying a fresh token creates a pinned pre-restore local backup, then **replaces** local Notebook/RAG/registry state and rebuilds FTS. Extra current entries are removed. A filesystem recovery journal handles interruption around the SQLite transaction. Restore does not upload automatically; the next upload creates a new checkpoint of the restored state. Global persona prompts are refreshed after a successful restore.
+
+Cleanup supports local, cloud or both locations, with a half-open date range `[from,to)` or `--older-than Nd|Nm|Ny` (calendar months/years). Preview shows count and compressed bytes; use its token or explicit `--yes` to apply. Pinned checkpoints and the latest successful/local pending checkpoint are protected by default. `pin --unpin` removes a pin; `--include-protected` explicitly overrides protection. Full archives have no dependency chain, so deleting older checkpoints cannot break newer ones. Local ZIP history is retained until cleanup; no silent retention policy is imposed.
+
+Agents can use the same actions through MCP and native OpenCode `manage_snapshots`. Restore/delete require the preview token after user approval. `--yes` is available for explicit CLI automation. The older RAG-only `export_snapshot` / `import_snapshot` still export/merge RAG data; they are separate from full checkpoint replacement.
 
 ### Authentication
 
@@ -516,7 +549,9 @@ Configuration is stored in `<memory-dir>/config.json`.
 
 | Key | Default | Meaning |
 | :--- | :--- | :--- |
-| `mode` | `only-local` | `only-local`, `only-cloud`, or `hybrid-sync` |
+| `mode` | `only-local` | `only-local`, `cloud-snapshots`, or legacy `only-cloud` / `hybrid-sync` |
+| `snapshotSyncMode` | `manual` | `manual`, `scheduled`, `off`; automatic uploads only in `cloud-snapshots` |
+| `snapshotIntervalHours` | `24` | Arbitrary positive hours, including fractional values and `168` (weekly) |
 | `conflictStrategy` | `merge` | Notebook conflict policy: `merge`, `cloud-wins`, `local-wins` |
 | `fusionAlgorithm` | `rsf` | `rsf`, `rrf`, `semantic_only`, or `lexical_only` |
 | `alpha` | `0.5` | Dense-vector weight for RSF |

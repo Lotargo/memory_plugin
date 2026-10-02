@@ -21,6 +21,8 @@ export const defStr = (fallback) =>
     .string()
     .nullish()
     .transform((v) => (v === null || v === undefined || v === "" ? fallback : v));
+export const defEnum = (values, fallback) =>
+  z.union([z.enum(values), z.literal("")]).nullish().transform((v) => v || fallback);
 export const defBool = (fallback) =>
   z.boolean().nullish().transform((v) => (v === null || v === undefined ? fallback : v));
 export const defNum = (fallback) =>

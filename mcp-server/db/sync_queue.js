@@ -108,7 +108,7 @@ async function processSyncTask(db, task) {
 
     let realDocId = String(key || "").startsWith("doc_") ? key : null;
     let realPath = hintedPath;
-    let blobHash = null;
+    let blobHash = payload.blobHash || null;
     if (docRow.rows.length > 0) {
       realDocId = docRow.rows[0].id;
       realPath = docRow.rows[0].path || realPath;
@@ -131,8 +131,10 @@ async function processSyncTask(db, task) {
       await db.cloudClient.execute({ sql: "DELETE FROM sections WHERE doc_id = ?;", args: [realDocId] });
       await db.cloudClient.execute({ sql: "DELETE FROM knowledge_links WHERE doc_id = ?;", args: [realDocId] });
       await db.cloudClient.execute({ sql: "DELETE FROM documents WHERE id = ?;", args: [realDocId] });
-      if (blobHash) await deleteCloudBlobIfUnreferenced(db, blobHash);
     }
+    // A previous attempt may already have removed the document before blob
+    // cleanup failed. Retain its hash in the durable task for an idempotent retry.
+    if (blobHash) await deleteCloudBlobIfUnreferenced(db, blobHash);
 
     if (realDocId) {
       await recordCloudDocumentTombstone(db, {
@@ -258,9 +260,9 @@ async function processSyncTask(db, task) {
   }
 }
 
-export async function enqueueSyncTask(action, keyOrId, payload = null) {
+export async function enqueueSyncTask(action, keyOrId, payload = null, { db: customDb = null, trigger = true } = {}) {
   const { getDatabase } = await import("./database.js");
-  const db = await getDatabase();
+  const db = customDb || await getDatabase();
   if (db.mode === "only-cloud") return;
   await db.exec(`CREATE TABLE IF NOT EXISTS sync_queue (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -271,7 +273,9 @@ export async function enqueueSyncTask(action, keyOrId, payload = null) {
   );`);
   await db.prepare(`INSERT INTO sync_queue (action, key_or_id, payload, created_at) VALUES (?, ?, ?, ?);`)
     .run(action, keyOrId, payload ? (typeof payload === "string" ? payload : JSON.stringify(payload)) : null, Date.now());
-  triggerBackgroundSync().catch((err) => console.error("Background sync trigger error:", err.message));
+  // The background worker drains the default database only. A caller-owned
+  // database must not start a worker against an unrelated Notebook/queue.
+  if (trigger && db.isDefault) triggerBackgroundSync().catch((err) => console.error("Background sync trigger error:", err.message));
 }
 
 async function enumerateLocalStores() {
@@ -314,6 +318,7 @@ async function pullFromCloud(db) {
   });
 
   for (const key of allKeys) {
+    if (db.isDefault && getConfig().mode !== "hybrid-sync") break;
     const cloudContent = cloudByKey.get(key);
     const localContent = localContentByKey.get(key) || "";
     const cloudFacts = cloudContent !== undefined ? extractFacts(cloudContent) : null;
@@ -445,6 +450,8 @@ export async function syncFromCloud({ throttle = false } = {}) {
     }
 
     if (ragDue) {
+      const { getConfig } = await import("../config/config_manager.js");
+      if (getConfig().mode !== "hybrid-sync") return { skipped: true, reason: "mode_changed" };
       const ragStartedAt = Date.now();
       rag = await pullRagFromCloud(db);
       traceSync("rag_pull", ragStartedAt, `remote=${rag.remoteDocuments || 0} changed=${(rag.pulled || 0) + (rag.updated || 0)} unchanged=${rag.unchanged || 0}`);
@@ -491,17 +498,24 @@ async function runBackgroundSyncPass() {
     // all write_memory pushes behind it never reached the cloud.
     try { await db.exec(`ALTER TABLE sync_queue ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;`); } catch {}
     const MAX_TASK_ATTEMPTS = 5;
-    let syncFailed = false;
-    while (!syncFailed) {
-      const tasks = await db.prepare("SELECT * FROM sync_queue ORDER BY id ASC LIMIT 50;").all();
+    const blockedKeys = new Set();
+    let afterId = 0;
+    while (true) {
+      const tasks = await db.prepare("SELECT * FROM sync_queue WHERE id > ? ORDER BY id ASC LIMIT 50;").all(afterId);
       if (tasks.length === 0) break;
       for (const task of tasks) {
+        const { getConfig } = await import("../config/config_manager.js");
+        if (db.isDefault && getConfig().mode !== "hybrid-sync") return;
+        afterId = task.id;
+        // A failed document must not block independent Notebook/RAG writes.
+        // Preserve task order for the same object across the whole pass.
+        if (blockedKeys.has(task.key_or_id)) continue;
         try {
           await processSyncTask(db, task);
           await db.prepare("DELETE FROM sync_queue WHERE id = ?;").run(task.id);
         } catch (err) {
           const attempts = Number(task.attempts || 0) + 1;
-          if (attempts >= MAX_TASK_ATTEMPTS) {
+          if (attempts >= MAX_TASK_ATTEMPTS && task.action === "ingest_document" && /Blob not found for hash:/.test(err.message)) {
             console.error(`Dropping poison sync task ${task.id} (${task.action}) after ${attempts} attempts:`, err.message);
             await db.prepare("DELETE FROM sync_queue WHERE id = ?;").run(task.id);
             continue;
@@ -510,8 +524,7 @@ async function runBackgroundSyncPass() {
             await db.prepare("UPDATE sync_queue SET attempts = ? WHERE id = ?;").run(attempts, task.id);
           } catch {}
           console.error(`Failed to process sync task ${task.id} (${task.action}):`, err.message, err.stack);
-          syncFailed = true;
-          break;
+          blockedKeys.add(task.key_or_id);
         }
       }
     }

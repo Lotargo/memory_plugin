@@ -12,6 +12,10 @@ import {
 import { factBody } from "../fact_format.js";
 
 export async function handleDirectCommands(cliArgs) {
+  if (cliArgs[0] === "snapshots") {
+    const { handleSnapshotCommands } = await import("./snapshot_commands.js");
+    return handleSnapshotCommands(cliArgs);
+  }
   if (cliArgs[0] === "uninstall" || cliArgs.includes("uninstall") || cliArgs.includes("--uninstall")) {
     const { runUninstall } = await import("../uninstall.js");
     await runUninstall();

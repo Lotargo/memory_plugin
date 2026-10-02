@@ -36,7 +36,7 @@ function mergeMetadata(baseMetadata, metadataOverrides) {
 }
 
 async function clearOnlyCloudTombstone(db, docId, path) {
-  if (getConfig().mode !== "only-cloud") return;
+  if (db.mode !== "only-cloud") return;
   const { clearCloudDocumentTombstone } = await import("../db/rag_sync.js");
   await clearCloudDocumentTombstone(db, { docId, path });
 }
@@ -53,6 +53,7 @@ export async function ingestDocument({
   metadataOverrides = null,
 }) {
   const db = customDb || await getDatabase();
+  const mode = db.mode || "only-local";
 
   let effectiveType = type;
   let effectivePath = path;
@@ -90,7 +91,7 @@ export async function ingestDocument({
   const blobRes = await saveBlob(markdown, customBlobDir);
   const blobHash = blobRes.hash;
 
-  if (getConfig().mode === "only-cloud") {
+  if (mode === "only-cloud") {
     const { pushBlobToCloud } = await import("../db/rag_blob_transport.js");
     await pushBlobToCloud(db, blobHash, customBlobDir);
   }
@@ -117,11 +118,11 @@ export async function ingestDocument({
 
     const sectionsRow = await db.prepare("SELECT COUNT(*) AS cnt FROM sections WHERE doc_id = ?").get(docId);
     const chunksRow = await db.prepare("SELECT COUNT(*) AS cnt FROM micro_chunks WHERE doc_id = ?").get(docId);
-    if (getConfig().mode === "hybrid-sync") {
+    if (mode === "hybrid-sync") {
       try {
         const { exportDocumentData } = await import("./exporter.js");
         const { enqueueSyncTask } = await import("../db/sync_queue.js");
-        await enqueueSyncTask("ingest_document", docId, await exportDocumentData(docId, db));
+        await enqueueSyncTask("ingest_document", docId, await exportDocumentData(docId, db), { db });
       } catch (err) {
         logger.error("Failed to queue document scope sync task:", err.message);
       }
@@ -232,7 +233,7 @@ export async function ingestDocument({
     const refs = await db.prepare("SELECT COUNT(*) AS cnt FROM documents WHERE blob_hash = ?").get(existingDoc.blob_hash);
     if (!refs?.cnt) {
       try { await deleteBlob(existingDoc.blob_hash, customBlobDir); } catch {}
-      if (getConfig().mode === "only-cloud") {
+      if (mode === "only-cloud") {
         try {
           const { deleteCloudBlobIfUnreferenced } = await import("../db/rag_blob_transport.js");
           await deleteCloudBlobIfUnreferenced(db, existingDoc.blob_hash);
@@ -243,11 +244,11 @@ export async function ingestDocument({
     }
   }
 
-  if (getConfig().mode === "hybrid-sync") {
+  if (mode === "hybrid-sync") {
     try {
       const { exportDocumentData } = await import("./exporter.js");
       const { enqueueSyncTask } = await import("../db/sync_queue.js");
-      await enqueueSyncTask("ingest_document", docId, await exportDocumentData(docId, db));
+      await enqueueSyncTask("ingest_document", docId, await exportDocumentData(docId, db), { db });
     } catch (err) {
       logger.error("Failed to queue document ingest sync task:", err.message);
     }
@@ -302,11 +303,16 @@ export async function ingestNote({
 
 export async function deleteDocument(docIdOrPath, customDb = null, customBlobDir = BLOBS_DIR) {
   const db = customDb || await getDatabase();
+  const mode = db.mode || "only-local";
   const doc = await db.prepare("SELECT * FROM documents WHERE id = ? OR path = ? OR title = ?")
     .get(docIdOrPath, docIdOrPath, docIdOrPath);
   if (!doc) return { deleted: false, reason: "Document not found" };
 
   const deletedAt = Date.now();
+  if (mode === "only-cloud") {
+    const { recordCloudDocumentTombstone } = await import("../db/rag_sync.js");
+    await recordCloudDocumentTombstone(db, { docId: doc.id, path: doc.path, deletedAt });
+  }
   const ownedIds = [doc.id];
   for (const table of ["sections", "medium_chunks", "micro_chunks"]) {
     const rows = await db.prepare(`SELECT id FROM ${table} WHERE doc_id = ?`).all(doc.id);
@@ -322,26 +328,29 @@ export async function deleteDocument(docIdOrPath, customDb = null, customBlobDir
         .run(id, id, `${id}*`, `${id}*`);
     }
     await db.prepare("DELETE FROM documents WHERE id = ?;").run(doc.id);
+    if (mode === "hybrid-sync") {
+      // Persist deletion intent before a cloud pull can see the old document.
+      // The queue entry and tombstone commit with the local deletion, so an
+      // offline/blocked push cannot turn a successful delete into resurrection.
+      await db.prepare(`
+        INSERT INTO rag_document_tombstones (doc_id, path, deleted_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(doc_id) DO UPDATE SET path = excluded.path, deleted_at = excluded.deleted_at;
+      `).run(doc.id, doc.path, deletedAt);
+      const { enqueueSyncTask } = await import("../db/sync_queue.js");
+      await enqueueSyncTask("delete_document", doc.id, { path: doc.path, blobHash: doc.blob_hash, deletedAt }, { db, trigger: false });
+    }
     await db.exec("COMMIT;");
   } catch (err) {
     try { await db.exec("ROLLBACK;"); } catch {}
     throw err;
   }
 
-  if (getConfig().mode === "only-cloud") {
-    try {
-      const { recordCloudDocumentTombstone } = await import("../db/rag_sync.js");
-      await recordCloudDocumentTombstone(db, { docId: doc.id, path: doc.path, deletedAt });
-    } catch (err) {
-      logger.error("Failed to record cloud RAG deletion tombstone:", err.message);
-    }
-  }
-
   if (doc.blob_hash) {
     const refCountRow = await db.prepare("SELECT COUNT(*) as cnt FROM documents WHERE blob_hash = ?").get(doc.blob_hash);
     if (Number(refCountRow?.cnt || 0) === 0) {
       await deleteBlob(doc.blob_hash, customBlobDir);
-      if (getConfig().mode === "only-cloud") {
+      if (mode === "only-cloud") {
         try {
           const { deleteCloudBlobIfUnreferenced } = await import("../db/rag_blob_transport.js");
           await deleteCloudBlobIfUnreferenced(db, doc.blob_hash);
@@ -352,16 +361,12 @@ export async function deleteDocument(docIdOrPath, customDb = null, customBlobDir
     }
   }
 
-  if (getConfig().mode === "hybrid-sync") {
-    try {
-      const { enqueueSyncTask } = await import("../db/sync_queue.js");
-      await enqueueSyncTask("delete_document", doc.id, { path: doc.path, deletedAt });
-    } catch (err) {
-      logger.error("Failed to queue document delete sync task:", err.message);
-    }
+  if (mode === "hybrid-sync" && db.isDefault && process.env.MEMORY_DISABLE_BACKGROUND_SYNC !== "1") {
+    const { triggerBackgroundSync } = await import("../db/sync_queue.js");
+    triggerBackgroundSync().catch((err) => logger.error("Failed to synchronize document deletion:", err.message));
   }
 
-  return { deleted: true, docId: doc.id, title: doc.title, linksCleaned: true };
+  return { deleted: true, docId: doc.id, title: doc.title, linksCleaned: true, syncPending: mode === "hybrid-sync" };
 }
 
 export async function reindexEmbeddings({
@@ -422,11 +427,11 @@ export async function reindexEmbeddings({
     throw new Error(`Re-index transaction failed: ${err.message}`);
   }
 
-  if (config.mode === "hybrid-sync") {
+  if (db.mode === "hybrid-sync") {
     try {
       const { enqueueSyncTask } = await import("../db/sync_queue.js");
       const { exportDocumentData } = await import("./exporter.js");
-      for (const docId of affectedDocIds) await enqueueSyncTask("ingest_document", docId, await exportDocumentData(docId, db));
+      for (const docId of affectedDocIds) await enqueueSyncTask("ingest_document", docId, await exportDocumentData(docId, db), { db });
     } catch (err) {
       logger.error("Failed to queue document re-index sync tasks:", err.message);
     }

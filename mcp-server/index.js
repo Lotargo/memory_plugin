@@ -5,6 +5,7 @@ import { ensureDir, MEMORY_DIR } from "./memory.js";
 import { registerAllTools } from "./tools/index.js";
 import { closeDatabase } from "./db/database.js";
 import { readFileSync } from "node:fs";
+import { startSnapshotScheduler, stopSnapshotScheduler } from "./admin/cloud_snapshots.js";
 
 function readPackageVersion() {
   try {
@@ -40,6 +41,7 @@ const CLI_COMMANDS = new Set([
   "doctor",
   "models",
   "model",
+  "snapshots",
 ]);
 
 function printUsage() {
@@ -59,6 +61,7 @@ Usage:
   memory_plugin enable-prompt | disable-prompt
   memory_plugin models status [--json] | unload | load [--device cpu|gpu] | device cpu|gpu | timer off|<minutes>
   memory_plugin doctor --codex
+  memory_plugin snapshots help       ZIP checkpoints, schedules in hours, restore and period deletion
 
 Options:
   -h, --help                         Show this help text
@@ -103,12 +106,14 @@ await ensureDir();
 
 process.on("exit", () => {
   try {
+    stopSnapshotScheduler();
     closeDatabase();
   } catch {}
 });
 for (const sig of ["SIGINT", "SIGTERM"]) {
   process.on(sig, () => {
     try {
+      stopSnapshotScheduler();
       closeDatabase();
     } catch {}
     process.exit(0);
@@ -126,6 +131,7 @@ const { startModelControlLoop } = await import("./ml/model_manager.js");
 startModelControlLoop();
 
 registerAllTools(server);
+startSnapshotScheduler();
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

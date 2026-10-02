@@ -71,6 +71,7 @@ export async function runRagMemoryNotesMcpTests() {
     assert.ok(toolNames.includes("remember_note"), "MCP registry exposes remember_note");
     assert.ok(toolNames.includes("query_knowledge_base"));
     assert.ok(toolNames.includes("manage_knowledge_base"));
+    assert.ok(toolNames.includes("manage_snapshots"));
 
     const noteBody = [
       "MCP cold-memory integration record.",
@@ -151,7 +152,23 @@ export async function runRagMemoryNotesMcpTests() {
     }), "query after delete"));
     assert.ok(afterDelete.includes("No matching knowledge"));
 
-    console.log("✅ RAG MEMORY NOTES MCP CONTRACT PASSED!");
+    const snapshot = JSON.parse(textOf(await withTimeout(request("tools/call", {
+      name: "manage_snapshots", arguments: { action: "create" },
+    }), "create local ZIP")));
+    assert.equal(snapshot.status, "saved-local");
+    const snapshotPreview = JSON.parse(textOf(await withTimeout(request("tools/call", {
+      name: "manage_snapshots", arguments: { action: "restore", id: snapshot.snapshot.id },
+    }), "restore preview")));
+    assert.equal(snapshotPreview.status, "preview");
+    const snapshotRestored = JSON.parse(textOf(await withTimeout(request("tools/call", {
+      name: "manage_snapshots", arguments: { action: "restore", id: snapshot.snapshot.id, confirmToken: snapshotPreview.confirmToken },
+    }), "restore apply")));
+    assert.equal(snapshotRestored.status, "restored");
+    const invalidSnapshotCall = await withTimeout(request("tools/call", {
+      name: "manage_snapshots", arguments: { action: "delete", includeProtected: "false" },
+    }), "invalid snapshot flag");
+    assert.equal(invalidSnapshotCall.isError, true);
+    console.log("✅ RAG MEMORY NOTES AND ZIP SNAPSHOTS MCP CONTRACT PASSED!");
   } finally {
     if (child) {
       child.kill();

@@ -42,7 +42,7 @@ async function readRawWithCloudFallback(db, blobHash) {
   try {
     return await readBlob(blobHash);
   } catch (localErr) {
-    if (getConfig().mode === "only-local") throw localErr;
+    if (!["hybrid-sync", "only-cloud"].includes(getConfig().mode)) throw localErr;
 
     const { ensureCloudConnection } = await import("../../db/database.js");
     await ensureCloudConnection(db);

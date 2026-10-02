@@ -214,7 +214,7 @@ export function registerRagTools(server) {
           .prepare(`SELECT d.id FROM documents d WHERE (d.id = ? OR d.path = ? OR d.title = ?) AND ${visibleDocWhere}`)
           .get(docId, docId, docId, ...scopeKeys);
         if (!visible) throw new Error(`Document not found in the selected RAG scope for docId: ${docId}`);
-        const scopeRemoval = await removeDocumentScopes(db, visible.id, scopeKeys);
+        const scopeRemoval = await removeDocumentScopes(db, visible.id, scopeKeys, { deferFinalRemoval: true });
         if (scopeRemoval.remainingScopes > 0) {
           return {
             content: [{

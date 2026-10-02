@@ -48,13 +48,21 @@ export async function addDocumentScope(db, docId, scopeKey) {
   return key;
 }
 
-export async function removeDocumentScopes(db, docId, scopeKeys) {
+export async function removeDocumentScopes(db, docId, scopeKeys, { deferFinalRemoval = false } = {}) {
   const keys = Array.isArray(scopeKeys) ? [...new Set(scopeKeys.filter(Boolean))] : [];
   if (keys.length === 0) return { removedScopes: [], remainingScopes: 0 };
   const placeholders = keys.map(() => "?").join(",");
   const existing = await db
     .prepare(`SELECT scope_key FROM document_scopes WHERE doc_id = ? AND scope_key IN (${placeholders})`)
     .all(docId, ...keys);
+  if (deferFinalRemoval) {
+    const total = await db.prepare("SELECT COUNT(*) AS cnt FROM document_scopes WHERE doc_id = ?").get(docId);
+    if (Number(total?.cnt || 0) === existing.length) {
+      // The caller will purge the document. Leave its last scope intact until
+      // deleteDocument commits the purge and durable cloud deletion together.
+      return { removedScopes: existing.map((row) => row.scope_key), remainingScopes: 0 };
+    }
+  }
   await db
     .prepare(`DELETE FROM document_scopes WHERE doc_id = ? AND scope_key IN (${placeholders})`)
     .run(docId, ...keys);

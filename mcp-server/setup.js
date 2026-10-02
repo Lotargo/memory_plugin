@@ -56,7 +56,7 @@ export async function runSetup() {
   const doCodex = !hasSpecificFlag || lowerArgs.includes("--codex");
 
   // Headless cloud setup: --api-key (aliases: --api-token, --token) <TURSO_API_TOKEN> and/or --mode <only-local|only-cloud|hybrid-sync>
-  const VALID_MODES = ["only-local", "only-cloud", "hybrid-sync"];
+  const VALID_MODES = ["only-local", "cloud-snapshots", "only-cloud", "hybrid-sync"];
   const apiKeyArg = flagValue(args, "--api-key") || flagValue(args, "--api-token") || flagValue(args, "--token");
   const modeArg = flagValue(args, "--mode");
   if (modeArg && !VALID_MODES.includes(modeArg)) {
@@ -83,7 +83,10 @@ export async function runSetup() {
       const secrets = await loginWithApiToken({ token: apiKey });
       if (modeArg && VALID_MODES.includes(modeArg)) {
         const { updateConfig } = await import("./config/config_manager.js");
-        updateConfig({ mode: modeArg });
+        if (modeArg === "cloud-snapshots") {
+          const { manageSnapshots } = await import("./admin/cloud_snapshots.js");
+          await manageSnapshots({ action: "enable" });
+        } else updateConfig({ mode: modeArg });
       }
       console.log(`  [OK] Cloud: authorized as "${secrets.username}" via API token. Endpoint: ${secrets.dbUrl}`);
       configuredCount++;
@@ -93,7 +96,10 @@ export async function runSetup() {
   } else if (modeArg && VALID_MODES.includes(modeArg)) {
     try {
       const { updateConfig } = await import("./config/config_manager.js");
-      updateConfig({ mode: modeArg });
+      if (modeArg === "cloud-snapshots") {
+        const { manageSnapshots } = await import("./admin/cloud_snapshots.js");
+        await manageSnapshots({ action: "enable" });
+      } else updateConfig({ mode: modeArg });
       console.log(`  [OK] Cloud: sync mode set to "${modeArg}"`);
     } catch (err) {
       console.log("  [SKIP] Cloud mode update skipped:", err.message);

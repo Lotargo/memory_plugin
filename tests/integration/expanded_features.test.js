@@ -258,7 +258,7 @@ export async function runExpandedFeaturesTests() {
 
     // 3. End-to-End Ingestion Integration Test
     console.log("3. Testing End-to-End Spreadsheet Ingestion & Retrieval...");
-    const db = await getDatabase(TEST_DB_PATH);
+  const db = await getDatabase(TEST_DB_PATH, "only-local");
 
     const ingestRes = await ingestDocument({
       content: csvContent,

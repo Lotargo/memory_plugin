@@ -7,10 +7,8 @@ import {
   today,
   MEMORY_DIR,
   GLOBAL_KEY,
-  scopeKey,
   projectKey,
   projectName,
-  canonicalPath,
   listProjectStores,
   storeFilePath,
 } from "../../memory.js";
@@ -60,15 +58,22 @@ function extractEffectiveDir(args = {}, ctx = {}) {
   return (
     args?.directory ||
     args?.project ||
-    ctx?.directory ||
     ctx?.worktree ||
+    ctx?.directory ||
     null
   );
 }
 
 async function resolveScopeKey(scope, args = {}, ctx = {}) {
+  validateScope(scope, ["project", "global"], "project");
+  if (scope === "global") return GLOBAL_KEY;
   const dir = extractEffectiveDir(args, ctx);
-  return await scopeKey(scope || "project", ctx?.worktree ?? null, dir);
+  return await resolveTargetKey(dir);
+}
+
+function validateScope(scope, allowed, fallback) {
+  const value = scope == null || scope === "" ? fallback : scope;
+  if (!allowed.includes(value)) throw new Error(`Invalid scope: ${value}. Expected ${allowed.join(" or ")}.`);
 }
 
 export async function rememberFact(
@@ -137,27 +142,44 @@ export async function rememberFact(
 }
 
 async function resolveTargetKey(projectPath) {
-  if (!projectPath) return null;
-  if (typeof projectPath === "string" && (projectPath.startsWith("git:") || projectPath.startsWith("git_") || projectPath === GLOBAL_KEY)) {
-    return projectPath;
+  if (!projectPath) return await projectKey(null, null);
+  if (typeof projectPath !== "string") throw new Error("Notebook target must be a directory path or project store key.");
+  if (projectPath === GLOBAL_KEY) throw new Error("Use scope='global' to target global memory.");
+  if (projectPath.startsWith("git:") || projectPath.startsWith("git_")) {
+    const stores = await listProjectStores();
+    const store = stores.find((item) => item.path === projectPath || storeFilePath(projectPath).endsWith(item.file));
+    if (store) {
+      // Canonical and legacy keys can slugify to the same file. Preserve its
+      // recorded identity so mutations do not rename it or orphan fact links.
+      return store.path?.startsWith("git:") || store.path?.startsWith("git_") ? store.path : projectPath;
+    }
+    const { getDatabase } = await import("../../db/database.js");
+    const { listIdentities } = await import("../../identity.js");
+    if ((await listIdentities(await getDatabase())).some((identity) => identity.key === projectPath)) return projectPath;
+    throw new Error(`Unknown Notebook target: ${projectPath}. Use an existing store key or Git directory.`);
   }
+  // Never turn an absent/mistyped explicit path into the current Git project
+  // by walking its parent directories. Reading and writing share this route.
+  const { stat } = await import("node:fs/promises");
+  if (!await stat(projectPath).then((info) => info.isDirectory()).catch(() => false)) return null;
   try {
     const { resolveProjectIdentity } = await import("../../identity.js");
     const identity = await resolveProjectIdentity(projectPath);
     if (identity) return identity.key;
   } catch {}
-  return canonicalPath(projectPath);
+  return null;
 }
 
 export async function recallFacts(
   { scope, directory, project, query, tags, since, until, mode, offset, limit, includeSuperseded = false },
   ctx = {}
 ) {
+  validateScope(scope, ["project", "global", "all", "list_projects"], "all");
   const results = [];
   const now = Date.now();
   const targetMode = mode || "full";
   const targetOffset = offset !== undefined && offset !== null ? offset : 0;
-  const targetProjectInput = directory || project || ctx.directory || ctx.worktree || null;
+  const targetProjectInput = extractEffectiveDir({ directory, project }, ctx);
 
   if (scope === "list_projects") {
     const stores = await listProjectStores();
@@ -178,8 +200,7 @@ export async function recallFacts(
     ({ getLinksForFact } = await import("../../graph/knowledge_linker.js"));
   } catch {}
 
-  const target =
-    (await resolveTargetKey(targetProjectInput)) ?? (await projectKey(ctx.worktree ?? null, targetProjectInput));
+  const target = scope === "global" ? null : await resolveTargetKey(targetProjectInput);
   const label = targetProjectInput ? target : await projectName(ctx.worktree ?? null, targetProjectInput);
 
   const formatFactWithLinks = async (factLine, index, key) => {
@@ -257,6 +278,7 @@ export async function recallFacts(
 }
 
 export async function getFactById({ id, scope, directory, project }, ctx = {}) {
+  validateScope(scope, ["project", "global", "all"], "all");
   const targetId = String(id || "").trim();
   if (!targetId) throw new Error("ID parameter is required.");
 
@@ -272,7 +294,7 @@ export async function getFactById({ id, scope, directory, project }, ctx = {}) {
 
   if (scope !== "project") await check(GLOBAL_KEY);
   if (scope !== "global") {
-    const projKey = await projectKey(ctx.worktree ?? null, targetDir);
+    const projKey = await resolveTargetKey(targetDir);
     if (projKey) await check(projKey);
   }
 
@@ -291,6 +313,8 @@ export async function getFactById({ id, scope, directory, project }, ctx = {}) {
 }
 
 export async function forgetFacts({ query, scope, force, directory, project }, ctx = {}) {
+  if (typeof query !== "string" || !query.trim()) throw new Error("A nonempty forget query is required.");
+  if (force != null && typeof force !== "boolean") throw new Error("force must be a boolean.");
   const key = requireProjectKey(await resolveScopeKey(scope, { directory, project }, ctx));
   const entries = await readMemory(key);
 
@@ -327,7 +351,7 @@ export async function forgetFacts({ query, scope, force, directory, project }, c
       await deleteLinksForFacts(await getDatabase(), key, removedBodies);
     } catch {}
   }
-  let text = removable.length ? "Memory updated" : "Nothing removed.";
+  let text = removable.length ? `Memory updated: removed ${removable.length} fact(s) from ${key}.` : `Nothing removed from ${key}.`;
   if (protectedCount) text += ` (${protectedCount} protected fact(s) skipped; use force=true to override)`;
   return text;
 }
@@ -414,7 +438,7 @@ async function syncGlobalPersonaPrompts() {
 export async function memoryInfo(_args = {}, ctx = {}) {
   const effectiveDir = extractEffectiveDir(_args, ctx) || process.cwd();
   const dbPath = join(MEMORY_DIR, "storage", "memory.sqlite");
-  const activeKey = await projectKey(ctx.worktree ?? null, effectiveDir);
+  const activeKey = await resolveScopeKey("project", _args, ctx);
   const globalFile = storeFilePath(GLOBAL_KEY);
   const projectFile = activeKey ? storeFilePath(activeKey) : null;
 
@@ -447,11 +471,14 @@ export async function memoryInfo(_args = {}, ctx = {}) {
     const { getDatabase } = await import("../../db/database.js");
     const { resolveProjectIdentity, listIdentities } = await import("../../identity.js");
     const db = await getDatabase();
-    const identity = await resolveProjectIdentity(effectiveDir);
     const all = await listIdentities(db);
-    const registered = identity ? all.find((item) => item.key === identity.key) : null;
+    const registered = all.find((item) => item.key === activeKey);
+    const isStoreKey = effectiveDir.startsWith("git:") || effectiveDir.startsWith("git_");
+    const identity = isStoreKey
+      ? registered || (activeKey?.startsWith("git:") ? { key: activeKey, name: activeKey.slice(4) } : null)
+      : await resolveProjectIdentity(effectiveDir);
     identityLines.push(
-      `Identity: ${identity ? "git" : "no-git"}` +
+      `Identity: ${identity ? "git" : isStoreKey ? "legacy-store" : "no-git"}` +
         (identity
           ? ` | key: ${identity.key} | name: ${identity.name}${
               identity.primaryRemote ? ` | remote: ${identity.primaryRemote}` : ""

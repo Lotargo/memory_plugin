@@ -37,6 +37,7 @@ Usage:
   memory-cli models status [--json] | unload | load [--device cpu|gpu] | device cpu|gpu | timer off|<minutes>
   memory-cli uninstall [--purge] [--purge-cache] [--dry-run] [--yes] [--opencode|--claude|--codex|--gemini|--antigravity]
   memory-cli doctor --codex
+  memory-cli snapshots help          Full ZIP checkpoints, arbitrary hour schedule, restore/delete
 
 Options:
   -h, --help                         Show this help text`);
@@ -291,8 +292,11 @@ async function showCategorySubmenu(category, config, stats, initialIndex = 0) {
           label: "Operational Mode",
           badge: config.mode.toUpperCase(),
           value: "cloud_mode",
-          info: "Choose Operational Mode: only-local | only-cloud | hybrid-sync",
+          info: "Choose local-only, ZIP cloud checkpoints (recommended), or legacy live synchronization",
         },
+        { label: "ZIP Snapshot Schedule", value: "cloud_snapshot_schedule", badge: (config.snapshotSyncMode || "manual").toUpperCase(),
+          info: `Manual/off or arbitrary hours; current interval ${config.snapshotIntervalHours} h. Commands: memory-cli snapshots help` },
+        { label: "Send Current ZIP Snapshot", value: "cloud_snapshot_upload", info: "Save locally, then upload one cloud row; skip unchanged state" },
         {
           label: "Conflict Strategy",
           badge: (config.conflictStrategy || "merge").toUpperCase(),

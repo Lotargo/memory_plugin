@@ -90,6 +90,7 @@ In such cases, use the **Full Raw Document Reading** mechanism:
 - Use `action: "list"` to see all ingested documents.
 - Use `action: "read_document"` with `docId` to read the complete raw text content of any document.
 - Use `action: "delete"` with `docId` to unlink a source from the current project by default (or global outside Git). Pass `scope: "global"` or `scope: "all"` only when broader removal is intentional. The document and CAS blob are purged only when no scopes remain.
+- In hybrid mode, a purge returns `deleted: true, syncPending: true`: local deletion is committed with a persistent tombstone and a cloud deletion task. This confirms local removal; cloud removal is pending. Reverse sync cannot restore the older cloud copy while sending is delayed. Deletion tasks survive repeated cloud failures, and a broken document task does not block independent Notebook/RAG objects.
 - Use `action: "export_snapshot"` with `snapshotPath` to export a complete RAG backup, including scopes, vectors, retrieval policies, graph edges, and Notebook links.
 - Use `action: "import_snapshot"` with `snapshotPath` to import and merge a complete backup. Older unscoped snapshots remain globally visible for compatibility.
 
