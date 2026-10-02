@@ -67,6 +67,8 @@ A profile system should remain optional and should not make the common setup pat
 
 ### Local web dashboard
 
+Functional implementation plan: [Local UI panel](dev_docs/PLAN_LOCAL_UI_PANEL.md). It defines staged delivery, management capabilities and acceptance criteria; visual design and implementation stack remain open.
+
 Add a local web dashboard as a visual management interface for `memory_plugin`.
 
 The CLI should remain the primary automation-friendly interface, but not every memory-management task is convenient to perform through commands. A dashboard can expose the same underlying engine through a more discoverable interface without moving control or storage away from the user.
