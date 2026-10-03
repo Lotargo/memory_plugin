@@ -40,4 +40,7 @@ if (major < MIN_MAJOR || (major === MIN_MAJOR && minor < MIN_MINOR)) {
 }
 
 // Version is OK — hand off to the real entry point.
-import("./index.js");
+if (process.argv[2] === "dashboard") {
+  const { runDashboard } = await import("./dashboard/server.js");
+  await runDashboard(process.argv.slice(3));
+} else await import("./index.js");

@@ -99,8 +99,6 @@ export async function handleCloudAction(value, config) {
       const modeItems = [
         { label: "cloud-snapshots (Recommended: local + ZIP checkpoints)", value: "cloud-snapshots", info: "Back up current local/legacy cloud, then use manual or hourly snapshots; local state is authoritative" },
         { label: "only-local (Local only)", value: "only-local", info: "Fully private, offline-first mode (everything stored on disk)" },
-        { label: "only-cloud (Cloud only)", value: "only-cloud", info: "Fully serverless cloud mode with no local caching" },
-        { label: "hybrid-sync (Local with background sync)", value: "hybrid-sync", info: "Instant local operations with a background sync daemon" },
       ];
       const initialIdx = Math.max(0, modeItems.findIndex((i) => i.value === config.mode));
       const subRes = await selectSimpleMenu({
@@ -140,26 +138,6 @@ export async function handleCloudAction(value, config) {
           console.log(JSON.stringify(await manageSnapshots({ action: "configure", syncMode: selection.value, intervalHours: hours }), null, 2));
         } catch (error) { console.error(error.message); }
         await waitForEnter();
-      }
-      break;
-    }
-    case "conflict_strategy": {
-      const strategyItems = [
-        { label: "merge (Union local + cloud)", value: "merge", info: "Facts from both sides are merged and deduplicated — no data loss (recommended)" },
-        { label: "cloud-wins (Cloud overwrites local)", value: "cloud-wins", info: "On conflict, the cloud copy replaces the local store" },
-        { label: "local-wins (Local overwrites cloud)", value: "local-wins", info: "On conflict, the local copy replaces the cloud store" },
-      ];
-      const initialIdx = Math.max(0, strategyItems.findIndex((i) => i.value === (config.conflictStrategy || "merge")));
-      const subRes = await selectSimpleMenu({
-        title: "CHOOSE CONFLICT STRATEGY",
-        subtitle: "How hybrid-sync resolves differing local vs cloud stores",
-        items: strategyItems,
-        initialIndex: initialIdx,
-      });
-
-      if (subRes.action === "select") {
-        updateConfig({ conflictStrategy: subRes.value });
-        console.log(`\n  [OK] Conflict strategy set to: ${subRes.value}`);
       }
       break;
     }

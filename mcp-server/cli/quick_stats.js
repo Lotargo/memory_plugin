@@ -1,5 +1,6 @@
 import { getDatabase } from "../db/database.js";
 import { readMemoryRaw, GLOBAL_KEY, projectKey } from "../memory.js";
+import { getConfig } from "../config/config_manager.js";
 
 let _quickStatsCache = null;
 let _quickStatsAt = 0;
@@ -11,6 +12,7 @@ export function invalidateQuickStats() {
 }
 
 export async function getQuickStats() {
+  if (getConfig().legacyCloudRestoreRequired) return { docCount: null, chunkCount: null, factCount: null, unavailable: "Cloud memory migration requires an explicit restore." };
   const now = Date.now();
   if (_quickStatsCache && (now - _quickStatsAt) < QUICK_STATS_TTL_MS) {
     return _quickStatsCache;

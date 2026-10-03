@@ -50,7 +50,7 @@ export function getIngestAllowedRoots() {
 }
 
 // Guard against arbitrary file reads (~/.ssh/id_rsa, .env, /etc/passwd) reaching
-// the RAG store — and, in hybrid-sync mode, the cloud.
+// the local RAG store and its later ZIP checkpoints.
 export function assertIngestPathAllowed(pathStr) {
   const resolved = realResolve(pathStr);
   const config = getConfig();

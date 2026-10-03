@@ -4,6 +4,7 @@ import {
   readMemory,
   readMemoryRaw,
   writeMemory,
+  notebookVersion,
   storeFilePath,
   GLOBAL_KEY,
   projectName,
@@ -114,7 +115,7 @@ export async function handleStorageAction(value, config, stats) {
               const newLine = formatFactEntry({ date: p.date, time: p.time, text: newText, meta: p.meta });
               const updated = [...rawEntries];
               updated[selectedIdx] = newLine;
-              await writeMemory(key, updated);
+              await writeMemory(key, updated, { expectedVersion: notebookVersion(rawEntries) });
               let links = 0;
               try {
                 const db = await getDatabase();
@@ -127,8 +128,8 @@ export async function handleStorageAction(value, config, stats) {
                   .run(newText, key, oldFactText);
                 links = runRes ? runRes.changes : 0;
                 if (links && linkedDocs.length) {
-                  const { queueDocumentSyncIfNeeded } = await import("../../graph/knowledge_linker.js");
-                  for (const row of linkedDocs) await queueDocumentSyncIfNeeded(db, row.doc_id);
+                  const { touchDocument } = await import("../../graph/knowledge_linker.js");
+                  for (const row of linkedDocs) await touchDocument(db, row.doc_id);
                 }
               } catch (e) {}
               console.clear();
@@ -138,14 +139,14 @@ export async function handleStorageAction(value, config, stats) {
               const updated = [...rawEntries];
               updated[selectedIdx] =
                 actionRes.value === "protect" ? withMeta(selectedEntry, { keep: "1" }) : withMeta(selectedEntry, { keep: null });
-              await writeMemory(key, updated);
+              await writeMemory(key, updated, { expectedVersion: notebookVersion(rawEntries) });
               console.clear();
               console.log(`\n  [OK] Fact ${actionRes.value === "protect" ? "protected" : "unprotected"} successfully.\n`);
               await waitForEnter();
             } else if (actionRes.action === "select" && actionRes.value === "delete") {
               const updated = [...rawEntries];
               updated.splice(selectedIdx, 1);
-              await writeMemory(key, updated);
+              await writeMemory(key, updated, { expectedVersion: notebookVersion(rawEntries) });
               console.clear();
               console.log("\n  [OK] Fact deleted successfully.\n");
               await waitForEnter();

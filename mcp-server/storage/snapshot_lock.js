@@ -1,10 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
+
+const ownedLocks = new AsyncLocalStorage();
 
 // Shared by Notebook writes and full snapshots. OS process liveness, rather
 // than elapsed time, prevents a slow upload from losing its lock.
 export async function withSnapshotLock(directory, work) {
+  const lockKey = path.resolve(directory);
+  if (ownedLocks.getStore()?.get(lockKey)?.active) return work();
   fs.mkdirSync(directory, { recursive: true });
   const file = path.join(directory, ".snapshot.lock");
   const token = randomUUID();
@@ -31,8 +36,12 @@ export async function withSnapshotLock(directory, work) {
       await new Promise(resolve => setTimeout(resolve, 50));
     }
   }
-  try { return await work(); }
+  const ownership = { active: true };
+  const inherited = new Map(ownedLocks.getStore() || []);
+  inherited.set(lockKey, ownership);
+  try { return await ownedLocks.run(inherited, work); }
   finally {
+    ownership.active = false;
     if (JSON.parse(fs.readFileSync(file, "utf8")).token === token) fs.unlinkSync(file);
   }
 }

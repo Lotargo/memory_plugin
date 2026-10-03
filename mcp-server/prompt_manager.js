@@ -3,7 +3,7 @@ import { existsSync } from "fs";
 import { join } from "path";
 import { createHash } from "crypto";
 import { MEMORY_ROUTING_POLICY } from "./tools/core/memory_routing.js";
-import { factText, isDirectiveFact, isExpiredLine, isSuperseded } from "./fact_format.js";
+import { factText, isDirectiveFact, isExpiredLine, isSuperseded, isDisabledFact } from "./fact_format.js";
 import { resolveClientPaths } from "./client_paths.js";
 
 const START_MARKER = "<!-- START MEMORY AGENT PROMPT -->";
@@ -117,7 +117,7 @@ ${END_MARKER}`;
 
 export function activePersonaDirectives(entries, now = Date.now()) {
   return (entries || []).filter(
-    (entry) => isDirectiveFact(entry) && !isSuperseded(entry) && !isExpiredLine(entry, now)
+    (entry) => isDirectiveFact(entry) && !isSuperseded(entry) && !isExpiredLine(entry, now) && !isDisabledFact(entry)
   );
 }
 

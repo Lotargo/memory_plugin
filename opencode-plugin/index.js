@@ -13,6 +13,7 @@ import {
   displayFact,
   factBody,
   isDirectiveFact,
+  isDisabledFact,
   isExpiredLine,
 } from "../mcp-server/fact_format.js";
 
@@ -143,7 +144,7 @@ export function injectMemoryPolicyIntoSystem(output) {
 export function partitionMemoryEntries(entries, now = Date.now()) {
   const directives = [];
   const facts = [];
-  for (const entry of entries.filter((item) => !isSuperseded(item))) {
+  for (const entry of entries.filter((item) => !isSuperseded(item) && !isDisabledFact(item))) {
     if (isDirectiveFact(entry) && !isExpiredLine(entry, now)) directives.push(entry);
     else facts.push(entry);
   }
@@ -163,7 +164,7 @@ function sortNewestFirst(entries) {
 }
 
 export function formatInjectedFacts(entries, limit, now = Date.now()) {
-  const activeEntries = entries.filter((e) => !isSuperseded(e));
+  const activeEntries = entries.filter((e) => !isSuperseded(e) && !isDisabledFact(e));
   const sorted = sortNewestFirst(activeEntries);
 
   const injectPriority = [];

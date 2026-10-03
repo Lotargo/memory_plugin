@@ -29,18 +29,19 @@ const testSuites = [
   { category: "Unit", name: "model_control", file: "tests/unit/model_control.test.js" },
 
   // --- 2. INTEGRATION TESTS ---
+  { category: "Integration", name: "dashboard", file: "tests/integration/dashboard.test.js" },
   { category: "Integration", name: "cloud_snapshots", file: "tests/integration/cloud_snapshots.test.js" },
   { category: "Integration", name: "expanded_features", file: "tests/integration/expanded_features.test.js" },
   { category: "Integration", name: "memory_verification", file: "tests/integration/memory_verification.test.js" },
   { category: "Integration", name: "mcp_tools", file: "tests/integration/mcp_tools.test.js" },
   { category: "Integration", name: "persona_sync", file: "tests/integration/persona_sync.test.js" },
   { category: "Integration", name: "codex_mcp_smoke", file: "tests/integration/codex_mcp_smoke.test.js" },
-  { category: "Integration", name: "reverse_sync", file: "tests/integration/reverse_sync.test.js" },
+  { category: "Integration", name: "storage_mode_migration", file: "tests/integration/storage_mode_migration.test.js" },
   { category: "Integration", name: "rag_mcp_tools", file: "tests/integration/rag_mcp_tools.test.js" },
   { category: "Integration", name: "rag_memory_notes", file: "tests/integration/rag_memory_notes.test.js" },
   { category: "Integration", name: "rag_memory_notes_mcp", file: "tests/integration/rag_memory_notes_mcp.test.js" },
-  { category: "Integration", name: "rag_cloud_portability", file: "tests/integration/rag_cloud_portability.test.js" },
-  { category: "Integration", name: "rag_pending_deletion", file: "tests/integration/rag_pending_deletion.test.js" },
+  { category: "Integration", name: "only_cloud_migration", file: "tests/integration/only_cloud_migration.test.js" },
+  { category: "Integration", name: "rag_deletion", file: "tests/integration/rag_deletion.test.js" },
 
   // --- 3. CLOUD TESTS ---
   { category: "Cloud", name: "phase1_cloud", file: "tests/cloud/phase1_cloud.test.js" },

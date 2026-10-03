@@ -1,23 +1,17 @@
 import { getDatabase } from "../db/database.js";
 import { randomUUID } from "node:crypto";
-import { GLOBAL_KEY } from "../memory.js";
+import { GLOBAL_KEY, MEMORY_DIR } from "../memory.js";
+import { withSnapshotLock } from "../storage/snapshot_lock.js";
 
-export async function queueDocumentSyncIfNeeded(db, docId) {
-  try {
-    // Bundle-level metadata is the cheap reverse-sync version marker. Touch the
-    // parent document whenever scopes, links, or graph relations change.
-    await db.prepare("UPDATE documents SET updated_at = ? WHERE id = ?;").run(Date.now(), docId);
-
-    if (db.mode !== "hybrid-sync") return;
-    const { exportDocumentData } = await import("../ingest/exporter.js");
-    const { enqueueSyncTask } = await import("../db/sync_queue.js");
-    await enqueueSyncTask("ingest_document", docId, await exportDocumentData(docId, db), { db });
-  } catch (err) {
-    console.warn(`Failed to queue linked RAG document sync for ${docId}: ${err.message}`);
-  }
+export async function touchDocument(db, docId) {
+  await db.prepare("UPDATE documents SET updated_at = ? WHERE id = ?;").run(Date.now(), docId);
 }
 
-export async function linkFactToDocument({
+export async function linkFactToDocument(args) {
+  return withSnapshotLock(MEMORY_DIR, () => linkFactToDocumentLocked(args));
+}
+
+async function linkFactToDocumentLocked({
   factKey,
   factText,
   docId,
@@ -73,7 +67,7 @@ export async function linkFactToDocument({
   `);
   const targetSpec = startLine ? `${doc.id}:L${startLine}-${endLine || startLine}` : doc.id;
   await edgeStmt.run(`fact:${factKey}:${factText.substring(0, 30)}`, targetSpec, relationType, JSON.stringify({ linkId: id }), now);
-  await queueDocumentSyncIfNeeded(db, doc.id);
+  await touchDocument(db, doc.id);
 
   return {
     linkId: id,
@@ -181,7 +175,7 @@ export async function moveKnowledgeScope(db, sourceKey, targetKey) {
   await db.prepare("UPDATE knowledge_links SET fact_key = ? WHERE fact_key = ?").run(targetKey, sourceKey);
 
   for (const docId of docIds) {
-    await queueDocumentSyncIfNeeded(db, docId);
+    await touchDocument(db, docId);
   }
 
   return { movedLinks: links.length, movedDocuments: docIds.size };
@@ -207,6 +201,6 @@ export async function deleteLinksForFacts(db, factKey, factTexts) {
     .prepare(`DELETE FROM knowledge_links WHERE fact_key = ? AND fact_text IN (${placeholders})`)
     .run(factKey, ...texts);
   const docIds = [...new Set(links.map((link) => link.doc_id))];
-  for (const docId of docIds) await queueDocumentSyncIfNeeded(db, docId);
+  for (const docId of docIds) await touchDocument(db, docId);
   return { deletedLinks: links.length, affectedDocuments: docIds.length };
 }

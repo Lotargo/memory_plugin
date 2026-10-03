@@ -2,7 +2,7 @@ import { manageSnapshots, stopSnapshotScheduler } from "../admin/cloud_snapshots
 
 const HELP = `Snapshot commands (all projects, no automatic cloud restore):
   snapshots status
-  snapshots enable                     Back up local/legacy cloud; enable manual ZIP mode
+  snapshots enable                     Back up local/legacy cloud; former cloud-only needs restore
   snapshots configure manual|off
   snapshots configure scheduled <hours>  e.g. 0.5, 24, 168
   snapshots create [--force]            Local checkpoint only

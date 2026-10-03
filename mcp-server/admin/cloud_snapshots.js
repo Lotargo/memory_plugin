@@ -3,7 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { createClient } from "@libsql/client";
 import { MEMORY_DIR, slugify } from "../memory.js";
-import { getDatabase, DB_PATH, BLOBS_DIR } from "../db/database.js";
+import { getDatabase, getMigrationDatabase, BLOBS_DIR } from "../db/database.js";
 import { getConfig, updateConfig } from "../config/config_manager.js";
 import { resolveCloudSecrets } from "./auth.js";
 import { bustIdentityCache } from "../identity.js";
@@ -45,7 +45,9 @@ export class CloudSnapshots {
   save(state) { atomicWrite(this.stateFile, JSON.stringify(state, null, 2)); }
   lock(work) { return withSnapshotLock(this.directory, work); }
   async localDb() {
-    const db = this.db || await getDatabase();
+    const db = this.db || (this.config().legacyCloudRestoreRequired
+      ? (this.migrationDb ||= await getMigrationDatabase(path.join(this.memoryDir, "storage", "memory.sqlite")))
+      : await getDatabase());
     if (!db.localDb) throw new Error("Switch to local storage before restoring or uploading local snapshots");
     return db;
   }
@@ -72,7 +74,7 @@ export class CloudSnapshots {
   }
   async cloud({ schema = true } = {}) {
     if (!this.client) {
-      const secrets = await resolveCloudSecrets();
+      const secrets = (await resolveCloudSecrets()) || {};
       const url = secrets.dbUrl || this.config().tursoUrl;
       if (!url) throw new Error("Cloud connection is not configured");
       this.client = createClient({ url, authToken: secrets.token || undefined });
@@ -112,6 +114,7 @@ export class CloudSnapshots {
     return { record, payload: await unpackPayload(bytes, record.checksum, record.state_hash, this.maxUnpackedBytes) };
   }
   async upload({ automatic = false, force = false } = {}) {
+    if (this.config().legacyCloudBackupRequired || this.config().legacyCloudRestoreRequired) throw new Error("Run memory-cli snapshots enable and complete the required local restore before uploading; legacy migration is pending.");
     if (!["cloud-snapshots", "only-local"].includes(this.config().mode)) throw new Error("Enable cloud-snapshots before uploading; legacy mirror modes cannot upload local snapshots");
     if (typeof automatic !== "boolean" || typeof force !== "boolean") throw new Error("Upload flags must be boolean");
     return this.lock(async () => {
@@ -155,7 +158,7 @@ export class CloudSnapshots {
   }
   async tick() {
     const config = this.config();
-    if (config.mode !== "cloud-snapshots" || config.snapshotSyncMode !== "scheduled") return { status: "disabled" };
+    if (config.legacyCloudBackupRequired || config.legacyCloudRestoreRequired || config.mode !== "cloud-snapshots" || config.snapshotSyncMode !== "scheduled") return { status: "disabled" };
     const hours = config.snapshotIntervalHours;
     if (!Number.isFinite(hours) || hours <= 0) throw new Error("Invalid snapshot schedule");
     let due = false;
@@ -173,6 +176,10 @@ export class CloudSnapshots {
   async restore({ id, location = "local", confirmToken = null } = {}) {
     if (!["only-local", "cloud-snapshots"].includes(this.config().mode)) throw new Error("Restore requires local storage; enable snapshot mode first");
     return this.lock(async () => {
+      const migration = this.config().legacyCloudRestoreRequired;
+      if (migration && (this.config().legacyCloudBackupRequired || location !== "local" || id !== this.state().legacyCloudBackupId)) {
+        throw new Error("Run memory-cli snapshots enable, then restore its verified cloudBackupId with --location local to complete migration.");
+      }
       const { record, payload } = await this.load(id, location);
       const db = await this.localDb();
       return withSnapshotLock(this.memoryDir, async () => {
@@ -188,9 +195,11 @@ export class CloudSnapshots {
         // Filesystem journal repairs Notebook files if the process dies before
         // SQLite commits. This is also kept on disk if recovery itself fails.
         const marker = randomUUID();
-        state.restoreJournal = { backupId: backup.id, marker, settings: payload.settings }; this.save(state);
+        const settings = { ...payload.settings, ...(migration ? { mode: "cloud-snapshots", snapshotSyncMode: "manual",
+          legacyCloudBackupRequired: false, legacyCloudRestoreRequired: false } : {}) };
+        state.restoreJournal = { backupId: backup.id, marker, settings }; this.save(state);
         replaceLocal(payload, db, this.memoryDir, this.blobDir, marker, stateHash(current), this.config());
-        this.saveConfig(payload.settings);
+        this.saveConfig(settings);
         bustIdentityCache();
         delete state.restoreJournal; state.lastCapturedId = null; state.pendingId = null;
         // Force the next send to create a fresh checkpoint, even when reverting
@@ -275,14 +284,25 @@ export class CloudSnapshots {
   }
   async enable() {
     return this.lock(async () => {
-      const config = this.config(), state = this.state();
-      const local = this.db || await getDatabase(DB_PATH, "only-local");
+      let config = this.config();
+      const state = this.state();
+      const restoreRequired = () => ({ status: "restore-required", localBackupId: state.legacyCloudLocalBackupId,
+        cloudBackupId: state.legacyCloudBackupId, restoreCommand: `memory-cli snapshots restore ${state.legacyCloudBackupId} --location local` });
+      if (config.legacyCloudRestoreRequired && !config.legacyCloudBackupRequired && state.legacyCloudBackupId) {
+        try { await this.load(state.legacyCloudBackupId, "local"); return restoreRequired(); }
+        catch { /* An explicitly repeated enable can re-download a lost/corrupt backup. */ }
+      }
+      if (config.legacyCloudRestoreRequired && !config.legacyCloudBackupRequired) {
+        this.saveConfig({ legacyCloudBackupRequired: true }); config = this.config();
+      }
+      const local = this.db || await getMigrationDatabase(path.join(this.memoryDir, "storage", "memory.sqlite"));
       try {
         const payload = await withSnapshotLock(this.memoryDir, () => captureLocal(local, this.memoryDir, this.blobDir, config));
         const backup = await this.store(payload, state, { force: true, source: "migration-local", pinned: true });
+        await this.load(backup.id, "local");
         let cloudBackup = null;
         // Preserve legacy cloud independently; never merge it automatically.
-        if (["hybrid-sync", "only-cloud"].includes(config.mode)) {
+        if (config.legacyCloudBackupRequired) {
           const client = await this.cloud({ schema: false });
           const names = new Set((await client.execute("SELECT name FROM sqlite_master WHERE type='table'")).rows.map(r => r.name));
           const tables = {};
@@ -314,14 +334,33 @@ export class CloudSnapshots {
           } catch (error) { await tx.rollback(); throw error; }
           finally { tx.close(); }
           cloudBackup = await this.store(remote, state, { force: true, source: "migration-cloud", pinned: true });
+          await this.load(cloudBackup.id, "local");
+          // Verify the archive can populate the current local schema before
+          // reporting a completed download. This never touches working files.
+          const validationDb = await getMigrationDatabase(":memory:");
+          try {
+            const raw = validationDb.localDb;
+            raw.exec("BEGIN IMMEDIATE");
+            for (const [table, columns] of Object.entries(TABLES)) {
+              const insert = raw.prepare(`INSERT INTO ${table} (${columns.join(",")}) VALUES (${columns.map(() => "?").join(",")})`);
+              for (const row of remote.tables[table]) insert.run(...columns.map(c => c === "vector" ? Buffer.from(row[c], "base64") : row[c]));
+            }
+            if (raw.prepare("PRAGMA foreign_key_check").all().length) throw new Error("Legacy cloud archive has broken relational references; migration remains pending");
+            raw.exec("ROLLBACK");
+          } finally { validationDb.close(); }
         }
-        this.saveConfig({ mode: "cloud-snapshots", snapshotSyncMode: "manual" });
+        if (config.legacyCloudRestoreRequired) {
+          state.legacyCloudLocalBackupId = backup.id; state.legacyCloudBackupId = cloudBackup.id; this.save(state);
+          this.saveConfig({ mode: "only-local", snapshotSyncMode: "manual", legacyCloudBackupRequired: false });
+          return restoreRequired();
+        }
+        this.saveConfig({ mode: "cloud-snapshots", snapshotSyncMode: "manual", legacyCloudBackupRequired: false, legacyCloudRestoreRequired: false });
         state.initialized = true; state.lastCapturedId = null; state.nextDueAt = null; this.save(state);
         return { status: "enabled", localBackupId: backup.id, cloudBackupId: cloudBackup?.id || null, syncMode: "manual" };
       } finally { if (!this.db) local.localDb?.close(); }
     });
   }
-  close() { this.client?.close(); this.client = null; this.schemaReady = false; }
+  close() { this.client?.close(); this.client = null; this.schemaReady = false; this.migrationDb?.close(); this.migrationDb = null; }
 }
 
 let service;
@@ -347,7 +386,8 @@ export async function manageSnapshots(args) {
   await api.recover();
   switch (args.action) {
     case "status": return { mode: getConfig().mode, syncMode: getConfig().snapshotSyncMode,
-      intervalHours: getConfig().snapshotIntervalHours, ...api.state() };
+      intervalHours: getConfig().snapshotIntervalHours, legacyCloudBackupRequired: getConfig().legacyCloudBackupRequired,
+      legacyCloudRestoreRequired: getConfig().legacyCloudRestoreRequired, ...api.state() };
     case "enable": return api.enable();
     case "configure": return api.configure(args);
     case "create": return api.lock(async () => {

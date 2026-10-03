@@ -2,7 +2,6 @@ import { getDatabase } from "../../db/database.js";
 import { resolveManageRagScopeKeys } from "../../rag_scope.js";
 import { readBlob } from "../../storage/blob_store.js";
 import { parseDocumentMetadata } from "../../retrieval/retriever.js";
-import { getConfig } from "../../config/config_manager.js";
 
 function normalizeTags(tags) {
   if (Array.isArray(tags)) {
@@ -36,25 +35,6 @@ export function normalizeKnowledgeDocumentMetadata(doc) {
 
 function resolveEffectiveDirectory(directory, project, ctx) {
   return directory || project || ctx.directory || null;
-}
-
-async function readRawWithCloudFallback(db, blobHash) {
-  try {
-    return await readBlob(blobHash);
-  } catch (localErr) {
-    if (!["hybrid-sync", "only-cloud"].includes(getConfig().mode)) throw localErr;
-
-    const { ensureCloudConnection } = await import("../../db/database.js");
-    await ensureCloudConnection(db);
-    const { materializeBlobFromCloud } = await import("../../db/rag_blob_transport.js");
-    const result = await materializeBlobFromCloud(db, blobHash);
-    if (!result.materialized && !result.existing) {
-      throw new Error(
-        `Raw blob ${blobHash} is unavailable locally and could not be restored from cloud (${result.reason || "unknown"})`
-      );
-    }
-    return await readBlob(blobHash);
-  }
 }
 
 /**
@@ -138,7 +118,7 @@ export async function readKnowledgeDocument(
     throw new Error(`Document not found in knowledge base for docId: ${docId}`);
   }
 
-  const rawContent = await readRawWithCloudFallback(db, doc.blob_hash);
+  const rawContent = await readBlob(doc.blob_hash);
   const { metadata, sourceType, noteKind, tags } = normalizeKnowledgeDocumentMetadata(doc);
 
   return {

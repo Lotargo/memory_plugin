@@ -55,13 +55,11 @@ export async function runSetup() {
   const doGemini = !hasSpecificFlag || lowerArgs.includes("--gemini");
   const doCodex = !hasSpecificFlag || lowerArgs.includes("--codex");
 
-  // Headless cloud setup: --api-key (aliases: --api-token, --token) <TURSO_API_TOKEN> and/or --mode <only-local|only-cloud|hybrid-sync>
-  const VALID_MODES = ["only-local", "cloud-snapshots", "only-cloud", "hybrid-sync"];
+  // Validate before authentication or writing any client configuration.
+  const { STORAGE_MODES: VALID_MODES, assertStorageMode } = await import("./config/config_manager.js");
   const apiKeyArg = flagValue(args, "--api-key") || flagValue(args, "--api-token") || flagValue(args, "--token");
   const modeArg = flagValue(args, "--mode");
-  if (modeArg && !VALID_MODES.includes(modeArg)) {
-    console.log(`  [WARN] Unknown --mode "${modeArg}". Allowed: ${VALID_MODES.join(", ")}`);
-  }
+  if (modeArg) assertStorageMode(modeArg);
 
   console.log("\nSetting up @lotargo/memory_plugin...\n");
   const clientPaths = resolveClientPaths();
@@ -85,7 +83,8 @@ export async function runSetup() {
         const { updateConfig } = await import("./config/config_manager.js");
         if (modeArg === "cloud-snapshots") {
           const { manageSnapshots } = await import("./admin/cloud_snapshots.js");
-          await manageSnapshots({ action: "enable" });
+          const result = await manageSnapshots({ action: "enable" });
+          if (result.status === "restore-required") console.log(`  [PENDING] Cloud archive downloaded. Preview and confirm: ${result.restoreCommand}`);
         } else updateConfig({ mode: modeArg });
       }
       console.log(`  [OK] Cloud: authorized as "${secrets.username}" via API token. Endpoint: ${secrets.dbUrl}`);
@@ -98,9 +97,13 @@ export async function runSetup() {
       const { updateConfig } = await import("./config/config_manager.js");
       if (modeArg === "cloud-snapshots") {
         const { manageSnapshots } = await import("./admin/cloud_snapshots.js");
-        await manageSnapshots({ action: "enable" });
-      } else updateConfig({ mode: modeArg });
-      console.log(`  [OK] Cloud: sync mode set to "${modeArg}"`);
+        const result = await manageSnapshots({ action: "enable" });
+        if (result.status === "restore-required") console.log(`  [PENDING] Cloud archive downloaded. Preview and confirm: ${result.restoreCommand}`);
+        else console.log(`  [OK] Cloud: storage mode set to "${modeArg}"`);
+      } else {
+        updateConfig({ mode: modeArg });
+        console.log(`  [OK] Local storage mode selected.`);
+      }
     } catch (err) {
       console.log("  [SKIP] Cloud mode update skipped:", err.message);
     }

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Memory — Notebook</title>
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Перейти к записям</a>
+  <div class="app-shell" id="shell">
+    <aside class="sidebar" id="sidebar" aria-label="Навигация и область памяти">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">m</span><span>memory<span class="brand-period">.</span></span></div>
+      <div class="scope-control">
+        <label for="target">Область памяти</label>
+        <select id="target" name="target" aria-describedby="scopeHint"><option value="global">Глобальная память</option></select>
+        <p id="scopeHint" class="caption">Доступна во всех проектах</p>
+      </div>
+      <nav class="view-nav" aria-label="Разделы памяти">
+        <button type="button" data-view="notebook" aria-current="page"><span>Notebook</span><span id="notebookCount" class="nav-count">—</span></button>
+        <button type="button" data-view="persona"><span>Инструкции</span><span id="directiveCount" class="nav-count">—</span></button>
+        <button type="button" data-view="archive"><span>История</span><span id="archiveCount" class="nav-count">—</span></button>
+      </nav>
+      <section class="project-section" aria-labelledby="projectsHeading"><div class="project-heading"><h2 id="projectsHeading">Проекты</h2><span id="projectCount" class="nav-count"></span></div><label class="visually-hidden" for="projectSearch">Поиск проектов</label><input id="projectSearch" name="projectSearch" type="search" placeholder="Найти проект…" autocomplete="off" aria-controls="projects"><div id="projects" class="project-list"></div></section>
+      <div class="sidebar-bottom">
+        <div class="appearance-control"><label for="theme">Тема</label><select id="theme" name="theme"><option value="system">Системная</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></div>
+        <span class="local-label"><span class="status-dot" aria-hidden="true"></span>На этом компьютере</span>
+        <button type="button" id="system" aria-label="Состояние хранилища">Хранилище <span id="version" class="caption"></span></button>
+      </div>
+    </aside>
+    <main class="main-area" id="main" tabindex="-1">
+      <header class="topbar">
+        <div class="location"><button type="button" id="navigation" class="mobile-navigation" aria-haspopup="dialog">Область</button><h1 id="viewTitle">Notebook</h1><span class="location-divider" aria-hidden="true">/</span><span id="scopeName" class="scope-name">Глобальная память</span></div>
+        <div class="top-actions"><button type="button" id="personaPreview" class="button ghost" aria-label="Предпросмотр" hidden><span class="preview-long">Предпросмотр</span><span class="preview-short" aria-hidden="true">Правила</span></button><button type="button" id="refresh" class="button secondary">Обновить</button><button type="button" id="create" class="button primary" disabled>+ Новая запись</button></div>
+      </header>
+      <div id="message" class="notice" role="status" aria-live="polite" hidden></div>
+      <div class="work-area">
+        <section class="list-pane" aria-label="Список записей">
+          <div class="list-controls">
+            <label class="visually-hidden" for="search">Поиск записей</label><div class="search-wrap"><input id="search" name="search" type="search" placeholder="Найти в памяти…" autocomplete="off"><kbd aria-hidden="true">/</kbd></div>
+            <div class="list-filter-row"><label class="visually-hidden" for="statusFilter">Состояние записей</label><select id="statusFilter" name="statusFilter"><option value="active">Текущие записи</option><option value="all">Все состояния</option><option value="protected">Защищённые</option><option value="disabled">Выключенные</option></select><span id="resultCount" class="caption" aria-live="polite">—</span></div>
+          </div>
+          <div id="listState" class="list-state" role="status">Загружаем память…</div><ul id="records" class="record-list" role="list" aria-busy="true"></ul>
+          <footer class="list-footer"><span id="updatedAt">Подключение…</span><span id="modeLabel"></span></footer>
+        </section>
+        <section id="detailPane" class="detail-pane" aria-label="Содержимое записи">
+          <div id="detailEmpty" class="detail-empty"><div class="empty-glyph" aria-hidden="true">{ }</div><h2>Выберите запись</h2><p>Её текст, свойства и источники появятся здесь.</p></div>
+          <div id="reader" class="reader" hidden>
+            <div class="detail-toolbar"><button type="button" id="backToList" class="button ghost back-button">К списку</button><span id="recordType" class="record-type"></span><div class="reader-actions"><button type="button" id="edit" class="button secondary">Редактировать</button></div></div>
+            <article class="record-content">
+              <div id="recordStatuses" class="record-statuses"></div><h2 id="recordTitle"></h2><p id="recordBody" class="record-body"></p><div id="recordTags" class="record-tags"></div>
+              <section class="properties"><h3>Свойства записи</h3><dl id="recordProperties"></dl></section>
+              <section id="sourcesSection" class="sources" hidden><h3>Связанные источники</h3><ul id="recordSources" role="list"></ul><p class="caption">Чтение источников появится в разделе RAG.</p></section>
+              <div class="record-bottom"><button type="button" id="delete" class="button ghost danger">Удалить запись</button></div>
+            </article>
+          </div>
+          <form id="editForm" class="record-editor" hidden>
+            <div class="detail-toolbar"><span id="editorHeading">Редактирование</span><span id="draftState" class="caption">Без изменений</span></div>
+            <div class="editor-content">
+              <p id="editScope" class="caption"></p>
+              <div class="field"><label for="title">Заголовок</label><input id="title" name="title" required maxlength="500" aria-describedby="titleError"><p id="titleError" class="field-error" hidden></p></div>
+              <div class="field"><label for="body">Текст записи</label><textarea id="body" name="body" required rows="7" maxlength="50000" aria-describedby="bodyHint bodyError"></textarea><p id="bodyHint" class="caption">Краткий факт или правило. Notebook хранит текст одной строкой.</p><p id="bodyError" class="field-error" hidden></p></div>
+              <div class="form-columns"><div class="field"><label for="kind">Тип записи</label><select id="kind" name="kind"><option value="fact">Факт</option><option value="directive">Инструкция</option></select></div><div class="field"><label for="ttl">Срок действия</label><input id="ttl" name="ttl" placeholder="Без ограничения" aria-describedby="ttlHint ttlError"><p id="ttlHint" class="caption">Например: 90d, 2w, 24h</p><p id="ttlError" class="field-error" hidden></p></div></div>
+              <div class="field"><label for="tags">Теги</label><input id="tags" name="tags" placeholder="Через запятую" maxlength="1000" aria-describedby="tagsError"><p id="tagsError" class="field-error" hidden></p></div>
+              <div class="options-group"><label class="check-option" for="keep"><input id="keep" name="keep" type="checkbox"><span><span class="option-title">Защитить от удаления</span><span class="caption">Для удаления потребуется отдельное подтверждение</span></span></label><label id="disabledOption" class="check-option" for="disabled"><input id="disabled" name="disabled" type="checkbox"><span><span class="option-title">Выключить инструкцию</span><span class="caption">Останется в памяти, но не войдёт в действующую персону</span></span></label></div>
+              <p id="editorError" class="inline-error" role="alert" hidden></p>
+            </div>
+            <footer class="editor-footer"><button type="button" id="cancelEdit" class="button secondary">Отмена</button><button type="submit" id="review" class="button primary">Проверить и сохранить</button></footer>
+          </form>
+        </section>
+      </div>
+    </main>
+  </div>
+  <dialog id="reviewDialog" class="dialog review-dialog" aria-labelledby="reviewHeading"><div class="dialog-heading"><div><p class="caption" id="reviewScope"></p><h2 id="reviewHeading">Проверка изменений</h2></div><button type="button" data-close="reviewDialog" class="button ghost">Закрыть</button></div><div id="changeList" class="change-list"></div><p id="reviewError" class="inline-error" role="alert" hidden></p><div class="dialog-actions"><button type="button" data-close="reviewDialog" class="button secondary">Вернуться к правке</button><button type="button" id="refreshConflict" class="button secondary" hidden>Обновить и сравнить</button><button type="button" id="confirmSave" class="button primary">Сохранить запись</button></div></dialog>
+  <dialog id="deleteDialog" class="dialog compact-dialog" aria-labelledby="deleteHeading"><p class="dialog-kicker">Удаление из памяти</p><h2 id="deleteHeading">Удалить эту запись?</h2><p id="deleteSummary"></p><p class="caption">Запись будет удалена из выбранной области. Эта операция не имеет отмены.</p><label id="protectedLabel" class="check-option" for="protectedConfirm"><input id="protectedConfirm" name="protectedConfirm" type="checkbox"><span>Подтверждаю удаление защищённой записи</span></label><p id="deleteError" class="inline-error" role="alert" hidden></p><div class="dialog-actions"><button type="button" data-close="deleteDialog" class="button secondary">Отмена</button><button type="button" id="confirmDelete" class="button primary destructive">Удалить запись</button></div></dialog>
+  <dialog id="discardDialog" class="dialog compact-dialog" aria-labelledby="discardHeading"><h2 id="discardHeading">Несохранённые изменения</h2><p>В редакторе есть несохранённый текст. Если перейти дальше, изменения будут потеряны.</p><div class="dialog-actions"><button type="button" id="discardChanges" class="button secondary">Не сохранять</button><button type="button" id="keepEditing" class="button primary">Продолжить правку</button></div></dialog>
+  <dialog id="personaDialog" class="dialog persona-dialog" aria-labelledby="personaHeading"><div class="dialog-heading"><div><p id="personaScope" class="caption"></p><h2 id="personaHeading">Действующие инструкции</h2></div><button type="button" data-close="personaDialog" class="button ghost">Закрыть</button></div><p class="dialog-description">Предпросмотр правил, доступных выбранной области. Выключенные, истёкшие и заменённые инструкции исключены.</p><div id="personaContent"></div><p class="caption">Глобальный блок использует построитель managed prompt. Проектный блок — предпросмотр; передачу проектных правил поддерживает OpenCode. Это не история использования агентом.</p></dialog>
+  <dialog id="systemDialog" class="dialog system-dialog" aria-labelledby="systemHeading"><div class="dialog-heading"><h2 id="systemHeading">Состояние хранилища</h2><button type="button" data-close="systemDialog" class="button ghost">Закрыть</button></div><dl id="systemProperties" class="system-properties"></dl><section><h3>Доступные возможности</h3><p>Notebook, выбор проектов, редактирование метаданных и управление инструкциями.</p><p class="caption">RAG, облако, модели и управление клиентами ещё не подключены к панели. Режим хранилища управляется существующим CLI.</p></section></dialog>
+  <dialog id="navigationDialog" class="dialog navigation-dialog" aria-label="Область и разделы"><div class="navigation-close"><button type="button" data-close="navigationDialog" class="button secondary">Закрыть</button></div><div id="mobileNavHost"></div></dialog>
+</body>
+</html>

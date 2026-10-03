@@ -15,7 +15,7 @@
 //   tags         comma-separated free-form tags for recall filtering
 //   kind         "fact" = descriptive context, "directive" = active personalization/working instruction
 
-const META_KEYS = ["id", "ttl", "keep", "supersededBy", "supersedes", "tags", "inject", "kind"];
+const META_KEYS = ["id", "ttl", "keep", "supersededBy", "supersedes", "tags", "inject", "kind", "disabled"];
 
 const LEGACY_DIRECTIVE_TAGS = new Set([
   "persona",
@@ -145,6 +145,11 @@ export function isSuperseded(line) {
   return Boolean(factMeta(line).supersededBy);
 }
 
+// Disabled remains a directive in storage, but is excluded from active context.
+export function isDisabledFact(line) {
+  return factMeta(line).disabled === "1";
+}
+
 // Explicit kind metadata is authoritative. Legacy stores predate `kind`, so
 // well-known personalization tags and inject:1 remain a compatibility bridge.
 // kind:fact can explicitly opt a tagged item out of directive semantics.
@@ -198,6 +203,7 @@ export function metaBadges(factLine, now = Date.now()) {
   if (isKeepFact(factLine)) badges.push("KEEP");
   if (isSuperseded(factLine)) badges.push("SUPERSEDED");
   if (isDirectiveFact(factLine)) badges.push("DIRECTIVE");
+  if (isDisabledFact(factLine)) badges.push("DISABLED");
   return badges;
 }
 

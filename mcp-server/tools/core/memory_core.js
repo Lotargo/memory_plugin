@@ -214,6 +214,7 @@ export async function recallFacts(
     if (isSuperseded(factLine)) badges.push("SUPERSEDED");
     if (meta.inject === "1") badges.push("INJECT");
     if (isDirectiveFact(factLine)) badges.push("DIRECTIVE");
+    if (meta.disabled === "1") badges.push("DISABLED");
     if (meta.id) badges.push(`id:${meta.id}`);
     if (meta.tags) badges.push(`tags:${meta.tags}`);
     badges.push(`${p.date} ${p.time}`);
@@ -392,7 +393,7 @@ export async function updateFactText({ id, newText, title, kind, scope, director
       .run(finalFact, key, oldBody);
     linksUpdated = res.changes;
     if (linksUpdated) {
-      const { queueDocumentSyncIfNeeded } = await import("../../graph/knowledge_linker.js");
+      const { touchDocument } = await import("../../graph/knowledge_linker.js");
       const docIds = new Set();
       for (const link of linkedRows) {
         const targetSpec = link.start_line
@@ -417,7 +418,7 @@ export async function updateFactText({ id, newText, title, kind, scope, director
         );
         docIds.add(link.doc_id);
       }
-      for (const docId of docIds) await queueDocumentSyncIfNeeded(db, docId);
+      for (const docId of docIds) await touchDocument(db, docId);
     }
   } catch {}
 

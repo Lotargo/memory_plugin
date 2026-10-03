@@ -30,6 +30,7 @@ if (cliArgs[0] === "snapshots") {
 // otherwise `memory_plugin link` etc. would fall through and start an MCP
 // server that silently blocks on stdin.
 const CLI_COMMANDS = new Set([
+  "dashboard",
   "cli",
   "config",
   "--cli",
@@ -61,6 +62,7 @@ Usage:
   memory_plugin setup --uninstall [--purge] [--purge-cache] [--dry-run] [--yes]
   memory_plugin uninstall [--purge] [--purge-cache] [--dry-run] [--yes] [--opencode|--claude|--codex|--gemini|--antigravity]
   memory_plugin cli                  Interactive terminal UI
+  memory_plugin dashboard [--port N] Local browser panel (Notebook first increment)
   memory_plugin login [--from-env|--api-token|--api-key|--db-url <URL>]
   memory_plugin logout [--api-key]
   memory_plugin auth-status

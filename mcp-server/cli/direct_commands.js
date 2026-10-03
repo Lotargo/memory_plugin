@@ -12,6 +12,11 @@ import {
 import { factBody } from "../fact_format.js";
 
 export async function handleDirectCommands(cliArgs) {
+  if (cliArgs[0] === "dashboard") {
+    const { runDashboard } = await import("../dashboard/server.js");
+    await runDashboard(cliArgs.slice(1));
+    return true;
+  }
   if (cliArgs[0] === "snapshots") {
     const { handleSnapshotCommands } = await import("./snapshot_commands.js");
     return handleSnapshotCommands(cliArgs);

@@ -222,9 +222,11 @@ try {
   await tx.execute("CREATE TABLE notebooks(key TEXT PRIMARY KEY, content TEXT, updated_at INTEGER)");
   await tx.execute({ sql: "INSERT INTO notebooks VALUES (?,?,?)", args: ["global", "# Global Memory\n\n- [legacy] cloud-only fact\n", clock] });
   await tx.commit(); tx.close();
-  settings.mode = "hybrid-sync";
+  settings.mode = "only-local";
+  settings.legacyCloudBackupRequired = true;
   const migrated = await api.enable();
   assert.equal(settings.mode, "cloud-snapshots");
+  assert.equal(settings.legacyCloudBackupRequired, false);
   assert.ok(migrated.cloudBackupId);
   const legacy = await api.load(migrated.cloudBackupId);
   assert.ok(legacy.payload.notebooks[0].content.includes("cloud-only fact"));

@@ -71,8 +71,8 @@ export async function removeDocumentScopes(db, docId, scopeKeys, { deferFinalRem
     .get(docId);
   const remainingScopes = remaining?.cnt || 0;
   if (existing.length > 0 && remainingScopes > 0) {
-    const { queueDocumentSyncIfNeeded } = await import("./graph/knowledge_linker.js");
-    await queueDocumentSyncIfNeeded(db, docId);
+    const { touchDocument } = await import("./graph/knowledge_linker.js");
+    await touchDocument(db, docId);
   }
   return {
     removedScopes: existing.map((row) => row.scope_key),

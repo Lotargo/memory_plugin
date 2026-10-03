@@ -1,0 +1,461 @@
+const $ = id => document.getElementById(id);
+const state = { overview: null, notebook: null, view: 'notebook', selectedRef: null, edit: null, busy: false, loading: false, sequence: 0 };
+const connectionToken = location.hash.slice(1);
+history.replaceState(null, '', location.pathname);
+const names = { notebook: 'Notebook', persona: 'Инструкции', archive: 'История' };
+const reasons = { expired: 'Срок истёк', superseded: 'Заменена', disabled: 'Выключена', invalid: 'Повреждённый формат' };
+const fields = ['title', 'body', 'kind', 'ttl', 'tags', 'keep', 'disabled'];
+const fieldNames = { title: 'Заголовок', body: 'Текст записи', kind: 'Тип', ttl: 'Срок действия', tags: 'Теги', keep: 'Защита от удаления', disabled: 'Инструкция выключена' };
+const focusBeforeDialog = new WeakMap();
+const recordPlural = new Intl.PluralRules('ru');
+let reviewed, reviewedChanged, deleting;
+
+function node(tag, text, className) {
+  const element = document.createElement(tag);
+  if (text != null) element.textContent = text;
+  if (className) element.className = className;
+  return element;
+}
+function notice(text = '', error = false) {
+  $('message').textContent = text;
+  $('message').hidden = !text;
+  $('message').classList.toggle('error', error);
+}
+function inlineError(id, text = '') { $(id).textContent = text; $(id).hidden = !text; }
+function openDialog(id) {
+  const dialog = $(id);
+  if (dialog.open) return;
+  focusBeforeDialog.set(dialog, document.activeElement);
+  dialog.showModal();
+}
+document.querySelectorAll('dialog').forEach(dialog => {
+  dialog.addEventListener('close', () => {
+    const previous = focusBeforeDialog.get(dialog);
+    if (previous?.isConnected && previous.getClientRects().length) previous.focus();
+  });
+  dialog.addEventListener('cancel', event => { if (state.busy) event.preventDefault(); });
+});
+document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', () => {
+  if (!state.busy) $(button.dataset.close).close();
+}));
+function errorText(error) {
+  if (error.status === 401) return 'Подключение истекло или адрес неполный. Откройте полный адрес, выведенный командой dashboard.';
+  if (error.code === 'CONFLICT') return 'Память изменилась в другом клиенте. Ваш текст остаётся в редакторе. Обновите данные и сравните правку с текущей записью перед повторным сохранением.';
+  if (error.code === 'UNSUPPORTED') return /source links/.test(error.message)
+    ? 'Запись связана с источниками. Изменение связанного текста и удаление пока недоступны. Метаданные можно редактировать.'
+    : 'Эта операция пока недоступна для выбранного хранилища. Проверьте режим и идентичность проекта в CLI.';
+  if (error.code === 'NOT_FOUND') return 'Хранилище больше не доступно. Обновите список областей.';
+  if (error.code === 'INVALID') return /already exists/.test(error.message) ? 'Запись с таким текстом уже есть в этой области.' : 'Не удалось сохранить поля записи. Проверьте текст, теги и срок действия.';
+  return 'Не удалось обратиться к хранилищу. Проверьте, что локальная панель запущена, и повторите действие.';
+}
+async function api(path, body) {
+  const response = await fetch(path, {
+    method: body ? 'POST' : 'GET',
+    headers: { Authorization: `Bearer ${connectionToken}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    ...(body ? { body: JSON.stringify(body) } : {})
+  });
+  const result = await response.json();
+  if (!response.ok) throw Object.assign(new Error(result.error), { code: result.code, status: response.status });
+  return result;
+}
+const historical = record => record.reasons.some(reason => ['expired', 'superseded'].includes(reason));
+const selected = () => state.notebook?.records.find(record => record.ref === state.selectedRef);
+const readOnly = () => !!(state.notebook?.readOnly || state.overview?.readOnly);
+const scope = () => state.notebook?.target || state.overview?.targets.find(target => target.key === $('target').value);
+function values(record) {
+  return { title: record?.title || '', body: record?.body || '', kind: record?.kind || (state.view === 'persona' ? 'directive' : 'fact'), ttl: record?.meta?.ttl || '', tags: record?.meta?.tags || '', keep: record?.meta?.keep === '1', disabled: record?.meta?.disabled === '1' };
+}
+function formValues() {
+  return Object.fromEntries(fields.map(field => [field, ['keep', 'disabled'].includes(field) ? $(field).checked : $(field).value.trim()]));
+}
+const dirty = () => state.edit && JSON.stringify(formValues()) !== JSON.stringify(state.edit.baseline);
+async function allowDiscard() {
+  if (state.busy || state.loading) return false;
+  if (!dirty()) return true;
+  if ($('discardDialog').open) return false;
+  openDialog('discardDialog');
+  return new Promise(resolve => {
+    const dialog = $('discardDialog');
+    const leave = () => dialog.close('discard');
+    const stay = () => dialog.close('stay');
+    const finish = () => {
+      $('discardChanges').removeEventListener('click', leave);
+      $('keepEditing').removeEventListener('click', stay);
+      resolve(dialog.returnValue === 'discard');
+    };
+    dialog.returnValue = '';
+    $('discardChanges').addEventListener('click', leave);
+    $('keepEditing').addEventListener('click', stay);
+    dialog.addEventListener('close', finish, { once: true });
+    $('keepEditing').focus();
+  });
+}
+function filteredRecords() {
+  const terms = $('search').value.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
+  return [...(state.notebook?.records || [])].reverse().filter(record => {
+    if (state.view === 'archive' && !historical(record)) return false;
+    if (state.view === 'persona' && record.kind !== 'directive') return false;
+    const filter = $('statusFilter').value;
+    if (state.view !== 'archive' && filter === 'active' && historical(record)) return false;
+    if (filter === 'protected' && record.meta?.keep !== '1') return false;
+    if (filter === 'disabled' && !record.reasons.includes('disabled')) return false;
+    const text = `${record.title || ''} ${record.body} ${record.id || ''} ${record.meta?.tags || ''}`.toLocaleLowerCase();
+    return terms.every(term => text.includes(term));
+  });
+}
+function renderNavigation() {
+  const records = state.notebook?.records || [];
+  $('notebookCount').textContent = records.filter(record => !historical(record)).length;
+  $('directiveCount').textContent = records.filter(record => record.kind === 'directive' && !historical(record)).length;
+  $('archiveCount').textContent = records.filter(historical).length;
+  document.querySelectorAll('[data-view]').forEach(button => {
+    if (button.dataset.view === state.view) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  });
+  $('viewTitle').textContent = names[state.view];
+  $('personaPreview').hidden = state.view !== 'persona';
+  $('personaPreview').disabled = !state.notebook || state.busy;
+  $('scopeName').textContent = scope() ? projectName(scope()) : 'Глобальная память';
+  $('scopeHint').textContent = scope()?.key === 'global' ? 'Доступна во всех проектах' : 'Только выбранный проект';
+  $('create').textContent = state.view === 'persona' ? '+ Новая инструкция' : '+ Новая запись';
+  $('statusFilter').options[0].textContent = state.view === 'archive' ? 'Истёкшие и заменённые' : 'Текущие записи';
+  $('create').disabled = !state.notebook || state.busy || state.loading || readOnly();
+  $('target').disabled = state.busy || state.loading || !state.overview?.targets.length;
+  $('create').title = readOnly() ? 'Редактирование в этом режиме недоступно.' : '';
+  $('create').classList.toggle('primary', !state.edit);
+  $('create').classList.toggle('secondary', !!state.edit);
+  document.title = `Memory — ${names[state.view]}`;
+  document.querySelectorAll('[data-project]').forEach(button => {
+    button.disabled = state.busy || state.loading || !!state.overview?.targets.find(target => target.key === button.dataset.project)?.unavailable;
+    if (button.dataset.project === $('target').value) button.setAttribute('aria-current', 'true');
+    else button.removeAttribute('aria-current');
+  });
+}
+function renderTargets(key) {
+  $('target').replaceChildren(); $('projects').replaceChildren();
+  for (const target of state.overview.targets) {
+    const name = projectName(target);
+    const option = node('option', name.length > 80 ? `${name.slice(0, 77)}…` : name); option.value = target.key; option.disabled = !!target.unavailable;
+    $('target').append(option);
+  }
+  $('target').value = state.overview.targets.some(target => target.key === key && !target.unavailable) ? key : 'global';
+  renderProjects();
+  $('version').textContent = `v${state.overview.version}`;
+}
+function projectName(target) {
+  // Display labels only: the exact store key still addresses every operation.
+  if (target.name.length > 120 || /<!--|-->|[<>\r\n]/.test(target.name)) return 'Неизвестное хранилище';
+  if (target.name.startsWith('git_') || target.name.startsWith('git:')) {
+    if (target.key.startsWith('git:') && target.key.includes('/')) return target.key.split('/').at(-1);
+    const repository = /^git_(?:github_com|gitlab_com|bitbucket_org)_[^_]+_(.+)$/.exec(target.name);
+    if (repository) return repository[1];
+    const local = /^git_local_(.+)_(\d{8,})$/.exec(target.name);
+    if (local) return `${local[1]} · ${local[2].slice(-4)}`;
+  }
+  return target.name;
+}
+function renderProjects() {
+  const all = state.overview?.targets.filter(target => target.key !== 'global') || [];
+  const terms = $('projectSearch').value.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
+  const matches = all.filter(target => {
+    const text = `${projectName(target)} ${target.name} ${target.key} ${target.aliases.map(alias => alias.alias).join(' ')}`.toLocaleLowerCase();
+    return terms.every(term => text.includes(term));
+  }).sort((a, b) => projectName(a).localeCompare(projectName(b), 'ru', { numeric: true }));
+  $('projects').replaceChildren();
+  $('projectCount').textContent = terms.length ? `${matches.length}/${all.length}` : all.length || '';
+  const groups = [
+    { title: null, targets: matches.filter(target => !target.unavailable && target.key.startsWith('git:')) },
+    { title: 'Другие хранилища', targets: matches.filter(target => !target.unavailable && !target.key.startsWith('git:')) },
+    { title: 'Требуют проверки', targets: matches.filter(target => target.unavailable) }
+  ];
+  for (const group of groups) {
+    if (!group.targets.length) continue;
+    const list = node('ul');
+    for (const target of group.targets) {
+      const item = node('li'), button = node('button'), marker = node('span', null, 'project-marker');
+      marker.setAttribute('aria-hidden', 'true');
+      button.append(marker, node('span', projectName(target), 'project-name')); button.type = 'button'; button.dataset.project = target.key;
+      button.disabled = !!target.unavailable || state.busy || state.loading;
+      button.title = `${target.key}${target.unavailable ? '\nТребуется исправление идентичности в CLI' : ''}`;
+      if (target.unavailable) button.setAttribute('aria-label', `${projectName(target)} — требуется проверка идентичности`);
+      if (target.key === $('target').value) button.setAttribute('aria-current', 'true');
+      button.addEventListener('click', () => selectTarget(target.key)); item.append(button); list.append(item);
+    }
+    if (group.title) {
+      const details = node('details', null, 'project-group'), summary = node('summary', group.title);
+      summary.append(node('span', String(group.targets.length), 'nav-count'));
+      details.open = !!terms.length || group.targets.some(target => target.key === $('target').value);
+      details.append(summary, list); $('projects').append(details);
+    } else $('projects').append(list);
+  }
+  if (!matches.length) $('projects').append(node('p', all.length ? 'Проект не найден' : 'Пока нет проектов', 'caption'));
+}
+function renderList() {
+  const records = filteredRecords();
+  $('records').replaceChildren(); $('records').setAttribute('aria-busy', String(state.loading));
+  $('resultCount').textContent = state.loading ? '—' : `${records.length} ${{one:'запись',few:'записи',many:'записей',other:'записи'}[recordPlural.select(records.length)]}`;
+  $('listState').hidden = !state.loading && !!records.length;
+  $('listState').textContent = state.loading ? 'Загружаем память…' : !state.notebook ? 'Данные недоступны' : $('search').value ? 'Ничего не найдено. Попробуйте другой запрос.' : state.view === 'archive' ? 'Истёкших и заменённых записей нет.' : 'В этой области пока нет записей с выбранным состоянием.';
+  for (const record of records) {
+    const li = node('li'), button = node('button', null, 'record-row'); button.type = 'button';
+    button.setAttribute('aria-pressed', String(record.ref === state.selectedRef));
+    const top = node('span', null, 'row-top');
+    top.append(node('span', record.invalid ? 'Требует исправления' : record.kind === 'directive' ? 'Инструкция' : 'Факт'), node('span', record.date || 'Без даты', 'row-date'));
+    button.append(top, node('span', record.title || 'Запись без заголовка', 'row-title'), node('span', record.body, 'row-summary'));
+    const statuses = record.reasons.map(reason => reasons[reason]);
+    if (record.meta?.keep === '1') statuses.push('Защищена');
+    if (statuses.length) button.append(node('span', statuses.join(' · '), 'row-state'));
+    button.addEventListener('click', () => selectRecord(record.ref)); li.append(button); $('records').append(li);
+  }
+  $('updatedAt').textContent = state.notebook ? `Обновлено ${new Date(state.notebook.observedAt).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })}` : 'Нет актуальных данных';
+  $('modeLabel').textContent = state.overview?.mode || '';
+}
+function property(container, label, value, className) { container.append(node('dt', label), node('dd', value || '—', className)); }
+function renderReader() {
+  const record = selected();
+  $('detailEmpty').hidden = !!record || !!state.edit;
+  $('reader').hidden = !record || !!state.edit;
+  $('editForm').hidden = !state.edit;
+  if (!record || state.edit) return;
+  $('recordType').textContent = record.kind === 'directive' ? 'Инструкция' : 'Факт';
+  $('recordTitle').textContent = record.title || 'Запись без заголовка';
+  $('recordBody').textContent = record.body;
+  $('recordStatuses').replaceChildren();
+  for (const reason of record.reasons) $('recordStatuses').append(node('span', reasons[reason], 'status-label inactive'));
+  if (record.meta?.keep === '1') $('recordStatuses').append(node('span', 'Защищена от удаления', 'status-label'));
+  $('recordTags').replaceChildren();
+  for (const tag of (record.meta?.tags || '').split(',').filter(Boolean)) $('recordTags').append(node('span', `#${tag.trim()}`));
+  $('recordProperties').replaceChildren();
+  property($('recordProperties'), 'Область', scope()?.name);
+  property($('recordProperties'), 'Ключ хранилища', scope()?.key, 'identifier');
+  property($('recordProperties'), 'ID записи', record.id || 'Legacy — присвоится при сохранении', 'identifier');
+  property($('recordProperties'), 'Создана', [record.date, record.time].filter(Boolean).join(' '));
+  property($('recordProperties'), 'Срок действия', record.meta?.ttl || 'Без ограничения');
+  if (record.meta?.supersededBy) property($('recordProperties'), 'Заменена записью', record.meta.supersededBy, 'identifier');
+  if (record.meta?.supersedes) property($('recordProperties'), 'Заменяет запись', record.meta.supersedes, 'identifier');
+  $('sourcesSection').hidden = !record.links?.length; $('recordSources').replaceChildren();
+  for (const link of record.links || []) $('recordSources').append(node('li', `${link.title || link.docId}${link.startLine ? ` · строки ${link.startLine}–${link.endLine || link.startLine}` : ''}`));
+  $('edit').disabled = !!record.invalid || state.busy || readOnly(); $('delete').disabled = !!record.invalid || state.busy || readOnly();
+  $('edit').title = readOnly() ? 'Редактирование в этом режиме недоступно.' : '';
+}
+function render() { renderNavigation(); renderList(); renderReader(); }
+async function loadTarget(key, keepRef = null) {
+  const sequence = ++state.sequence;
+  state.notebook = null; state.selectedRef = null; state.edit = null; state.loading = true; render();
+  try {
+    const notebook = await api(`/api/notebook?key=${encodeURIComponent(key)}`);
+    if (sequence !== state.sequence) return;
+    state.notebook = notebook;
+    if (notebook.readOnly) notice('В этом режиме доступен только просмотр.');
+    state.selectedRef = notebook.records.some(record => record.ref === keepRef) ? keepRef : matchMedia('(min-width:721px)').matches ? filteredRecords()[0]?.ref : null;
+  } catch (error) { if (sequence === state.sequence) notice(errorText(error), true); }
+  finally { if (sequence === state.sequence) { state.loading = false; render(); } }
+}
+async function refresh() {
+  if (!(await allowDiscard())) return;
+  const key = $('target').value, ref = state.selectedRef;
+  state.edit = null; state.loading = true; $('refresh').disabled = true; notice(); renderNavigation();
+  try {
+    state.overview = await api('/api/overview');
+    renderTargets(key);
+    if (state.overview.unavailable) {
+      state.notebook = null; state.loading = false; render();
+      notice('Панель поддерживает локальные данные в режимах only-local и cloud-snapshots. Текущий режим недоступен; переключение выполняется в CLI.', true);
+    } else await loadTarget($('target').value, ref);
+  } catch (error) { state.notebook = null; state.loading = false; render(); notice(errorText(error), true); }
+  finally { $('refresh').disabled = false; }
+}
+async function selectTarget(key) {
+  if (!(await allowDiscard())) { $('target').value = state.notebook?.target.key || 'global'; return; }
+  $('target').value = key;
+  const selectedGroup = [...$('projects').querySelectorAll('[data-project]')].find(button => button.dataset.project === key)?.closest('details');
+  if (selectedGroup) selectedGroup.open = true;
+  closeNavigation(); document.body.classList.remove('detail-open'); notice();
+  await loadTarget(key);
+}
+async function selectView(view) {
+  if (!(await allowDiscard())) return;
+  state.edit = null; state.view = view; $('search').value = ''; $('statusFilter').value = 'active';
+  state.selectedRef = matchMedia('(min-width:721px)').matches ? filteredRecords()[0]?.ref : null;
+  closeNavigation(); document.body.classList.remove('detail-open'); notice(); render();
+}
+async function selectRecord(ref) {
+  if (!(await allowDiscard())) return;
+  state.edit = null; state.selectedRef = ref; document.body.classList.add('detail-open'); render();
+  if (matchMedia('(max-width:720px)').matches) $('backToList').focus();
+}
+function clearFieldErrors() {
+  for (const field of ['title', 'body', 'ttl', 'tags']) { $(field).removeAttribute('aria-invalid'); inlineError(`${field}Error`); }
+  inlineError('editorError');
+}
+function updateDraft() {
+  if (!state.edit) return;
+  $('draftState').textContent = dirty() ? 'Не сохранено' : 'Без изменений';
+  $('disabledOption').hidden = $('kind').value !== 'directive';
+}
+async function startEdit(record = null) {
+  if (!state.notebook || readOnly() || !(await allowDiscard())) return;
+  state.edit = { key: state.notebook.target.key, version: state.notebook.version, ref: record?.ref || null, baseline: values(record) };
+  for (const field of fields) { if (['keep', 'disabled'].includes(field)) $(field).checked = state.edit.baseline[field]; else $(field).value = state.edit.baseline[field]; }
+  $('editorHeading').textContent = record ? 'Редактирование записи' : 'Новая запись';
+  $('editScope').textContent = `${scope().name} · ${scope().key}${record?.id ? ` · ID ${record.id}` : ''}`;
+  clearFieldErrors(); updateDraft(); document.body.classList.add('detail-open'); render(); $('title').focus();
+}
+function validate(input) {
+  clearFieldErrors();
+  const errors = {};
+  for (const field of ['title', 'body']) {
+    if (!input[field]) errors[field] = field === 'title' ? 'Укажите заголовок.' : 'Введите текст записи.';
+    else if (/[\r\n]|<!--|-->/.test(input[field])) errors[field] = 'Используйте одну строку без комментариев метаданных.';
+  }
+  if (input.title.includes('*')) errors.title = 'Заголовок не должен содержать звёздочки.';
+  if (input.ttl && (!/^\d+\s*[hdwm]?$/.test(input.ttl) || !(parseInt(input.ttl, 10) > 0))) errors.ttl = 'Укажите положительный срок, например 90d, 2w или 24h.';
+  if (input.ttl.length > 20) errors.ttl = 'Срок должен быть короче 21 символа.';
+  if (/[\r\n:]|<!--|-->/.test(input.tags)) errors.tags = 'Теги разделяются запятыми; двоеточия и комментарии не поддерживаются.';
+  for (const [field, text] of Object.entries(errors)) { $(field).setAttribute('aria-invalid', 'true'); inlineError(`${field}Error`, text); }
+  if (Object.keys(errors).length) $(Object.keys(errors)[0]).focus();
+  return !Object.keys(errors).length;
+}
+function displayValue(field, value) {
+  if (typeof value === 'boolean') return value ? 'Да' : 'Нет';
+  if (field === 'kind') return value === 'directive' ? 'Инструкция' : 'Факт';
+  return value || (field === 'ttl' ? 'Без ограничения' : 'Не указано');
+}
+function review(event) {
+  event.preventDefault();
+  if (!state.edit || state.busy) return;
+  const input = formValues();
+  if (!validate(input)) return;
+  const changed = fields.filter(field => input[field] !== state.edit.baseline[field]);
+  if (state.edit.ref && !changed.length) { if ($('reviewDialog').open) $('reviewDialog').close(); inlineError('editorError', 'Изменений нет. Измените поле или отмените редактирование.'); return; }
+  reviewed = { ...input }; reviewedChanged = changed; $('changeList').replaceChildren();
+  for (const field of state.edit.ref ? changed : fields.filter(field => input[field])) {
+    const section = node('section', null, 'change-item'); section.append(node('h3', fieldNames[field]));
+    const changes = node('div', null, 'change-values');
+    if (state.edit.ref) { const before = node('div', null, 'change-value'); before.append(node('span', 'Было', 'caption'), node('span', displayValue(field, state.edit.baseline[field]))); changes.append(before); }
+    const after = node('div', null, 'change-value after'); after.append(node('span', state.edit.ref ? 'Станет' : 'Новая запись', 'caption'), node('span', displayValue(field, input[field]))); changes.append(after); section.append(changes); $('changeList').append(section);
+  }
+  $('reviewScope').textContent = `${scope().name} · ${state.edit.key}${state.edit.ref ? ` · ${state.edit.ref}` : ''}`;
+  $('reviewHeading').textContent = state.edit.ref ? 'Проверка изменений' : 'Создание записи';
+  inlineError('reviewError'); $('refreshConflict').hidden = true; openDialog('reviewDialog');
+}
+function setBusy(busy) {
+  state.busy = busy;
+  $('confirmSave').disabled = busy; $('confirmSave').textContent = busy ? 'Сохраняем…' : 'Сохранить запись';
+  $('reviewDialog').setAttribute('aria-busy', String(busy));
+  $('refreshConflict').disabled = busy;
+  $('confirmDelete').disabled = busy || (deleting?.protected && !$('protectedConfirm').checked);
+  $('confirmDelete').textContent = busy ? 'Удаляем…' : 'Удалить запись';
+  $('deleteDialog').setAttribute('aria-busy', String(busy));
+  $('refresh').disabled = busy; renderNavigation(); renderReader();
+}
+function acceptMutation(result, message) {
+  state.notebook = result.notebook; state.selectedRef = result.ref || filteredRecords()[0]?.ref || null; state.edit = null;
+  render();
+  const context = result.persona.length ? ' Для активных сессий обновите контекст клиента.' : '';
+  notice(result.status === 'partial' ? 'Запись сохранена, но синхронизация инструкций клиента завершилась с ошибкой. Повторите синхронизацию в CLI.' : message + context, result.status === 'partial');
+}
+async function save() {
+  if (!state.edit || !reviewed || state.busy) return;
+  let saved = false;
+  setBusy(true); inlineError('reviewError');
+  try {
+    const result = await api('/api/notebook', { key: state.edit.key, expectedVersion: state.edit.version, ref: state.edit.ref, action: state.edit.ref ? 'update' : 'create', fields: reviewed });
+    $('reviewDialog').close(); acceptMutation(result, 'Запись сохранена.'); saved = true;
+  } catch (error) { inlineError('reviewError', errorText(error)); $('refreshConflict').hidden = error.code !== 'CONFLICT'; }
+  finally { setBusy(false); if (saved) $('edit').focus(); else ($('refreshConflict').hidden ? $('confirmSave') : $('refreshConflict')).focus(); }
+}
+async function refreshConflict() {
+  if (!state.edit || !reviewed || state.busy) return;
+  setBusy(true);
+  let refreshed = false;
+  try {
+    const notebook = await api(`/api/notebook?key=${encodeURIComponent(state.edit.key)}`);
+    const matches = notebook.records.filter(record => record.ref === state.edit.ref);
+    if (state.edit.ref && (matches.length !== 1 || state.edit.ref.startsWith('legacy:'))) {
+      inlineError('reviewError', 'Запись удалена, её ID неоднозначен или это legacy-запись. Черновик оставлен в редакторе. Обновите список и выберите запись заново; автоматическое сопоставление недоступно.');
+      return;
+    }
+    const baseline = state.edit.ref ? values(matches[0]) : state.edit.baseline;
+    // Carry only fields the user changed; retain unrelated edits from the other client.
+    const merged = state.edit.ref ? { ...baseline, ...Object.fromEntries(reviewedChanged.map(field => [field, reviewed[field]])) } : reviewed;
+    state.notebook = notebook; state.edit.version = notebook.version; state.edit.baseline = baseline;
+    for (const field of fields) { if (['keep', 'disabled'].includes(field)) $(field).checked = merged[field]; else $(field).value = merged[field]; }
+    if (merged.kind === 'fact') $('disabled').checked = false;
+    updateDraft(); render(); refreshed = true;
+  } catch (error) { inlineError('reviewError', errorText(error)); }
+  finally {
+    setBusy(false);
+    if (refreshed) { review({ preventDefault() {} }); notice('Данные обновлены. Проверьте правку относительно текущей записи; сохранение ещё не выполнено.'); }
+  }
+}
+function requestDelete() {
+  const record = selected(); if (!record || record.invalid || state.busy || readOnly()) return;
+  deleting = { key: scope().key, expectedVersion: state.notebook.version, ref: record.ref, protected: record.meta?.keep === '1' };
+  $('deleteSummary').textContent = `«${record.title || 'Без заголовка'}» · ${scope().name} · ${scope().key} · ${record.ref}`;
+  $('protectedLabel').hidden = !deleting.protected; $('protectedConfirm').checked = false;
+  $('confirmDelete').disabled = deleting.protected; inlineError('deleteError'); openDialog('deleteDialog');
+  $('deleteDialog').querySelector('[data-close]').focus();
+}
+async function removeRecord() {
+  if (!deleting || state.busy || deleting.protected && !$('protectedConfirm').checked) return;
+  setBusy(true); inlineError('deleteError');
+  try {
+    const result = await api('/api/notebook', { ...deleting, action: 'delete', confirmDelete: true, confirmProtected: $('protectedConfirm').checked });
+    $('deleteDialog').close(); acceptMutation(result, 'Запись удалена из выбранной области.');
+    if (matchMedia('(max-width:720px)').matches) document.body.classList.remove('detail-open');
+  } catch (error) { inlineError('deleteError', errorText(error)); }
+  finally { setBusy(false); }
+}
+async function previewPersona() {
+  if (!state.notebook || state.busy) return;
+  $('personaScope').textContent = scope().name; $('personaContent').replaceChildren(node('p', 'Загружаем действующие инструкции…', 'caption')); openDialog('personaDialog');
+  try {
+    const preview = await api(`/api/persona?key=${encodeURIComponent(scope().key)}`);
+    $('personaContent').replaceChildren();
+    for (const [key, label] of [['global', 'Глобальные инструкции'], ['project', 'Инструкции проекта']]) {
+      if (key === 'project' && scope().key === 'global') continue;
+      const section = node('section', null, 'persona-section'); section.append(node('h3', label));
+      const lines = preview[key].split('\n').filter(line => /^\d+\.\s/.test(line));
+      if (lines.length) {
+        const list = node('ol');
+        for (const line of lines) {
+          const text = line.replace(/^\d+\.\s/, ''), match = /^\*\*(.*?)\*\* — (.*)$/.exec(text), item = node('li');
+          if (match) item.append(node('strong', match[1]), node('p', match[2])); else item.textContent = text;
+          list.append(item);
+        }
+        section.append(list);
+      } else section.append(node('p', 'Действующих инструкций нет.', 'caption'));
+      $('personaContent').append(section);
+    }
+  } catch (error) { $('personaContent').replaceChildren(node('p', errorText(error), 'inline-error')); }
+}
+function showSystem() {
+  $('systemProperties').replaceChildren();
+  const overview = state.overview;
+  for (const [label, value] of [['Версия', overview?.version], ['Режим', overview?.mode], ['Хранилище', overview?.memoryDir], ['Известных проектов', overview ? String(overview.targets.filter(target => target.key !== 'global').length) : 'Не проверено'], ['Проверено', overview ? new Date(overview.observedAt).toLocaleString('ru') : 'Нет актуальных данных'], ['Модели', 'Состояние не проверялось'], ['Облако', 'Запросы не выполнялись'], ['Клиенты', 'Состояние не проверялось']]) property($('systemProperties'), label, value);
+  openDialog('systemDialog');
+}
+function closeNavigation() { if ($('navigationDialog').open) $('navigationDialog').close(); }
+$('navigation').addEventListener('click', () => { $('mobileNavHost').append($('sidebar')); openDialog('navigationDialog'); });
+$('navigationDialog').addEventListener('close', () => $('shell').prepend($('sidebar')));
+$('target').addEventListener('change', event => selectTarget(event.target.value));
+document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => selectView(button.dataset.view)));
+$('search').addEventListener('input', renderList); $('statusFilter').addEventListener('change', renderList);
+$('projectSearch').addEventListener('input', renderProjects);
+$('refresh').addEventListener('click', refresh); $('create').addEventListener('click', () => startEdit());
+$('edit').addEventListener('click', () => startEdit(selected())); $('delete').addEventListener('click', requestDelete);
+$('backToList').addEventListener('click', () => { document.body.classList.remove('detail-open'); $('search').focus(); });
+$('editForm').noValidate = true; $('editForm').addEventListener('submit', review);
+$('editForm').addEventListener('input', updateDraft);
+$('kind').addEventListener('change', () => { if ($('kind').value === 'fact') $('disabled').checked = false; updateDraft(); });
+$('cancelEdit').addEventListener('click', async () => { if (await allowDiscard()) { state.edit = null; render(); if (selected()) $('edit').focus(); else document.body.classList.remove('detail-open'); } });
+$('confirmSave').addEventListener('click', save); $('confirmDelete').addEventListener('click', removeRecord);
+$('refreshConflict').addEventListener('click', refreshConflict);
+$('protectedConfirm').addEventListener('change', () => { $('confirmDelete').disabled = !$('protectedConfirm').checked; });
+$('personaPreview').addEventListener('click', previewPersona); $('system').addEventListener('click', showSystem);
+document.addEventListener('keydown', event => {
+  if (event.key === '/' && !document.querySelector('dialog[open]') && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) { event.preventDefault(); $('search').focus(); }
+});
+window.addEventListener('beforeunload', event => { if (dirty() || state.busy) { event.preventDefault(); event.returnValue = ''; } });
+refresh();

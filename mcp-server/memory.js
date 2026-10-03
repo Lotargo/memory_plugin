@@ -3,8 +3,18 @@ import { existsSync, mkdirSync } from "fs";
 import { join, basename, resolve } from "path";
 import { homedir } from "os";
 import { resolveProjectIdentity } from "./identity.js";
-import { logger } from "./logger.js";
 import { atomicWrite, withSnapshotLock } from "./storage/snapshot_lock.js";
+import { createHash } from "node:crypto";
+
+// Read versions follow the returned array, including in-place CLI/MCP edits.
+const readVersions = new WeakMap();
+export function notebookVersion(entries) {
+  return createHash("sha256").update(JSON.stringify(entries)).digest("hex");
+}
+function observed(entries) {
+  readVersions.set(entries, notebookVersion(entries));
+  return entries;
+}
 
 function resolveMemoryDir() {
   if (process.env.MEMORY_DIR) return process.env.MEMORY_DIR;
@@ -107,30 +117,17 @@ export function parseMeta(content) {
 
 export async function readMemory(key) {
   if (!key) return [];
-  const { getConfig } = await import("./config/config_manager.js");
+  const { getConfig, assertLocalMemoryReady } = await import("./config/config_manager.js");
   const config = getConfig();
-  if (config.mode === "only-cloud") {
-    try {
-      const { getDatabase } = await import("./db/database.js");
-      const db = await getDatabase();
-      const row = await db.prepare("SELECT content FROM notebooks WHERE key = ?;").get(key);
-      if (row && row.content) {
-        return row.content.split("\n").filter((l) => l.startsWith("- ["));
-      }
-    } catch (err) {
-      logger.error("Failed to read memory from cloud database:", err.message);
-    }
-    return [];
-  }
+  assertLocalMemoryReady(config);
 
   const fp = memoryPath(key);
-  // Hybrid mode is local-first: reads must never wait for Turso. Background
-  // synchronization refreshes this local replica independently.
+  // Local working modes read directly from disk without cloud access.
   if (existsSync(fp)) {
     const content = await readFile(fp, "utf-8");
-    return content.split("\n").filter((l) => l.startsWith("- ["));
+    return observed(content.split("\n").filter((l) => l.startsWith("- [")));
   }
-  return [];
+  return observed([]);
 }
 
 export async function readMemoryRaw(key) {
@@ -154,72 +151,38 @@ export function extractFacts(content) {
 
 export async function writeMemoryFile(key, content) {
   if (!key) return;
+  const { assertLocalMemoryReady } = await import("./config/config_manager.js");
+  assertLocalMemoryReady();
   await withSnapshotLock(MEMORY_DIR, () => atomicWrite(memoryPath(key), content));
 }
 
-export async function writeMemory(key, entries) {
+export async function writeMemory(key, entries, { expectedVersion = readVersions.get(entries), localOnly = false } = {}) {
   if (!key) return;
   const content = buildMemoryContent(key, entries);
 
-  const { getConfig } = await import("./config/config_manager.js");
+  const { getConfig, assertLocalMemoryReady } = await import("./config/config_manager.js");
   const config = getConfig();
-  if (config.mode === "only-cloud") {
-    try {
-      const { getDatabase } = await import("./db/database.js");
-      const db = await getDatabase();
-      await db.prepare(`
-        INSERT INTO notebooks (key, content, updated_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(key) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at;
-      `).run(key, content, Date.now());
-    } catch (err) {
-      logger.error("Failed to write memory to cloud database:", err.message);
-    }
-    return;
+  assertLocalMemoryReady(config);
+  if (localOnly && !["only-local", "cloud-snapshots"].includes(config.mode)) {
+    throw Object.assign(new Error("Storage mode changed. Reload before saving."), { code: "CONFLICT" });
   }
 
-  await writeMemoryFile(key, content);
-
-  if (config.mode === "hybrid-sync") {
-    try {
-      const { enqueueSyncTask } = await import("./db/sync_queue.js");
-      await enqueueSyncTask("write_memory", key, content);
-    } catch (err) {
-      logger.error("Failed to queue memory sync task:", err.message);
+  await withSnapshotLock(MEMORY_DIR, async () => {
+    if (expectedVersion !== undefined && notebookVersion(await readMemory(key)) !== expectedVersion) {
+      const error = new Error("Notebook changed in another client. Reload before saving.");
+      error.code = "CONFLICT";
+      throw error;
     }
-  }
+    await atomicWrite(memoryPath(key), content);
+    readVersions.set(entries, notebookVersion(entries));
+  });
+
 }
 
 export async function listProjectStores() {
-  const { getConfig } = await import("./config/config_manager.js");
+  const { getConfig, assertLocalMemoryReady } = await import("./config/config_manager.js");
   const config = getConfig();
-  if (config.mode === "only-cloud") {
-    try {
-      const { getDatabase } = await import("./db/database.js");
-      const db = await getDatabase();
-      const rows = await db.prepare("SELECT key, content FROM notebooks WHERE key != ?;").all(GLOBAL_KEY);
-      const stores = [];
-      for (const row of rows) {
-        const key = row.key;
-        const content = row.content;
-        const facts = content.split("\n").filter((l) => l.startsWith("- ["));
-        const meta = parseMeta(content);
-        stores.push({
-          key,
-          path: meta.key || key,
-          basename: basename(meta.key || key) || key,
-          file: `${slugify(key)}.md`,
-          count: facts.length,
-          legacy: !meta.key || (!meta.key.startsWith("git:") && !meta.key.startsWith("git_")),
-        });
-      }
-      stores.sort((a, b) => a.basename.localeCompare(b.basename));
-      return stores;
-    } catch (err) {
-      logger.error("Failed to list memory stores from cloud database:", err.message);
-    }
-    return [];
-  }
+  assertLocalMemoryReady(config);
 
   const stores = [];
   const files = await readdir(MEMORY_DIR).catch(() => []);

@@ -29,6 +29,7 @@ export async function runCli() {
 
 Usage:
   memory-cli                         Launch the interactive TUI
+  memory-cli dashboard [--port N]    Launch the local browser panel
   memory-cli login [--from-env|--api-token|--api-key|--db-url <URL>]
   memory-cli logout [--api-key]
   memory-cli auth-status
@@ -73,14 +74,14 @@ Options:
       {
         label: "KNOWLEDGE BASE & STORAGE MANAGEMENT",
         value: "storage",
-        hint: `${stats.docCount} Docs | ${stats.chunkCount} Chunks | ${stats.factCount} Facts`,
+        hint: stats.unavailable ? "Migration required" : `${stats.docCount} Docs | ${stats.chunkCount} Chunks | ${stats.factCount} Facts`,
         info: "Manage facts, RAG documents, snapshots, models, and database",
       },
       {
         label: "CLOUD SYNCHRONIZATION & TURSO",
         value: "cloud",
         hint: config.mode.toUpperCase(),
-        info: "Login, logout, API keys, operational mode, and conflict strategy",
+        info: "Login, logout, API keys, operational mode, and ZIP checkpoints",
       },
       {
         label: "GLOBAL PROMPT & INTEGRATION MANAGEMENT",
@@ -222,7 +223,7 @@ async function showCategorySubmenu(category, config, stats, initialIndex = 0) {
       items = [
         {
           label: "[NOTEBOOK] Layer 1 Facts",
-          badge: `${stats.factCount} Facts Saved`,
+          badge: stats.unavailable ? "Migration required" : `${stats.factCount} Facts Saved`,
           value: "notebook",
           info: "Inspect & delete durable user identity facts (global & project)",
         },
@@ -238,13 +239,13 @@ async function showCategorySubmenu(category, config, stats, initialIndex = 0) {
         },
         {
           label: "[RAG DOCS] Layer 2 RAG Base",
-          badge: `${stats.docCount} Docs / ${stats.chunkCount} Chunks`,
+          badge: stats.unavailable ? "Migration required" : `${stats.docCount} Docs / ${stats.chunkCount} Chunks`,
           value: "rag_docs",
           info: "Inspect ingested Markdown/code docs & delete chunks from SQLite",
         },
         {
           label: "[REINDEX] Re-Embed Documents with Current Model",
-          badge: `${stats.docCount} Docs`,
+          badge: stats.unavailable ? "Migration required" : `${stats.docCount} Docs`,
           value: "reindex_embeddings",
           info: "Recompute all stored vectors with the active embedding model & vector dimension (use after switching model/dimension). Preserves facts, links, FTS & graph edges",
         },
@@ -297,17 +298,11 @@ async function showCategorySubmenu(category, config, stats, initialIndex = 0) {
           label: "Operational Mode",
           badge: config.mode.toUpperCase(),
           value: "cloud_mode",
-          info: "Choose local-only, ZIP cloud checkpoints (recommended), or legacy live synchronization",
+          info: "Choose local-only storage or ZIP cloud checkpoints (recommended)",
         },
         { label: "ZIP Snapshot Schedule", value: "cloud_snapshot_schedule", badge: (config.snapshotSyncMode || "manual").toUpperCase(),
           info: `Manual/off or arbitrary hours; current interval ${config.snapshotIntervalHours} h. Commands: memory-cli snapshots help` },
         { label: "Send Current ZIP Snapshot", value: "cloud_snapshot_upload", info: "Save locally, then upload one cloud row; skip unchanged state" },
-        {
-          label: "Conflict Strategy",
-          badge: (config.conflictStrategy || "merge").toUpperCase(),
-          value: "conflict_strategy",
-          info: "How hybrid-sync resolves differing local vs cloud stores: merge | cloud-wins | local-wins",
-        },
       ];
       break;
 

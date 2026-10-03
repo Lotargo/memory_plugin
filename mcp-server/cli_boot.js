@@ -30,7 +30,10 @@ if (major < MIN_MAJOR || (major === MIN_MAJOR && minor < MIN_MINOR)) {
 }
 
 // Version is OK — hand off to the real CLI.
-import("./cli.js").then(m => {
+if (process.argv[2] === "dashboard") {
+  const { runDashboard } = await import("./dashboard/server.js");
+  await runDashboard(process.argv.slice(3));
+} else import("./cli.js").then(m => {
   if (process.argv[1] && process.argv[1].includes("cli_boot.js")) {
     m.runCli().catch((err) => {
       console.error("CLI error:", err);
