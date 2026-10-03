@@ -5,24 +5,30 @@ All notable changes to `@lotargo/memory_plugin` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.7.1] - 2026-09-29
+## [1.7.1] - Unreleased
 
 ### Added
 
 - Local-authoritative `cloud-snapshots` mode: standalone full-memory ZIP archives (DEFLATE level 9) stored as one Turso BLOB row each. Includes all Notebook projects, Git identities, RAG raw text/vectors/scopes/links; excludes secrets, multimedia and caches. Explicit transition saves both local and legacy-cloud backups; no automatic merge or bootstrap restore.
 - Manual/off or arbitrary-hour checkpoint scheduling, persisted deadlines, unchanged-state skipping, one current upload after downtime, local ZIP fallback on quota/network failure, latest-only pending pointer and bounded backoff. BLOCKED/429/402 suspend automatic cloud attempts until a successful manual upload.
-- `memory-cli snapshots` and MCP/OpenCode `manage_snapshots`: metadata listing, local backup, upload, exact restore with preview/pre-restore backup/recovery journal, pinning and period/age cleanup with default latest/pinned protection. Legacy live-sync modes and RAG-only export/import remain available.
-- Isolated integration coverage for full restore, quotas, scheduling, cloud call count, period deletion, corruption, interruption recovery and legacy migration.
+- `memory-cli snapshots` and MCP/OpenCode `manage_snapshots`: metadata listing, local backup, upload, exact restore with preview/pre-restore backup/recovery journal, pinning and period/age cleanup with default latest/pinned protection. RAG-only export/import remain available separately.
+- Local Notebook dashboard through `memory_plugin dashboard` and `memory-cli dashboard`: global/project browsing, project and record search, structured editing, protected deletion, directive enable/disable, persona preview, responsive navigation, and system/light/dark themes. The loopback server uses a per-run connection token and the shared Notebook service without cloud polling or model loading. This is the first panel increment; RAG editing, settings, cloud administration and the full panel plan remain incomplete.
+- Isolated integration coverage for the dashboard, concurrent Notebook edits, full snapshot restoration, quotas, scheduling, corruption, interruption recovery, local RAG deletion, and both retired storage-mode migrations.
+
+### Removed
+
+- Removed `hybrid-sync` and `only-cloud`, the live Notebook/RAG push/pull worker, direct cloud working operations, mutation queue, conflict settings and failover from storage, setup, CLI and the local panel. The supported modes are `only-local` and `cloud-snapshots`.
+- Existing `hybrid-sync` configurations serve local memory without cloud traffic until an explicit `memory-cli snapshots enable` transition. Separate pinned local/legacy-cloud backups are preserved before switching; a failed backup retains the migration flag and blocks uploads. New selections of the removed mode fail before setup side effects. Legacy cloud tables and local backlogs are not purged by the upgrade.
+- Existing `only-cloud` configurations report `MIGRATION_REQUIRED` until an explicit two-step transition downloads a checked full cloud archive and restores it locally with a preview/confirmation. Failed downloads or restores retain migration flags and block uploads; verified downloads are reusable, and restoration journals recover configuration after interruption. Ordinary memory and RAG operations no longer initialize cloud clients or retry remote SQL.
 
 ### Fixed
 
 - Snapshot CLI rejects unknown/duplicate flags, extra arguments and incomplete deletion periods before touching history. ISO dates without a zone consistently use UTC; invalid calendar dates fail. All CLI entrypoints preserve failure exit codes and route snapshot help correctly.
 - OpenCode plugin entrypoint (`opencode-plugin/main.js`) now exports a V2 plugin definition (`default` object with `id` and `setup`) instead of a V1 plugin function. Newer OpenCode loaders reject the old shape with `Plugin must export a default definition with an id and an effect or setup function`, which left the plugin inactive. All 19 tools are registered via `ctx.tool.transform` and Notebook/RAG memory injection runs via `ctx.session.hook("context")`. The legacy V1 named export is kept for existing tests.
 - Notebook reads and mutations now share project targeting: explicit directories override the current worktree, and existing canonical/legacy store keys target the same store for recall, remember, update, and forget. Unknown targets no longer fall back to a different project. Invalid mutation scopes, empty forget queries, and non-boolean force flags are rejected; deletion replies identify the actual store and removed count.
-- Hybrid RAG deletion now atomically persists the local tombstone and cloud deletion queue entry. Reverse sync honors pending local deletions, queue failures roll back the purge without losing its last visible scope, and replies distinguish local removal from pending cloud sync. Only-cloud tombstone failures propagate instead of reporting successful deletion.
-- Cloud deletion tasks retain the raw-content blob hash, allowing retries to finish orphaned blob cleanup even if an earlier attempt already removed the document row.
-- Sync failures no longer stop unrelated queued objects. Notebook writes and document deletions remain queued beyond five failed attempts; only unrecoverable missing-blob ingestion tasks are eligible for dropping. Ingestion, reindexing, graph updates, and deletion use the selected database's mode and queue instead of silently using the default database.
-- The unified test runner now isolates memory and client configuration before module imports, preventing tests from using installed memory or cloud settings. Added regressions for Notebook targeting, destructive argument validation, offline RAG deletion, recovery, queue rollback/progress, and custom database isolation. Aligned the root lockfile version with 1.7.1.
+- Notebook writes check the version observed by CLI/MCP or supplied by the dashboard under a shared reentrant storage lock, rejecting stale edits instead of overwriting another client's changes. Disabled directives remain visible in storage and recall but are excluded from persona/context injection. Linked-text edits and deletion are explicitly blocked in the first dashboard increment until link migration is supported.
+- Local RAG deletion cleans scopes, links, graph edges and unreferenced blobs transactionally without a live cloud queue. Document mutations use the selected local database and update its document version.
+- The unified test runner now isolates memory and client configuration before module imports, preventing tests from using installed memory or cloud settings. Added regressions for Notebook targeting, destructive argument validation, local RAG deletion, recovery, migration guards, and custom database isolation. Aligned the root lockfile version with 1.7.1.
 
 ## [1.7.0] - 2026-09-20
 

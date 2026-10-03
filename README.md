@@ -59,7 +59,7 @@ The same engine adds Git-based project isolation, semantic search, full raw-sour
 - Three-tier document hierarchy, retrieval-policy expansion for tables/code, and GraphRAG Lite symbol extraction.
 - Git-identity project scopes that follow a repository across directories, machines, and operating systems.
 - Active persona overlays shared across OpenCode, Codex, Claude Code, Gemini CLI, and Antigravity.
-- Local-only storage, full ZIP cloud checkpoints, and legacy cloud-only / bidirectional hybrid-sync modes.
+- Local-only working storage and full ZIP cloud checkpoints.
 - No Docker, external vector database, hosted embedding API, or telemetry.
 
 > This is a practical agent-memory system, not a claim of generalized benchmark superiority. Repository benchmark results describe the included evaluation corpus and configuration.
@@ -162,10 +162,10 @@ The doctor validates the configured Node runtime, MCP initialization, tool disco
 ```bash
 # Authenticate with a Turso account token and enable hybrid sync
 # (--api-token and --token are accepted as aliases for --api-key)
-npx -y @lotargo/memory_plugin setup --api-key <TURSO_API_TOKEN> --mode hybrid-sync
+npx -y @lotargo/memory_plugin setup --api-key <TURSO_API_TOKEN> --mode cloud-snapshots
 
 # Or change mode when credentials already exist
-npx -y @lotargo/memory_plugin setup --mode only-cloud
+npx -y @lotargo/memory_plugin setup --mode cloud-snapshots
 ```
 
 Prefer `TURSO_API_TOKEN`, `TURSO_DB_URL`, and `TURSO_DB_TOKEN` environment variables over command-line secrets because shell arguments may appear in process lists and history.
@@ -375,18 +375,14 @@ Cloud support uses Turso / LibSQL and is optional.
 | :--- | :--- |
 | `only-local` (default) | Markdown notebooks, SQLite index, CAS blobs, and models remain local. |
 | `cloud-snapshots` (recommended for cloud backup) | Local working state; immutable full ZIP checkpoints in Turso. Manual by default, optionally scheduled in hours. |
-| `only-cloud` | Notebook and database operations use Turso directly; raw RAG blobs are materialized into a verified local cache when read. |
-| `hybrid-sync` | Local-first reads/writes with background push, reverse synchronization, and conflict resolution. |
 
-Hybrid synchronization covers Notebook stores and complete RAG state: documents, scopes, sections, chunks, vectors, retrieval policies, graph edges, fact links, compressed raw CAS blobs, and deletion tombstones. Raw notes/documents can therefore be expanded on another device rather than returning metadata without source content.
+`hybrid-sync` and `only-cloud` have been removed, including live push/pull, direct cloud working operations, conflict settings and failover. Ordinary reads, search and edits use local storage. Cloud access is limited to explicit snapshot operations and configured checkpoint uploads.
 
-Notebook conflict strategies:
+An existing `hybrid-sync` configuration serves local memory without live synchronization. Run `memory-cli snapshots enable` to save separate pinned local/legacy-cloud backups and switch to `cloud-snapshots`.
 
-- `merge` (default): union fact lines with local order first and deduplication.
-- `cloud-wins`.
-- `local-wins`.
+An existing `only-cloud` configuration reports `MIGRATION_REQUIRED` for ordinary reads/writes because its local cache may be incomplete. Run `memory-cli snapshots enable` to download, validate and save a full legacy-cloud archive alongside a separate pinned local backup. The result is `restore-required`, with a `cloudBackupId` and local restore command. Downloading does not apply the archive or enable uploads. Run the displayed `snapshots restore <cloudBackupId> --location local` command, inspect the preview, then repeat with its `--confirm <token>` (or explicit CLI automation `--yes`). Successful restoration enables manual `cloud-snapshots`. Recovery journals also finish this transition after interruption around the SQLite/config commit.
 
-Legacy live synchronization retries with timeouts and can switch to `failoverUrl` after repeated primary failures. In `hybrid-sync`, local SQLite continues serving reads during an outage. In `only-cloud`, an unavailable primary with no failover surfaces as an error.
+`snapshots status` reports `legacyCloudBackupRequired`, `legacyCloudRestoreRequired` and the prepared backup IDs. Failed downloads, corrupt archives and interrupted restores retain the pending state; uploads remain blocked. A repeated `enable` reuses a verified download, or re-downloads a missing/corrupt archive. Settings resets preserve migration flags. Old cloud tables are read without migrations or writes and remain intact. New selections of either removed mode fail before setup side effects.
 
 ### Full ZIP checkpoints
 
@@ -406,7 +402,7 @@ memory-cli snapshots pin <id> --location cloud
 memory-cli snapshots help
 ```
 
-`enable` saves separate pinned local and legacy-cloud backups before switching modes. It leaves old cloud tables intact and aborts if a legacy cloud backup cannot be read completely. It never merges old cloud data into the local working state. On a fresh installation, choose a checkpoint explicitly with `list` and `restore`; even empty local memory is never automatically repopulated. Existing installations retain their selected mode until an explicit switch. Close other memory clients before switching/restoring so their in-flight operations cannot write stale results afterward.
+`enable` saves separate pinned local and legacy-cloud backups before switching modes. It leaves old cloud tables intact and aborts if a legacy cloud backup cannot be read completely. It never merges old cloud data into the local working state. Former cloud-only installations additionally require an explicit restore of the downloaded archive. On a fresh installation, choose a checkpoint explicitly with `list` and `restore`; even empty local memory is never automatically repopulated. Existing supported modes remain selected. Close other memory clients before switching/restoring so their in-flight operations cannot write stale results afterward.
 
 Every checkpoint is independent: one ZIP with DEFLATE level 9, containing Notebook stores for **all projects**, Git identity/alias registry, RAG documents and raw text, sections/chunks, vectors, scopes, graph/fact links and deletion tombstones. Embedding model/dimension settings travel with it. Authentication, machine secrets, original multimedia files, model caches and legacy synchronization queues do not. ZIP/state/blob hashes are checked on restore, with a bounded decompression limit. Compression reduces text size; embedding vectors can compress less.
 
@@ -506,6 +502,7 @@ The MCP server exposes **16 tools**. The native OpenCode plugin exposes the same
 | `memory_plugin setup [client flags] [--mode <mode>]` | Configure clients, skills, prompts, and optional cloud mode/auth. |
 | `memory_plugin doctor --codex` | Validate Codex configuration and live MCP behavior. |
 | `memory-cli` | Open the interactive TUI. |
+| `memory_plugin dashboard [--port <0..65535>]` | Open the local Notebook dashboard; prints a private browser connection URL. |
 | `memory-cli login ...` / `logout` / `auth-status` | Manage Turso authentication. |
 | `memory-cli link --dir <path> [--remote <url>]` | Link a Git project identity. |
 | `memory-cli unlink --dir <path> [--purge]` | Remove an alias or registry identity. |
@@ -519,6 +516,22 @@ The MCP server exposes **16 tools**. The native OpenCode plugin exposes the same
 | `memory-cli uninstall [--purge] [--purge-cache] [--dry-run] [--yes] [client flags]` | Remove plugin, MCP entries, prompts and skills; `--purge` deletes local data, while `--purge-cache` explicitly removes only this plugin's OpenCode cache. |
 
 The TUI provides retrieval configuration, model management, Notebook/RAG browsing, reindexing, snapshots, cloud settings, prompt integration, diagnostics, and reset actions. Use Up/Down, Enter, and Backspace to navigate.
+
+### Local dashboard
+
+The initial dashboard supports global/project Notebook browsing, search, record editing, metadata, protected deletion, and directive enable/disable with a preview from the shared persona builder. It runs against the same local storage as CLI/MCP in `only-local` and `cloud-snapshots` modes. RAG editing, cloud administration, model controls, and client setup remain available through the existing CLI/TUI.
+
+From this checkout, run:
+
+```bash
+node mcp-server/boot.js dashboard
+```
+
+With this checkout installed or linked, use `memory_plugin dashboard` (or `memory-cli dashboard`). Open the complete URL printed in the terminal. The server listens on `127.0.0.1`, uses a fresh connection token for each run, and does not load models or poll cloud services. The browser removes the token from its address and keeps it in memory only; reopen the original printed URL to reconnect after reloading. Stop the server with `Ctrl+C`. No frontend build or cloud login is required.
+
+The sidebar includes project search and a **Theme** selector with system, light, and dark options. On smaller screens, open **Область** to access them. Only the appearance choice is saved in a local browser cookie; it persists across dashboard ports. Project labels are shortened for display without changing their storage identities.
+
+Saving shows a field comparison and checks the store version. If another client changes the store, the draft stays open; **Обновить и сравнить** loads fresh data and preserves only your edited fields for a new review. Legacy records cannot be automatically matched after a conflict. Changes to linked record text and deletion are blocked until the shared link migration service is available; metadata editing remains supported.
 
 ---
 
@@ -551,10 +564,9 @@ Configuration is stored in `<memory-dir>/config.json`.
 
 | Key | Default | Meaning |
 | :--- | :--- | :--- |
-| `mode` | `only-local` | `only-local`, `cloud-snapshots`, or legacy `only-cloud` / `hybrid-sync` |
+| `mode` | `only-local` | `only-local` or `cloud-snapshots` |
 | `snapshotSyncMode` | `manual` | `manual`, `scheduled`, `off`; automatic uploads only in `cloud-snapshots` |
 | `snapshotIntervalHours` | `24` | Arbitrary positive hours, including fractional values and `168` (weekly) |
-| `conflictStrategy` | `merge` | Notebook conflict policy: `merge`, `cloud-wins`, `local-wins` |
 | `fusionAlgorithm` | `rsf` | `rsf`, `rrf`, `semantic_only`, or `lexical_only` |
 | `alpha` | `0.5` | Dense-vector weight for RSF |
 | `embeddingModel` | `Xenova/multilingual-e5-small` | Local Hugging Face/ONNX embedding model |
@@ -570,7 +582,6 @@ Configuration is stored in `<memory-dir>/config.json`.
 | `gpuAttentionBudget` | `2000000` | Experimental GPU micro-batch budget |
 | `onnxThreads` | `0` | WASM thread count; `0` auto-detects |
 | `tursoUrl` | `""` | Primary LibSQL endpoint populated by login |
-| `failoverUrl` | `""` | Optional secondary cloud endpoint |
 | `authorized` | `false` | Whether cloud authorization completed |
 | `username` | `""` | Authenticated Turso username |
 | `ingestAllowedPaths` | `[]` | Additional directories allowed for local-file ingestion |
@@ -631,7 +642,7 @@ npm run benchmark:table-code
 
 The fast suites use `generateEmbeddings: false` in retrieval paths for deterministic offline coverage. `npm run smoke` covers the dense-vector path with real cached/downloaded model weights and checks multilingual semantic retrieval. Both modes are needed: lexical-only tests cannot catch a broken vector serialization or ONNX execution path.
 
-The unified suites cover fact formatting, typed directives, persona migration/synchronization, client prompt safety, Codex launcher compatibility, Git identity isolation, RAG scopes, policy expansion, RAG Memory Notes, semantic index output, raw blob portability, reverse sync, tombstones, snapshots, MCP contracts, spreadsheet parsing, and cloud authentication workflows.
+The unified suites cover fact formatting, typed directives, persona migration/synchronization, client prompt safety, Codex launcher compatibility, Git identity isolation, RAG scopes, policy expansion, RAG Memory Notes, semantic index output, full legacy-cloud migration and explicit restoration, retired-mode rejection, snapshots, MCP contracts, spreadsheet parsing, and cloud authentication workflows.
 
 See [`docs/BENCHMARKS.md`](./docs/BENCHMARKS.md) for methodology and detailed reports.
 
