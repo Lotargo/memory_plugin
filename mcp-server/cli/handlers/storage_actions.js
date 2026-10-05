@@ -1,4 +1,5 @@
 import { browseNotebookFacts } from "../notebook.js";
+import { handleMaintenanceAction } from './maintenance_actions.js';
 import { join, basename } from "node:path";
 import { getDatabase } from "../../db/database.js";
 import {
@@ -7,7 +8,6 @@ import {
   projectKey,
   listProjectStores,
   migrateLegacyStore,
-  migrateStoreTitles,
   memoryFileName,
   canonicalPath,
   MEMORY_DIR,
@@ -249,34 +249,7 @@ export async function handleStorageAction(value, config, stats) {
     }
 
     case "migrate_titles": {
-      console.log(`\n  \x1b[1m\x1b[37mMIGRATE TITLES TO LEGACY FACTS\x1b[0m\n`);
-      console.log("  Scans every store and stamps an auto-generated **Title** onto");
-      console.log("  facts that lack one (Part A1 legacy migration).\n");
-      try {
-        const targets = [];
-        const gitKey = await projectKey(process.cwd(), null);
-        if (gitKey) targets.push(gitKey);
-        targets.push(GLOBAL_KEY);
-        const stores = await listProjectStores();
-        for (const s of stores) {
-          if (!targets.includes(s.key)) targets.push(s.key);
-        }
-
-        let total = 0;
-        for (const k of targets) {
-          const res = await migrateStoreTitles(k);
-          if (res.ok) {
-            total += res.changed;
-            console.log(`  [OK] ${k}: ${res.changed} fact(s) titled`);
-          } else {
-            console.log(`  [SKIP] ${k}: ${res.reason}`);
-          }
-        }
-        console.log(`\n  \x1b[32m[DONE] ${total} fact(s) updated across ${targets.length} store(s).\x1b[0m`);
-      } catch (err) {
-        console.log(`\n  \x1b[31m[ERROR] ${err.message}\x1b[0m`);
-      }
-      await waitForEnter();
+      await handleMaintenanceAction(value);
       break;
     }
 

@@ -1,4 +1,4 @@
-import { getConfig, updateConfig, resetConfig } from "../../config/config_manager.js";
+import { handleMaintenanceAction } from './maintenance_actions.js';
 import { hybridQuery } from "../../retrieval/retriever.js";
 import {
   selectSimpleMenu,
@@ -97,10 +97,7 @@ export async function handleDiagnosticsAction(value, config, stats) {
     }
 
     case "reset": {
-      resetConfig();
-      console.clear();
-      console.log("\n  [OK] Configuration reset to factory defaults (RSF 50/50, e5-small, no reranker).\n");
-      await waitForEnter();
+      await handleMaintenanceAction(value);
       break;
     }
   }

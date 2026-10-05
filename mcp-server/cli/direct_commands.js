@@ -7,6 +7,10 @@ import {
 } from "../memory.js";
 
 export async function handleDirectCommands(cliArgs) {
+  if (cliArgs[0] === 'maintenance') {
+    const { handleMaintenanceCommand } = await import('./maintenance_commands.js');
+    await handleMaintenanceCommand(cliArgs.slice(1)); return true;
+  }
   if (cliArgs[0] === 'prompts') {
     const { handlePromptCommand } = await import('./prompt_commands.js');
     await handlePromptCommand(cliArgs.slice(1)); return true;
@@ -72,9 +76,9 @@ export async function handleDirectCommands(cliArgs) {
     for (const item of result.migrated) {
       console.log(`  - ${item.title}${item.id ? ` (${item.id})` : ""}`);
     }
-    console.log(dryRun
-      ? "\nNo files were changed.\n"
-      : "\nGlobal directives and managed client prompts are synchronized.\n");
+    console.log(dryRun ? "\nNo files were changed.\n" : `\nNotebook: ${result.status}. Backup: ${result.backup || 'no changes'}.\n`);
+    if (!dryRun) for (const item of result.persona || []) console.log(`  - ${item.name || 'Persona sync'}: ${item.status}`);
+    if (result.status === 'partial') process.exitCode = 1;
     return true;
   }
 
@@ -149,7 +153,7 @@ export async function handleDirectCommands(cliArgs) {
         const res = await migrateStoreTitles(k);
         if (res.ok) {
           total += res.changed;
-          console.log(`  [OK] ${k}: ${res.changed} fact(s) titled`);
+          console.log(`  [${res.status}] ${k}: ${res.changed} record(s) updated (titles/IDs). Backup: ${res.backup || 'no changes'}`);
         } else {
           console.log(`  [SKIP] ${k}: ${res.reason}`);
         }

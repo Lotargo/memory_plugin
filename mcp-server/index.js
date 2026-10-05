@@ -40,6 +40,7 @@ if (cliArgs[0] === "snapshots") {
 // otherwise `memory_plugin link` etc. would fall through and start an MCP
 // server that silently blocks on stdin.
 const CLI_COMMANDS = new Set([
+  "maintenance",
   "notebook",
   "prompts",
   "web",

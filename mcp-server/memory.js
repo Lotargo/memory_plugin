@@ -231,17 +231,8 @@ export async function migrateLegacyStore(legacyKey, targetDir) {
 // changed. Skips stores that already have titles on every fact (fast no-op).
 export async function migrateStoreTitles(key) {
   if (!key) return { ok: false, reason: "no_key", changed: 0 };
-  const { withTitle } = await import("./fact_format.js");
-  const facts = await readMemory(key);
-  let changed = 0;
-  const migrated = facts.map((line) => {
-    const next = withTitle(line);
-    if (next !== line) changed++;
-    return next;
-  });
-  if (!changed) return { ok: true, changed: 0 };
-  await writeMemory(key, migrated);
-  return { ok: true, changed };
+  const { executeMaintenance } = await import('./services/maintenance_service.js');
+  return { ok: true, ...await executeMaintenance('migrate-titles', { key }) };
 }
 
 export function today() {

@@ -65,7 +65,7 @@ export function readSettings() {
   };
 }
 
-function validateFields(fields) {
+export function validateFields(fields) {
   keys(fields, SETTINGS_FIELDS.map(field => field.key));
   if (!Object.keys(fields).length) fail('INVALID', 'Нет изменённых настроек.');
   for (const [key, value] of Object.entries(fields)) {

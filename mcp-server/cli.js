@@ -14,7 +14,7 @@ import { handleWebAction } from "./cli/handlers/web_actions.js";
 export async function runCli() {
   const cliArgs = process.argv.slice(2);
 
-  if (["snapshots", "web", "dashboard", "knowledge", "notebook", "prompts", "marketplace"].includes(cliArgs[0])) {
+  if (["snapshots", "web", "dashboard", "knowledge", "notebook", "prompts", "maintenance", "marketplace"].includes(cliArgs[0])) {
     await handleDirectCommands(cliArgs);
     return;
   }

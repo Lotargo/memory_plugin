@@ -40,7 +40,10 @@ if (major < MIN_MAJOR || (major === MIN_MAJOR && minor < MIN_MINOR)) {
 }
 
 // Version is OK — hand off to the real entry point.
-if (process.argv[2] === 'prompts') {
+if (process.argv[2] === 'maintenance') {
+  const { handleMaintenanceCommand } = await import('./cli/maintenance_commands.js');
+  await handleMaintenanceCommand(process.argv.slice(3));
+} else if (process.argv[2] === 'prompts') {
   const { handlePromptCommand } = await import('./cli/prompt_commands.js');
   await handlePromptCommand(process.argv.slice(3));
 } else if (process.argv[2] === 'notebook') {

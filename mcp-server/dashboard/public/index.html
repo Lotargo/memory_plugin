@@ -37,6 +37,7 @@
         <span class="local-label"><span class="status-dot" aria-hidden="true"></span>На этом компьютере</span>
         <button type="button" id="openSettings" aria-haspopup="dialog">Настройки</button>
         <button type="button" id="openModels" aria-haspopup="dialog">Модели</button>
+        <button type="button" id="openMaintenance" aria-haspopup="dialog">Обслуживание</button>
         <button type="button" id="system" aria-label="Состояние хранилища">Хранилище <span id="version" class="caption"></span></button>
       </div>
     </aside>
@@ -136,6 +137,21 @@
     <div id="transferResults"></div>
     <label id="transferShareConfirmation" class="check-option" hidden><input id="transferShareConfirm" type="checkbox">Подтверждаю открытие перечисленных источников целевой области</label>
     <div class="dialog-actions"><button id="transferPreview" type="button" class="button secondary">Обновить предпросмотр</button><button id="transferConfirm" type="button" class="button primary" disabled>Подтвердить перенос</button></div>
+  </dialog>
+  <dialog id="maintenanceDialog" class="dialog persona-dialog" aria-labelledby="maintenanceHeading">
+    <div class="dialog-heading"><h2 id="maintenanceHeading">Обслуживание памяти</h2><button type="button" id="maintenanceClose" class="button ghost">Закрыть</button></div>
+    <p class="caption">Локальные операции. Перед записью проверьте область и изменения. RAG import/reset и удаление плагина пока доступны через CLI.</p>
+    <div class="persona-controls">
+      <div class="field"><label for="maintenanceOperation">Операция</label><select id="maintenanceOperation"><option value="migrate-titles">Добавить legacy-заголовки</option><option value="migrate-persona">Уточнить legacy-инструкции</option><option value="reset-settings">Сбросить настройки поиска, моделей и источников</option><option value="restore-settings">Восстановить настройки из резервной копии</option></select></div>
+      <div class="field" id="maintenanceTargetField"><label for="maintenanceTarget">Хранилище Notebook</label><select id="maintenanceTarget"></select></div>
+      <div class="field" id="maintenanceBackupField" hidden><label for="maintenanceBackup">Резервная копия настроек</label><select id="maintenanceBackup"></select></div>
+      <button type="button" id="maintenanceRefresh" class="button secondary">Обновить состояние</button>
+    </div>
+    <p id="maintenanceHint" class="caption"></p>
+    <p id="maintenanceError" class="inline-error" role="alert" hidden></p>
+    <p id="maintenanceResult" role="status" class="prompt-path"></p>
+    <div id="maintenancePreview"></div>
+    <div class="dialog-actions"><button type="button" id="maintenanceReview" class="button secondary">Проверить изменения</button><button type="button" id="maintenanceApply" class="button primary" disabled>Подтвердить изменения</button></div>
   </dialog>
   <dialog id="promptsDialog" class="dialog persona-dialog" aria-labelledby="promptsHeading">
     <div class="dialog-heading"><div><h2 id="promptsHeading">Клиентские файлы инструкций</h2></div><button type="button" id="promptsClose" class="button ghost">Закрыть</button></div>

@@ -1,4 +1,5 @@
 import { createPromptAdmin } from './prompts.js';
+import { createMaintenance } from './maintenance.js';
 import { createKnowledgeBrowser } from './knowledge.js';
 import { renderContent, connectContentToggle } from './content.js';
 import { createLinkEditor } from './links.js';
@@ -102,6 +103,8 @@ createModels({api,node,openDialog,allowDiscard,closeNavigation,onChanged:refresh
 const readOnly = () => !!(state.notebook?.readOnly || state.overview?.readOnly);
 const scope = () => state.notebook?.target || state.overview?.targets.find(target => target.key === $('target').value);
 const prompts = createPromptAdmin({ api, node, openDialog });
+createMaintenance({ api, node, openDialog, allowDiscard, closeNavigation, scopeKey: () => $('target').value,
+  onSaved: async () => { state.edit = null; await refresh(); } });
 const persona = createPersonaPreview({ api, node, openDialog, scope, errorText, openRecord: async item => {
   await selectTarget(item.key); await selectView('persona'); $('statusFilter').value = 'all';
   const record = state.notebook?.records.find(record => record.ref === item.ref);
