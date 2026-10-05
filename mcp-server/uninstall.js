@@ -209,6 +209,12 @@ async function removeJsonMcpClient({ label, configPath, cliName, cliArgs, dry })
 }
 
 export async function runUninstall(rawArgs = process.argv.slice(2)) {
+  const reviewedArgs = rawArgs[0] === 'uninstall' || rawArgs[0] === '--uninstall' ? rawArgs.slice(1)
+    : ['setup','install'].includes(rawArgs[0]) && rawArgs[1] === '--uninstall' ? rawArgs.slice(2) : null;
+  if (reviewedArgs?.[0] && !reviewedArgs[0].startsWith('-')) {
+    const { handleUninstallCommand } = await import('./cli/uninstall_commands.js');
+    return handleUninstallCommand(reviewedArgs);
+  }
   // strip leading "uninstall" / "setup" / "--uninstall" tokens so parsing is uniform
   // e.g. ["uninstall","--purge"] or ["setup","--uninstall","--purge"] or ["--uninstall"]
   const filtered = rawArgs.filter((a, idx) => {

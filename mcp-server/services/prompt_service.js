@@ -139,6 +139,25 @@ async function preview(target, operation, entries) {
     canApply: !snap.integration.pluginManaged, previewToken: version(target, operation, snap, proposal, entries) };
 }
 function same(a, b) { return a.exists === b.exists && (!a.exists || a.text === b.text); }
+// Internal removal plan for the reviewed integration service. It uses the same
+// marker/ownership rules as A3, without publishing or exposing file contents.
+export async function preparePromptRemoval(client) {
+  const target = targets.find(item => item.id === client);
+  if (!target) return { files: [], pluginManaged: false };
+  ensureNoJournal();
+  const snap = await snapshot(target, []), proposal = plan(target, 'disable', snap);
+  if (snap.integration.pluginManaged) return { files: [], pluginManaged: true };
+  const files = [];
+  const add = (file, before, after) => {
+    if (!same(before, after)) files.push({ path: file, before, after });
+  };
+  add(target.filePath, snap.current, { exists: proposal.exists, text: proposal.text });
+  if (snap.owner) {
+    const state = { ...snap.state }; delete state[target.filePath];
+    add(paths.promptStateFile, snap.stateFile, { exists: true, text: JSON.stringify(state, null, 2) + '\n' });
+  }
+  return { files, pluginManaged: false };
+}
 function publish(file, value) {
   safePath(file);
   if (value.exists) atomicWrite(file, value.text, { renameRetries: 10 });

@@ -60,12 +60,15 @@ export async function withSnapshotLock(directory, work) {
   }
 }
 
-export function atomicWrite(file, data, { renameRetries = 0 } = {}) {
+export function atomicWrite(file, data, { renameRetries = 0, mode } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const temp = `${file}.${randomUUID()}.tmp`;
   try {
-    const fd = fs.openSync(temp, 'wx');
-    try { fs.writeFileSync(fd, data); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+    const fd = fs.openSync(temp, 'wx', mode);
+    try {
+      if (mode !== undefined) fs.fchmodSync(fd, mode);
+      fs.writeFileSync(fd, data); fs.fsyncSync(fd);
+    } finally { fs.closeSync(fd); }
     for (let attempt=0;;attempt++) {
       try {fs.renameSync(temp, file);break;}
       catch(error) {

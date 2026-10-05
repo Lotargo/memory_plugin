@@ -42,6 +42,7 @@ const testSuites = [
   { category: "Integration", name: "maintenance", file: "tests/integration/maintenance.test.js" },
   { category: "Integration", name: "rag_maintenance", file: "tests/integration/rag_maintenance.test.js" },
   { category: "Integration", name: "diagnostics", file: "tests/integration/diagnostics.test.js" },
+  { category: "Integration", name: "uninstall_service", file: "tests/integration/uninstall_service.test.js" },
   { category: "Integration", name: "settings", file: "tests/integration/settings.test.js" },
   { category: "Integration", name: "models", file: "tests/integration/models.test.js" },
   { category: "Integration", name: "resources", file: "tests/integration/resources.test.js" },

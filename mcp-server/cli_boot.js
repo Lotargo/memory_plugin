@@ -30,6 +30,11 @@ if (major < MIN_MAJOR || (major === MIN_MAJOR && minor < MIN_MINOR)) {
 }
 
 // Version is OK — hand off to the real CLI.
+if (process.argv[2] === 'uninstall' && process.argv[3] && !process.argv[3].startsWith('-')) {
+  const { handleUninstallCommand } = await import('./cli/uninstall_commands.js');
+  await handleUninstallCommand(process.argv.slice(3));
+  process.exit(process.exitCode || 0);
+}
 if (process.argv[2] === 'rag-maintenance') {
   const { handleRagMaintenanceCommand } = await import('./cli/rag_maintenance_commands.js');
   await handleRagMaintenanceCommand(process.argv.slice(3));

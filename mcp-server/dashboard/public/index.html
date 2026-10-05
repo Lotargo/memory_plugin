@@ -39,6 +39,7 @@
         <button type="button" id="openModels" aria-haspopup="dialog">Модели</button>
         <button type="button" id="openMaintenance" aria-haspopup="dialog">Обслуживание</button>
         <button type="button" id="openDiagnostics" aria-haspopup="dialog">Диагностика и файлы RAG</button>
+        <button type="button" id="openUninstall" aria-haspopup="dialog">Удаление интеграции</button>
         <button type="button" id="system" aria-label="Состояние хранилища">Хранилище <span id="version" class="caption"></span></button>
       </div>
     </aside>
@@ -138,6 +139,21 @@
     <div id="transferResults"></div>
     <label id="transferShareConfirmation" class="check-option" hidden><input id="transferShareConfirm" type="checkbox">Подтверждаю открытие перечисленных источников целевой области</label>
     <div class="dialog-actions"><button id="transferPreview" type="button" class="button secondary">Обновить предпросмотр</button><button id="transferConfirm" type="button" class="button primary" disabled>Подтвердить перенос</button></div>
+  </dialog>
+  <dialog id="uninstallDialog" class="dialog persona-dialog" aria-labelledby="uninstallHeading">
+    <div class="dialog-heading"><h2 id="uninstallHeading">Удаление интеграции клиента</h2><button type="button" id="uninstallClose" class="button ghost">Закрыть</button></div>
+    <div class="persona-options">
+      <div class="field"><label for="uninstallClient">Клиент</label><select id="uninstallClient" aria-describedby="uninstallHint uninstallError"><option value="opencode">OpenCode</option><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="gemini">Gemini CLI</option><option value="antigravity">Antigravity</option></select></div>
+      <div class="field"><label for="uninstallOperation">Действие</label><select id="uninstallOperation" aria-describedby="uninstallHint uninstallError"><option value="uninstall">Удалить глобальную интеграцию</option><option value="restore">Восстановить файлы из резервной копии</option></select></div>
+      <div class="field" id="uninstallBackupField" hidden><label for="uninstallBackup">Квитанция удаления выбранного клиента</label><select id="uninstallBackup" aria-describedby="uninstallHint uninstallError"></select></div>
+      <button type="button" id="uninstallRefresh" class="button secondary">Обновить состояние</button>
+    </div>
+    <p id="uninstallHint" class="caption"></p><p id="uninstallStatus" class="caption"></p>
+    <p id="uninstallError" class="inline-error" role="alert" hidden></p>
+    <p id="uninstallResult" role="status" class="prompt-path"></p>
+    <details id="uninstallReceipts" hidden><summary>Квитанции операций</summary><ul id="uninstallReceiptList"></ul></details>
+    <div id="uninstallPreview" class="knowledge-text"></div>
+    <div class="dialog-actions"><button type="button" id="uninstallReview" class="button secondary">Проверить список файлов</button><button type="button" id="uninstallApply" class="button primary" disabled aria-describedby="uninstallHint uninstallResult">Подтвердить удаление интеграции</button></div>
   </dialog>
   <dialog id="diagnosticsDialog" class="dialog persona-dialog" aria-labelledby="diagnosticsHeading">
     <div class="dialog-heading"><h2 id="diagnosticsHeading">Диагностика и файлы RAG</h2><button type="button" id="diagnosticsClose" class="button ghost">Закрыть</button></div>

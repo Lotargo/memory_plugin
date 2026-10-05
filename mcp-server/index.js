@@ -17,6 +17,11 @@ function readPackageVersion() {
 }
 
 const cliArgs = process.argv.slice(2);
+if (cliArgs[0] === 'uninstall' && cliArgs[1] && !cliArgs[1].startsWith('-')) {
+  const { handleUninstallCommand } = await import('./cli/uninstall_commands.js');
+  await handleUninstallCommand(cliArgs.slice(1));
+  process.exit(process.exitCode || 0);
+}
 if (cliArgs[0] === "knowledge") {
   const { handleKnowledgeCommand } = await import("./cli/knowledge_commands.js");
   await handleKnowledgeCommand(cliArgs.slice(1));

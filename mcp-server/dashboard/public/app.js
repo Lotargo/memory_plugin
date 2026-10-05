@@ -1,6 +1,7 @@
 import { createPromptAdmin } from './prompts.js';
 import { createMaintenance } from './maintenance.js';
 import { createDiagnostics } from './diagnostics.js';
+import { createUninstall } from './uninstall.js';
 import { createKnowledgeBrowser } from './knowledge.js';
 import { renderContent, connectContentToggle } from './content.js';
 import { createLinkEditor } from './links.js';
@@ -105,6 +106,7 @@ const readOnly = () => !!(state.notebook?.readOnly || state.overview?.readOnly);
 const scope = () => state.notebook?.target || state.overview?.targets.find(target => target.key === $('target').value);
 const prompts = createPromptAdmin({ api, node, openDialog });
 createDiagnostics({ api, node, openDialog, allowDiscard, closeNavigation });
+createUninstall({ api, node, openDialog, allowDiscard, closeNavigation });
 createMaintenance({ api, node, openDialog, allowDiscard, closeNavigation, scopeKey: () => $('target').value,
   onSaved: async () => { state.edit = null; await refresh(); } });
 const persona = createPersonaPreview({ api, node, openDialog, scope, errorText, openRecord: async item => {
