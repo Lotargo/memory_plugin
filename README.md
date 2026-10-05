@@ -147,6 +147,21 @@ npx -y @lotargo/memory_plugin uninstall --codex
 
 Claude Code, Gemini CLI, and Codex setup/uninstall use their native MCP lifecycle commands when available. An ownership-checked config edit is retained as a compatibility fallback for missing, older, or non-functional client CLIs. Antigravity remains a separate integration because it uses a different config layout.
 
+For reviewed removal of one client's global integration, open **Удаление интеграции** in the local panel, or use the shared service from CLI/TUI:
+
+```bash
+memory-cli uninstall status
+memory-cli uninstall preview --client gemini --operation uninstall
+memory-cli uninstall apply --client gemini --operation uninstall --preview-token <token> --confirm
+memory-cli uninstall preview --client gemini --operation restore --backup-id <uninstall-receipt-id>
+memory-cli uninstall apply --client gemini --operation restore --backup-id <uninstall-receipt-id> --preview-token <token> --confirm
+memory-cli uninstall receipt --operation-id <id>
+```
+
+Supported fixed clients are `opencode`, `codex`, `claude`, `gemini` and `antigravity`. Preview lists exact paths, byte counts, hashes and preserved components; configuration contents and secrets stay private. Apply verifies the current files/channel and saves a checked local backup before changing owned registrations, managed prompt/persona blocks and unmodified skill files. Recovery refuses changed files. After a lost response, inspect the receipt before retrying; interrupted removal requires explicit reviewed restoration. The panel reports marketplace ownership and leaves that channel to the client's plugin manager. Memory, models, package/cache, project registrations and the running panel are preserved. Empty skill directories may remain. Active client sessions require their own reconnect/restart.
+
+The original flag-based `uninstall --codex`, `--purge` and `--purge-cache` flows remain terminal compatibility commands with their existing native lifecycle behavior. They are separate from this reviewed global-file operation and are not browser endpoints.
+
 ### Local Marketplaces (Codex / Claude Code)
 
 Build a separate local catalog from this checkout, then install it with migration from direct setup:
@@ -611,6 +626,19 @@ The TUI provides retrieval configuration, model management, Notebook/RAG browsin
 TUI Notebook edits use the same scoped service as the web panel. Enter a new title (or keep it with Enter), then a new body; an empty body cancels. Changes preserve date, metadata and source identity. Deletion reviews the selected store and source links, requires confirmation, and asks separately before removing a KEEP-protected record. If another client changes the record or its links, reload and review instead of overwriting it. A persona synchronization failure is reported as partial success after the Notebook is saved; existing agent sessions may need a context refresh.
 
 To move one directive, open its concrete Notebook store and choose **Перенести инструкцию**. Select the destination, review both stores, the ID change and source links, then confirm. If a linked document is unavailable in the destination, opening it to that scope requires a separate reviewed confirmation; adding global scope makes that source visible across projects. Existing document scopes remain. The service saves a verified pinned local ZIP and publishes both Notebook files and links through the recovery journal. Date, TTL, KEEP, disabled state and metadata travel with the record. Prepare knowledge links first (`memory-cli knowledge migrate`); preview never migrates automatically. Duplicate bodies, replacement-history chains, unresolved links and independent graph edges block the move with an explanation. Existing client sessions may require refreshed context.
+
+### Client status and explicit diagnostics
+
+Open **Клиентские интеграции** in the local panel or **Diagnostics → Integration Status / Run Explicit Probe** in the TUI. Status inventories the five supported clients from local configuration and PATH, including disabled, foreign, duplicate, marketplace and project bindings. Configured does not mean installed or loaded in a session. Missing/malformed/linked files remain explicit and do not hide other clients.
+
+```bash
+memory-cli clients status
+memory-plugin clients status --client codex
+memory-cli clients probe --client codex --operation version --expected-version <version-from-status>
+memory-cli clients probe --client codex --operation doctor --expected-version <version-from-status>
+```
+
+Status starts no client process. Each probe is explicit, has a 20-second deadline and 256 KiB output budget, returns only a checked summary, and reports changed configurations as stale. Failed requests are not retried automatically. Doctor accepts one owned direct Node/boot launcher or a verified Codex/Claude marketplace adapter with probe-mode support; npx, arbitrary commands, changed adapters and project overrides are unavailable. The diagnostic runtime disables persona/background sync, panel autostart and model command consumption; explicit MCP reads can initialize the local storage schema. Original CLI output, recalled bodies, environment credentials and raw errors are not returned. Results observe that diagnostic process, while active sessions, automatic hook delivery and agent usage remain UNVERIFIED. The latest result is kept only in the current panel process. Existing `doctor --codex` and `marketplace doctor` use this same service.
 
 ### Local dashboard
 
