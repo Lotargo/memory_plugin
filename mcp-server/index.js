@@ -45,6 +45,7 @@ if (cliArgs[0] === "snapshots") {
 // otherwise `memory_plugin link` etc. would fall through and start an MCP
 // server that silently blocks on stdin.
 const CLI_COMMANDS = new Set([
+  'clients',
   "maintenance",
   "diagnostics",
   "rag-maintenance",
@@ -166,7 +167,7 @@ const server = new McpServer({
 // Arm the file-based model control channel so `memory-cli models ...`
 // commands can unload/reload ONNX sessions owned by this process.
 const { startModelControlLoop } = await import("./ml/model_manager.js");
-startModelControlLoop();
+if (process.env.MEMORY_CLIENT_PROBE !== '1') startModelControlLoop();
 
 registerAllTools(server);
 startSnapshotScheduler();

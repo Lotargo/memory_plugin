@@ -1,10 +1,6 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { homedir } from "node:os";
-import { getCodexMemoryAgentSections, isSupportedNodeVersion } from "./codex_config.js";
-import { resolveClientPaths } from './client_paths.js';
-import { integrationStatus } from './plugin_integration.js';
+import { getCodexMemoryAgentSections } from "./codex_config.js";
 
 function decodeTomlString(raw) {
   const value = String(raw || "").trim();
@@ -39,6 +35,7 @@ export function parseCodexMemoryAgentConfig(content) {
   const args = [];
   if (argsMatch) {
     const stringPattern = /"(?:\\.|[^"\\])*"|'(?:''|[^'])*'/g;
+    if (argsMatch[1].replace(stringPattern, '').replace(/[\s,]/g, '')) return { ok: false, error: 'Unsupported memory-agent args', sectionCount: 1 };
     for (const match of argsMatch[1].matchAll(stringPattern)) {
       const decoded = decodeTomlString(match[0]);
       if (decoded === null) return { ok: false, error: "Unable to parse memory-agent args", sectionCount: 1 };
@@ -174,110 +171,15 @@ export async function runDirectMcpSmoke({
   }
 }
 
-function countOccurrences(text, needle) {
-  let count = 0;
-  let offset = 0;
-  while ((offset = text.indexOf(needle, offset)) !== -1) {
-    count++;
-    offset += needle.length;
-  }
-  return count;
-}
-
-export async function runCodexDoctor({
-  home = homedir(),
-  cwd = process.cwd(),
-  env = process.env,
-  output = console,
-} = {}) {
-  const checks = [];
-  const record = (level, label, detail = "") => {
-    checks.push({ level, label, detail });
-    output.log(`[${level}] ${label}${detail ? `: ${detail}` : ""}`);
-  };
-
-  const paths = resolveClientPaths({ home, cwd, env });
-  const configPath = paths.codexConfigPath;
-  const integration = await integrationStatus('codex', { paths, cwd });
-  if (integration.conflict) {
-    record('FAIL', 'Duplicate memory integrations', 'Both marketplace and direct memory-agent are configured; use marketplace install to migrate');
-    return { ok: false, checks, configPath, integration };
-  }
-  if (integration.pluginEnabled) {
-    record('INFO', 'Marketplace memory integration', integration.selector);
-    record('INFO', 'Runtime acceptance', 'Use memory-plugin marketplace doctor --client codex to check the installed adapter; trust its SessionStart hook in a new client session.');
-    return { ok: false, checks, configPath, integration, configurationOk: true, runtimeVerified: false };
-  }
-  if (!existsSync(configPath)) {
-    record("FAIL", "Codex config found", configPath);
-    return { ok: false, checks, configPath };
-  }
-  record("OK", "Codex config found", configPath);
-  const config = readFileSync(configPath, "utf8");
-  const parsed = parseCodexMemoryAgentConfig(config);
-  if (!parsed.ok) {
-    record("FAIL", "memory-agent configuration", parsed.error);
-    return { ok: false, checks, configPath };
-  }
-  record("OK", "Single memory-agent section found");
-  record(parsed.command.toLowerCase().includes("npx") ? "FAIL" : "OK", "Direct executable launcher", parsed.command);
-  record(existsSync(parsed.command) ? "OK" : "FAIL", "Command executable exists", parsed.command);
-
-  const bootPath = parsed.args[0];
-  record(bootPath && existsSync(bootPath) ? "OK" : "FAIL", "boot.js exists", bootPath || "missing first arg");
-  record(parsed.args.length === 1 ? "OK" : "FAIL", "boot.js is the only launcher argument", JSON.stringify(parsed.args));
-
-  let detectedVersion = null;
-  try {
-    detectedVersion = await new Promise((resolve, reject) => {
-      const child = spawn(parsed.command, ["--version"], { cwd, env: { ...env }, stdio: ["ignore", "pipe", "pipe"] });
-      let stdout = "";
-      let stderr = "";
-      child.stdout.setEncoding("utf8");
-      child.stderr.setEncoding("utf8");
-      child.stdout.on("data", (chunk) => { stdout += chunk; });
-      child.stderr.on("data", (chunk) => { stderr += chunk; });
-      child.on("error", reject);
-      child.on("exit", (code) => code === 0 ? resolve(stdout.trim()) : reject(new Error(stderr.trim() || `exit ${code}`)));
-    });
-    record(isSupportedNodeVersion(detectedVersion) ? "OK" : "FAIL", "Node.js version >= 22.5.0", detectedVersion);
-  } catch (error) {
-    record("FAIL", "Node.js version check", error.message);
-  }
-
-  try {
-    const smoke = await runDirectMcpSmoke({ command: parsed.command, args: parsed.args, cwd, env });
-    record("OK", "MCP initialize");
-    record("OK", "MCP tools/list", `${smoke.toolNames.length} tools`);
-    record("OK", "memory_info tool call");
-    record("OK", "recall(scope=all) tool call");
-  } catch (error) {
-    record("FAIL", "Direct MCP protocol smoke test", error.message);
-  }
-
-  try {
-    const { resolveProjectIdentity } = await import("./identity.js");
-    const identity = await resolveProjectIdentity(cwd);
-    record("INFO", "Current project identity", identity?.key || "none (global memory only)");
-  } catch (error) {
-    record("WARN", "Current project identity", error.message);
-  }
-
-  const agentsPath = join(paths.codexDir, "AGENTS.md");
-  if (existsSync(agentsPath)) {
-    const agents = readFileSync(agentsPath, "utf8");
-    const starts = countOccurrences(agents, "<!-- START MEMORY AGENT PROMPT -->");
-    const ends = countOccurrences(agents, "<!-- END MEMORY AGENT PROMPT -->");
-    record(starts === 1 && ends === 1 ? "OK" : "WARN", "Codex memory prompt block count", `start=${starts}, end=${ends}`);
-  } else {
-    record("WARN", "Codex memory prompt", `${agentsPath} not found`);
-  }
-
-  record(
-    "INFO",
-    "Codex Desktop exposure",
-    "Cannot be proven by the MCP server; start a new task after setup and verify that memory-agent tools are listed"
-  );
-  const ok = !checks.some((check) => check.level === "FAIL");
-  return { ok, checks, configPath, parsed, detectedVersion };
+export async function runCodexDoctor({ home = homedir(), cwd = process.cwd(), env = process.env, output = console } = {}) {
+  const { clientRequest } = await import('./services/client_service.js');
+  const options = { home, cwd, env };
+  const status = await clientRequest({ action: 'status', client: 'codex' }, options);
+  const item = status.items[0];
+  if (!item.version) return { ok: false, checks: [{ level: 'FAIL', label: 'Client configuration unavailable' }], runtimeVerified: false };
+  const result = await clientRequest({ action: 'probe', client: 'codex', operation: 'doctor', expectedVersion: item.version }, options);
+  for (const check of result.checks) output.log('[' + check.level + '] ' + check.label);
+  if (result.status !== 'passed') output.log('[FAIL] Client doctor: ' + (result.code || result.status));
+  output.log('[INFO] Active session and automatic initialization: UNVERIFIED');
+  return { ...result, ok: result.status === 'passed', runtimeVerified: result.status === 'passed', configPath: item.files[0]?.path };
 }

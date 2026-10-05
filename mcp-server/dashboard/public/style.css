@@ -270,6 +270,10 @@ select,.appearance-control select,.list-filter-row select {
 @media(max-width:720px) {.models-dialog .resource-properties,.resource-gpu .system-properties {grid-template-columns:1fr}}
 
 .prompt-path { overflow-wrap: anywhere; }
+.clients-dialog .dialog-content { display: grid; gap: 16px; }
+#clientsStatus, #clientsResult { display: grid; gap: 8px; }
+#clientsResult:empty, #clientsProgress:empty { display: none; }
+#clientsResult ul { margin: 0; padding-left: 24px; }
 #promptsDialog .dialog-heading h2 { min-width:0; overflow-wrap:anywhere; }
 #promptsClose { flex-shrink:0; }
 .prompt-selected-status { margin-block:12px; }

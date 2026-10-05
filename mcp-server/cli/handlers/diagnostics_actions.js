@@ -1,4 +1,5 @@
 import { handleCasAction } from './cas_actions.js';
+import { handleClientAction } from './client_actions.js';
 import { handleUninstallAction } from './uninstall_actions.js';
 import { handleMaintenanceAction } from './maintenance_actions.js';
 import { hybridQuery } from "../../retrieval/retriever.js";
@@ -9,6 +10,7 @@ import {
 } from "../ui.js";
 
 export async function handleDiagnosticsAction(value, config, stats) {
+  if (['client_status','client_probe'].includes(value)) return handleClientAction(value);
   if (['client_uninstall','client_restore'].includes(value)) return handleUninstallAction(value);
   if (['graph_test','cas_cleanup','cas_restore','cas_resume'].includes(value)) return handleCasAction(value);
   switch (value) {

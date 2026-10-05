@@ -16,6 +16,7 @@ import { resourceOverview } from '../services/resource_service.js';
 import { promptRequest } from '../services/prompt_service.js';
 import { maintenanceRequest } from '../services/maintenance_service.js';
 import { diagnosticsRequest } from '../services/diagnostics_service.js';
+import { clientRequest } from '../services/client_service.js';
 import { uninstallRequest } from '../services/uninstall_service.js';
 import { ragMaintenanceRequest, RAG_FILE_LIMIT } from '../services/rag_maintenance_service.js';
 import { directiveTransferRequest } from '../services/directive_transfer_service.js';
@@ -29,7 +30,7 @@ for (const [name, type] of [
   ["favicon-16x16.png", "image/png"],
   ["apple-touch-icon.png", "image/png"]
 ]) assets.set(`/${name}`, [name, type]);
-const statuses = { INVALID: 400, CONFIRMATION: 400, CONFLICT: 409, MIGRATION_REQUIRED: 409, NOT_FOUND: 404, UNSUPPORTED: 422 };
+const statuses = { INVALID: 400, CONFIRMATION: 400, CONFLICT: 409, BUSY: 409, MIGRATION_REQUIRED: 409, NOT_FOUND: 404, UNSUPPORTED: 422 };
 statuses.BUSY = 503;
 statuses.STORAGE_UNAVAILABLE = 503;
 statuses.RECOVERY_REQUIRED = 409;
@@ -49,6 +50,7 @@ assets.set('/resources.js', ['resources.js', 'text/javascript; charset=utf-8']);
 assets.set('/prompts.js', ['prompts.js', 'text/javascript; charset=utf-8']);
 assets.set('/maintenance.js', ['maintenance.js', 'text/javascript; charset=utf-8']);
 assets.set('/diagnostics.js', ['diagnostics.js', 'text/javascript; charset=utf-8']);
+assets.set('/clients.js', ['clients.js', 'text/javascript; charset=utf-8']);
 assets.set('/uninstall.js', ['uninstall.js', 'text/javascript; charset=utf-8']);
 assets.set('/persona.js', ['persona.js', 'text/javascript; charset=utf-8']);
 assets.set('/directive_transfer.js', ['directive_transfer.js', 'text/javascript; charset=utf-8']);
@@ -155,6 +157,10 @@ export async function startDashboard({ port = 0, token = randomBytes(32).toStrin
         if (url.search) return json(400, { code: 'INVALID', error: 'No uninstall query parameters allowed.' });
         return json(200, await uninstallRequest({ action: 'status' }));
       }
+      if (req.method === 'GET' && url.pathname === '/api/clients') {
+        if (url.search) return json(400, { code: 'INVALID', error: 'Client status takes no query parameters.' });
+        return json(200, await clientRequest({ action: 'status' }));
+      }
       if (req.method === 'GET' && url.pathname === '/api/rag-maintenance') {
         if (url.search) return json(400, { code: 'INVALID', error: 'RAG status takes no parameters.' });
         return json(200, await ragMaintenanceRequest({ action: 'status' }));
@@ -169,7 +175,7 @@ export async function startDashboard({ port = 0, token = randomBytes(32).toStrin
         if (Object.keys(input).some(key => !['key', 'client'].includes(key)) || [...url.searchParams.keys()].some(key => url.searchParams.getAll(key).length > 1)) return json(400, { code: 'INVALID', error: 'Unknown or repeated persona parameter.' });
         return json(200, await previewNotebookPersona(input));
       }
-      if (req.method === "POST" && ['/api/uninstall', '/api/diagnostics', '/api/rag-maintenance', '/api/maintenance', '/api/prompts', '/api/directive-transfer', '/api/notebook', '/api/knowledge-links','/api/knowledge-content','/api/knowledge-removal','/api/projects','/api/settings','/api/snapshots','/api/models'].includes(url.pathname)) {
+      if (req.method === "POST" && ['/api/clients', '/api/uninstall', '/api/diagnostics', '/api/rag-maintenance', '/api/maintenance', '/api/prompts', '/api/directive-transfer', '/api/notebook', '/api/knowledge-links','/api/knowledge-content','/api/knowledge-removal','/api/projects','/api/settings','/api/snapshots','/api/models'].includes(url.pathname)) {
         if (req.headers.origin !== origin || req.headers["content-type"] !== "application/json") return json(403, { error: "Same-origin JSON required." });
         let size = 0;
         const chunks = [];
@@ -184,6 +190,7 @@ export async function startDashboard({ port = 0, token = randomBytes(32).toStrin
         if (url.pathname === '/api/rag-maintenance') return json(200, await ragMaintenanceRequest(input));
         if (url.pathname === '/api/maintenance') return json(200, await maintenanceRequest(input));
         if (url.pathname === '/api/diagnostics') return json(200, await diagnosticsRequest(input));
+        if (url.pathname === '/api/clients') return json(200, await clientRequest(input));
         if (url.pathname === '/api/uninstall') return json(200, await uninstallRequest(input));
         if (url.pathname === '/api/prompts') return json(200, await promptRequest(input));
         if (url.pathname === '/api/directive-transfer') return json(200, await directiveTransferRequest(input));

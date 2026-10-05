@@ -26,7 +26,7 @@ function codexPluginSetting(text) {
   return enabled[1] === 'true';
 }
 
-function projectConfigDirectories(cwd) {
+export function projectConfigDirectories(cwd) {
   const current = resolve(cwd);
   const directories = [];
   for (let dir = current; ; dir = dirname(dir)) {
@@ -36,7 +36,8 @@ function projectConfigDirectories(cwd) {
   }
 }
 
-export async function integrationStatus(client, { paths = resolveClientPaths(), cwd = paths.cwd } = {}) {
+export async function integrationStatus(client, { paths = resolveClientPaths(), cwd = paths.cwd,
+  textReader = textAt, jsonReader = readJsonConfig } = {}) {
   if (!['codex', 'claude'].includes(client)) throw new Error('Client must be codex or claude');
   let pluginEnabled = false;
   let direct = false;
@@ -46,7 +47,7 @@ export async function integrationStatus(client, { paths = resolveClientPaths(), 
   const configPath = client === 'codex' ? paths.codexConfigPath : paths.claudeConfigPath;
   const projectDirectories = projectConfigDirectories(cwd);
   if (client === 'codex') {
-    const config = await textAt(configPath);
+    const config = await textReader(configPath);
     const sections = getCodexMemoryAgentSections(config).filter(s => s.exact);
     direct = sections.some(s => isMemoryPluginOwnedSection(s.text));
     foreignDirect = sections.some(s => !isMemoryPluginOwnedSection(s.text));
@@ -61,24 +62,24 @@ export async function integrationStatus(client, { paths = resolveClientPaths(), 
     for (const dir of projectDirectories) {
       const file = join(dir, '.codex', 'config.toml');
       if (resolve(file) === resolve(configPath)) continue;
-      const project = await textAt(file);
+      const project = await textReader(file);
       pluginEnabled = codexPluginSetting(project) ?? pluginEnabled;
       projectDirect ||= getCodexMemoryAgentSections(project).length > 0;
     }
   } else {
-    const config = await readJsonConfig(configPath);
+    const config = await jsonReader(configPath);
     const entry = config.mcpServers?.['memory-agent'];
     direct = !!entry && isMemoryMcpServerEntry(entry);
     foreignDirect = !!entry && !direct;
     memoryDirOverride = entry?.env?.MEMORY_DIR || (entry?.env?.OPENCODE_CONFIG_DIR ? join(entry.env.OPENCODE_CONFIG_DIR, 'memory') : undefined);
     for (const file of [join(paths.claudeDir, 'settings.json'), ...projectDirectories.flatMap(dir => [join(dir, '.claude', 'settings.json'), join(dir, '.claude', 'settings.local.json')])]) {
-      const settings = await readJsonConfig(file);
+      const settings = await jsonReader(file);
       const flag = settings.enabledPlugins?.[PLUGIN_SELECTOR];
       if (flag !== undefined && typeof flag !== 'boolean') throw new Error(`Invalid plugin state in ${file}`);
       pluginEnabled = flag ?? pluginEnabled;
     }
     for (const dir of projectDirectories) {
-      const project = await readJsonConfig(join(dir, '.mcp.json'));
+      const project = await jsonReader(join(dir, '.mcp.json'));
       projectDirect ||= !!project.mcpServers?.['memory-agent'];
     }
   }

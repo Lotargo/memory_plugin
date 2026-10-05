@@ -172,20 +172,13 @@ export async function switchToDirect(client, { runNative = native } = {}) {
 }
 
 export async function marketplaceDoctor(client) {
-  const status = await integrationStatus(client);
-  if (status.mode !== 'marketplace') throw new Error(`Expected one marketplace integration; current mode: ${status.mode}`);
-  const listed = JSON.parse(native(client, ['plugin', 'list', '--json']).stdout);
-  const installed = client === 'codex' ? listed.installed?.find(p => p.pluginId === PLUGIN_SELECTOR) : listed.find(p => p.id === PLUGIN_SELECTOR);
-  if (!installed?.enabled) throw new Error('The native client does not list an enabled memory plugin');
-  const installedPath = client === 'claude' ? installed.installPath : installed.source?.path;
-  if (!installedPath) throw new Error('Native client did not expose a local plugin path');
-  const receipt = JSON.parse(await readFile(join(installedPath, 'runtime.json'), 'utf8'));
-  const { runDirectMcpSmoke } = await import('./codex_diagnostics.js');
-  const smoke = await runDirectMcpSmoke({ command: process.execPath, args: [join(installedPath, 'scripts', 'entry.cjs'), 'mcp'] });
-  if (!smoke.memoryInfo.includes(receipt.memoryDir) || !smoke.memoryInfo.includes(`Version: ${receipt.version}`)) throw new Error('The installed adapter reported a different runtime or memory directory');
-  return { ok: true, client, installedPath, version: receipt.version, memoryDir: receipt.memoryDir,
-    toolCount: smoke.toolNames.length, initialize: 'PASS', memoryInfo: 'PASS', recall: 'PASS',
-    automaticInitialization: 'UNVERIFIED: review/trust the SessionStart hook and verify its delivery in a new client session' };
+  const { clientRequest } = await import('./services/client_service.js');
+  const status = await clientRequest({ action: 'status', client });
+  const item = status.items[0];
+  if (!item?.version || item.channel?.mode !== 'marketplace') throw new Error('Expected one available marketplace integration. Refresh client status.');
+  const result = await clientRequest({ action: 'probe', client, operation: 'doctor', expectedVersion: item.version });
+  if (result.status !== 'passed') throw new Error('Marketplace doctor: ' + (result.code || result.status));
+  return { ...result, ok: true };
 }
 
 export async function handleMarketplaceCommand(args) {
@@ -214,7 +207,14 @@ export async function handleMarketplaceCommand(args) {
       native(flags['--client'], ['plugin', flags['--client'] === 'codex' ? 'remove' : 'uninstall', PLUGIN_SELECTOR]);
       result = await integrationStatus(flags['--client']);
       if (result.pluginEnabled) throw new Error('Plugin remains enabled in another configuration scope');
-    } else result = await Promise.all((flags['--client'] ? [flags['--client']] : ['codex', 'claude']).map(c => integrationStatus(c)));
+    } else {
+      if (flags['--client'] && !['codex','claude'].includes(flags['--client'])) throw new Error('--client codex|claude is required');
+      const { clientRequest } = await import('./services/client_service.js');
+      const snapshot = await clientRequest({ action: 'status', ...(flags['--client'] ? { client: flags['--client'] } : {}) });
+      result = snapshot.items.filter(item => ['codex','claude'].includes(item.client)).map(item => ({ ...item, selector: PLUGIN_SELECTOR,
+        pluginEnabled: item.channel?.marketplace ?? null, direct: item.channel?.direct ?? null, foreignDirect: item.channel?.foreign ?? null,
+        projectDirect: item.channel?.project ?? null, conflict: item.channel?.conflict ?? null, mode: item.channel?.mode || 'unknown', configPath: item.files[0]?.path }));
+    }
     console.log(JSON.stringify(result, null, 2));
   } catch (error) { console.error(`Marketplace: ${error.message}`); process.exitCode = 1; }
 }

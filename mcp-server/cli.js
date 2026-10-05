@@ -353,6 +353,8 @@ async function showCategorySubmenu(category, config, stats, initialIndex = 0) {
         { label: '[CAS] Review Unused RAG Files', value: 'cas_cleanup', info: 'Exact files, fresh preview and verified recovery ZIP' },
         { label: '[CAS] Restore RAG Files from Backup', value: 'cas_restore', info: 'Fixed receipt ID; existing files are never overwritten' },
         { label: '[CAS] Resume Interrupted Cleanup', value: 'cas_resume', info: 'Review remaining files and revived references' },
+        { label: '[CLIENT] Integration Status', value: 'client_status', info: 'Local files/PATH only; configured is not live session acceptance' },
+        { label: '[CLIENT] Run Explicit Probe', value: 'client_probe', info: 'Fixed version or memory adapter doctor, bounded process' },
         { label: '[CLIENT] Review Integration Removal', value: 'client_uninstall', info: 'Fixed global client files; private backup, no memory/package/cache purge' },
         { label: '[CLIENT] Restore Integration Files', value: 'client_restore', info: 'Exact receipt, fresh review, changed files are never overwritten' },
         {

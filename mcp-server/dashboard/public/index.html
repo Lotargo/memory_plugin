@@ -40,6 +40,7 @@
         <button type="button" id="openMaintenance" aria-haspopup="dialog">Обслуживание</button>
         <button type="button" id="openDiagnostics" aria-haspopup="dialog">Диагностика и файлы RAG</button>
         <button type="button" id="openUninstall" aria-haspopup="dialog">Удаление интеграции</button>
+        <button type="button" id="openClients" aria-haspopup="dialog">Клиентские интеграции</button>
         <button type="button" id="system" aria-label="Состояние хранилища">Хранилище <span id="version" class="caption"></span></button>
       </div>
     </aside>
@@ -139,6 +140,19 @@
     <div id="transferResults"></div>
     <label id="transferShareConfirmation" class="check-option" hidden><input id="transferShareConfirm" type="checkbox">Подтверждаю открытие перечисленных источников целевой области</label>
     <div class="dialog-actions"><button id="transferPreview" type="button" class="button secondary">Обновить предпросмотр</button><button id="transferConfirm" type="button" class="button primary" disabled>Подтвердить перенос</button></div>
+  </dialog>
+  <dialog id="clientsDialog" class="dialog persona-dialog clients-dialog" aria-labelledby="clientsHeading">
+    <div class="dialog-content">
+      <h2 id="clientsHeading">Клиентские интеграции</h2>
+      <p class="caption">Статус читает локальные файлы. Проверка запускается отдельно и показывает результат конкретного процесса.</p>
+      <div class="field"><label for="clientsClient">Клиент</label><select id="clientsClient"><option value="opencode">OpenCode</option><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="gemini">Gemini CLI</option><option value="antigravity">Antigravity</option></select></div>
+      <div id="clientsStatus"></div>
+      <div class="field"><label for="clientsOperation">Проверка</label><select id="clientsOperation" aria-describedby="clientsProbeHint"><option value="version">Версия CLI</option><option value="doctor">Адаптер памяти (MCP)</option></select><p id="clientsProbeHint" class="caption">Лимит 20 секунд и 256 KiB вывода. Проверка адаптера поддерживает один принадлежащий плагину Node/boot.js или Codex/Claude marketplace. Npx, чужие команды и проектные переопределения не запускаются.</p></div>
+      <p id="clientsError" class="inline-error" role="alert" hidden></p>
+      <p id="clientsProgress" class="caption" role="status"></p>
+      <div id="clientsResult" aria-live="polite"></div>
+    </div>
+    <div class="dialog-actions"><button id="clientsClose" type="button" class="button secondary">Закрыть</button><button id="clientsRefresh" type="button" class="button secondary">Обновить статус</button><button id="clientsRun" type="button" class="button primary" disabled>Запустить проверку</button></div>
   </dialog>
   <dialog id="uninstallDialog" class="dialog persona-dialog" aria-labelledby="uninstallHeading">
     <div class="dialog-heading"><h2 id="uninstallHeading">Удаление интеграции клиента</h2><button type="button" id="uninstallClose" class="button ghost">Закрыть</button></div>
