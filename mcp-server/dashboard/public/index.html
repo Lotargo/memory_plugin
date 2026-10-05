@@ -38,6 +38,7 @@
         <button type="button" id="openSettings" aria-haspopup="dialog">Настройки</button>
         <button type="button" id="openModels" aria-haspopup="dialog">Модели</button>
         <button type="button" id="openMaintenance" aria-haspopup="dialog">Обслуживание</button>
+        <button type="button" id="openDiagnostics" aria-haspopup="dialog">Диагностика и файлы RAG</button>
         <button type="button" id="system" aria-label="Состояние хранилища">Хранилище <span id="version" class="caption"></span></button>
       </div>
     </aside>
@@ -137,6 +138,21 @@
     <div id="transferResults"></div>
     <label id="transferShareConfirmation" class="check-option" hidden><input id="transferShareConfirm" type="checkbox">Подтверждаю открытие перечисленных источников целевой области</label>
     <div class="dialog-actions"><button id="transferPreview" type="button" class="button secondary">Обновить предпросмотр</button><button id="transferConfirm" type="button" class="button primary" disabled>Подтвердить перенос</button></div>
+  </dialog>
+  <dialog id="diagnosticsDialog" class="dialog persona-dialog" aria-labelledby="diagnosticsHeading">
+    <div class="dialog-heading"><h2 id="diagnosticsHeading">Диагностика и файлы RAG</h2><button type="button" id="diagnosticsClose" class="button ghost">Закрыть</button></div>
+    <div class="form-grid">
+      <div class="field"><label for="diagnosticsOperation">Операция</label><select id="diagnosticsOperation" aria-describedby="diagnosticsHint diagnosticsError"><option value="graph-check">Проверить движок во временном хранилище</option><option value="cleanup-blobs">Очистить неиспользуемые файлы RAG</option><option value="restore-blobs">Восстановить файлы из резервного ZIP</option><option value="resume-cleanup">Продолжить прерванную очистку</option></select></div>
+      <div class="field" id="diagnosticsBackupField" hidden><label for="diagnosticsBackup">Квитанция с резервным ZIP</label><select id="diagnosticsBackup" aria-describedby="diagnosticsHint diagnosticsError"></select></div>
+      <button type="button" id="diagnosticsRefresh" class="button secondary">Обновить состояние</button>
+    </div>
+    <p id="diagnosticsHint" class="caption"></p>
+    <p id="diagnosticsCounts" class="caption"></p>
+    <p id="diagnosticsError" class="inline-error" role="alert" hidden></p>
+    <p id="diagnosticsResult" role="status" class="prompt-path"></p>
+    <details id="diagnosticsReceipts" hidden><summary>Квитанции операций с файлами</summary><ul id="diagnosticsReceiptList"></ul></details>
+    <div id="diagnosticsPreview" class="knowledge-text"></div>
+    <div class="dialog-actions"><button type="button" id="diagnosticsReview" class="button secondary">Запустить проверку</button><button type="button" id="diagnosticsApply" class="button primary" disabled>Подтвердить проверенную операцию</button></div>
   </dialog>
   <dialog id="maintenanceDialog" class="dialog persona-dialog" aria-labelledby="maintenanceHeading">
     <div class="dialog-heading"><h2 id="maintenanceHeading">Обслуживание памяти</h2><button type="button" id="maintenanceClose" class="button ghost">Закрыть</button></div>

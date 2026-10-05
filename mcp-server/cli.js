@@ -348,8 +348,11 @@ async function showCategorySubmenu(category, config, stats, initialIndex = 0) {
         {
           label: "[GRAPH] Graph & Notebook Linking Verification",
           value: "graph_test",
-          info: "Ingest sample doc + save Notebook fact linked to line range + verify recall & raw document reader",
+          info: "Isolated temporary store: Notebook, scoped links, graph, saved raw and lexical retrieval; no models/cloud",
         },
+        { label: '[CAS] Review Unused RAG Files', value: 'cas_cleanup', info: 'Exact files, fresh preview and verified recovery ZIP' },
+        { label: '[CAS] Restore RAG Files from Backup', value: 'cas_restore', info: 'Fixed receipt ID; existing files are never overwritten' },
+        { label: '[CAS] Resume Interrupted Cleanup', value: 'cas_resume', info: 'Review remaining files and revived references' },
         {
           label: "[RESET] Reset Config to Factory Defaults",
           value: "reset",

@@ -335,7 +335,7 @@ Higher-priority platform and safety instructions remain authoritative.
 
 The panel's **Обслуживание** reviews title migration for one Notebook and global legacy persona classification before writing. It shows stable IDs assigned to old records, checks the Notebook and source-link versions, and verifies a pinned full local ZIP before publishing through the shared recovery journal. Knowledge-link migration must already be complete; use **Знания → Подготовить связи** if needed. Client files are synchronized separately through **Инструкции → Файлы клиентов**.
 
-Settings reset/restore in **Обслуживание** covers search, models and source-access preferences, with a local integrity-checked backup and a fresh preview before restoration. Storage mode, cloud credentials, snapshot schedule, migration guards, port and startup remain preserved. Model owners and existing vectors require separate runtime commands or reindexing. Isolated diagnostics, cleanup and uninstall UI remain planned.
+Settings reset/restore in **Обслуживание** covers search, models and source-access preferences, with a local integrity-checked backup and a fresh preview before restoration. Storage mode, cloud credentials, snapshot schedule, migration guards, port and startup remain preserved. Model owners and existing vectors require separate runtime commands or reindexing. Uninstall UI remains planned.
 
 ```bash
 memory-cli maintenance status
@@ -367,6 +367,25 @@ memory-cli rag-maintenance download --snapshot-id <id> --output-path <new-file.j
 ```
 
 `memory-plugin rag-maintenance` accepts the same commands. `manage_knowledge_base` exposes `rag_status`, `export_snapshot`, `import_snapshot`, `reset_rag`, and `rag_receipt`. Import/reset return a preview first; apply uses its immutable `snapshotId` (import), `importMode`, `previewToken` and `confirm:true`. Explicit project/scoped fields are rejected for these whole-RAG operations. CLI output files must be new files; existing export paths are not overwritten. Custom-database low-level helpers remain compatibility primitives for isolated callers, rather than reviewed user endpoints. Maintenance runs synchronously under shared locks; background execution and cancellation are not provided for these bounded operations.
+
+**Диагностика и файлы RAG** runs an engine check in a separate process with a temporary home: Notebook write/readback, source links and graph projection, saved text and lexical retrieval. It does not load models, contact cloud services, inspect a client's active session or write test records to working memory. The TUI graph check uses the same isolated service.
+
+The same section reviews unused content-addressed RAG files across **all local scopes**. It lists exact hashes and bytes; fresh reference/file/recovery checks precede removal. Referenced, foreign, linked and corrupt files are preserved. A verified local ZIP contains the unused bytes themselves, which ordinary full snapshots omit. **Active CAS reduction is not net disk space freed**: the recovery ZIP remains under `maintenance-blobs`. Notebook, SQLite/indexes, models, client files and snapshot history are preserved. Cleanup and recovery do not call cloud services.
+
+If interrupted or if a response is lost, refresh the receipt list first. Choose the exact receipt and review **Продолжить прерванную очистку** or **Восстановить файлы из резервного ZIP**. Resume protects files that became referenced; restore only publishes missing files, never overwrites an existing different file, and can itself be retried from a fresh review after interruption. Normal status reads do not resume pending writes. Inspection is limited to 2000 eligible files, 64 MiB compressed bytes and 128 MiB unpacked bytes; unsupported inventories make no changes. These operations run synchronously; background queues/cancellation and backup expiration are not included.
+
+```bash
+memory-cli diagnostics status
+memory-cli diagnostics run --operation graph-check
+memory-cli diagnostics preview --operation cleanup-blobs
+memory-cli diagnostics apply --operation cleanup-blobs --preview-token <token> --confirm
+memory-cli diagnostics receipt --operation-id <id>
+memory-cli diagnostics preview --operation restore-blobs --backup-id <receipt-id>
+memory-cli diagnostics preview --operation resume-cleanup --backup-id <receipt-id>
+memory-cli diagnostics apply --operation restore-blobs --backup-id <receipt-id> --preview-token <token> --confirm
+```
+
+`memory-plugin diagnostics` accepts the same commands. TUI **Diagnostics & System Actions** provides graph check, unused-file cleanup, restore and resume. Client `doctor`, setup/uninstall and hybrid/batch search remain separate operations; the isolated lexical check does not establish their acceptance.
 
 ---
 

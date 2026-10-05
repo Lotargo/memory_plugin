@@ -15,6 +15,7 @@ import { modelsRequest } from '../services/model_service.js';
 import { resourceOverview } from '../services/resource_service.js';
 import { promptRequest } from '../services/prompt_service.js';
 import { maintenanceRequest } from '../services/maintenance_service.js';
+import { diagnosticsRequest } from '../services/diagnostics_service.js';
 import { ragMaintenanceRequest, RAG_FILE_LIMIT } from '../services/rag_maintenance_service.js';
 import { directiveTransferRequest } from '../services/directive_transfer_service.js';
 import { startSnapshotScheduler, stopSnapshotScheduler } from '../admin/cloud_snapshots.js';
@@ -46,6 +47,7 @@ assets.set('/models.js', ['models.js', 'text/javascript; charset=utf-8']);
 assets.set('/resources.js', ['resources.js', 'text/javascript; charset=utf-8']);
 assets.set('/prompts.js', ['prompts.js', 'text/javascript; charset=utf-8']);
 assets.set('/maintenance.js', ['maintenance.js', 'text/javascript; charset=utf-8']);
+assets.set('/diagnostics.js', ['diagnostics.js', 'text/javascript; charset=utf-8']);
 assets.set('/persona.js', ['persona.js', 'text/javascript; charset=utf-8']);
 assets.set('/directive_transfer.js', ['directive_transfer.js', 'text/javascript; charset=utf-8']);
 
@@ -143,6 +145,10 @@ export async function startDashboard({ port = 0, token = randomBytes(32).toStrin
         if (url.search) return json(400, { code: 'INVALID', error: 'Maintenance status takes no parameters.' });
         return json(200, await maintenanceRequest({ action: 'status' }));
       }
+      if (req.method === 'GET' && url.pathname === '/api/diagnostics') {
+        if (url.search) return json(400, { error: 'Unexpected query parameters.', code: 'INVALID' });
+        return json(200, await diagnosticsRequest({ action: 'status' }));
+      }
       if (req.method === 'GET' && url.pathname === '/api/rag-maintenance') {
         if (url.search) return json(400, { code: 'INVALID', error: 'RAG status takes no parameters.' });
         return json(200, await ragMaintenanceRequest({ action: 'status' }));
@@ -157,7 +163,7 @@ export async function startDashboard({ port = 0, token = randomBytes(32).toStrin
         if (Object.keys(input).some(key => !['key', 'client'].includes(key)) || [...url.searchParams.keys()].some(key => url.searchParams.getAll(key).length > 1)) return json(400, { code: 'INVALID', error: 'Unknown or repeated persona parameter.' });
         return json(200, await previewNotebookPersona(input));
       }
-      if (req.method === "POST" && ['/api/rag-maintenance', '/api/maintenance', '/api/prompts', '/api/directive-transfer', '/api/notebook', '/api/knowledge-links','/api/knowledge-content','/api/knowledge-removal','/api/projects','/api/settings','/api/snapshots','/api/models'].includes(url.pathname)) {
+      if (req.method === "POST" && ['/api/diagnostics', '/api/rag-maintenance', '/api/maintenance', '/api/prompts', '/api/directive-transfer', '/api/notebook', '/api/knowledge-links','/api/knowledge-content','/api/knowledge-removal','/api/projects','/api/settings','/api/snapshots','/api/models'].includes(url.pathname)) {
         if (req.headers.origin !== origin || req.headers["content-type"] !== "application/json") return json(403, { error: "Same-origin JSON required." });
         let size = 0;
         const chunks = [];
@@ -171,6 +177,7 @@ export async function startDashboard({ port = 0, token = randomBytes(32).toStrin
         if (!input || typeof input !== "object" || Array.isArray(input)) return json(400, { error: "Object required." });
         if (url.pathname === '/api/rag-maintenance') return json(200, await ragMaintenanceRequest(input));
         if (url.pathname === '/api/maintenance') return json(200, await maintenanceRequest(input));
+        if (url.pathname === '/api/diagnostics') return json(200, await diagnosticsRequest(input));
         if (url.pathname === '/api/prompts') return json(200, await promptRequest(input));
         if (url.pathname === '/api/directive-transfer') return json(200, await directiveTransferRequest(input));
         if(url.pathname==='/api/models')return json(200,await modelsRequest(input));
