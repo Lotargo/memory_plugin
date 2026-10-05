@@ -1,4 +1,5 @@
 import { KNOWLEDGE_REMOVAL_DESCRIPTION, KNOWLEDGE_REMOVAL_FIELDS, knowledgeRemovalTool } from '../mcp-server/tools/core/knowledge_removal_core.js';
+import { RAG_MAINTENANCE_ACTIONS, executeRagMaintenanceTool } from '../mcp-server/tools/core/rag_maintenance_core.js';
 // Static ESM imports: top-level `await import(...)` blocked module evaluation
 // and made this file an async module for every consumer.
 import { mkdir, cp, readdir } from "node:fs/promises";
@@ -563,15 +564,22 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
         args: {
           action: {
             type: "string",
-            description: "Management action: 'stats', 'list', 'read_document', 'delete', 'export_snapshot', 'import_snapshot'",
+            description: "Management action: stats, list, read_document, delete, export_snapshot, import_snapshot, rag_status, reset_rag, rag_receipt. Import/reset return preview, then require previewToken and confirm.",
           },
           docId: { type: "string", description: "Document ID, title, or path (required for read_document and delete)" },
           snapshotPath: { type: "string", description: "File path for snapshot export/import" },
+          snapshotId: {type:'string',description:'Immutable RAG input ID from preview'},
+          importMode: {type:'string',description:'merge or replace; all local RAG scopes'},
+          previewToken: {type:'string',description:'Fresh RAG preview token'},
+          confirm: {type:'boolean',description:'Explicit approval of reviewed all-local-RAG effects'},
+          operationId: {type:'string',description:'Committed RAG receipt ID'},
           scope: { type: "string", description: "For stats/list/read: global + current project by default. Delete defaults to the current project (or global outside Git); pass all/global explicitly for broader removal" },
           directory: { type: "string", description: "Optional workspace/project directory path to target" },
           project: { type: "string", description: "Alias for directory" },
         },
-        async execute({ action, docId, snapshotPath, scope, directory, project }, { worktree, directory: ctxDir }) {
+        async execute(input, { worktree, directory: ctxDir } = {}) {
+          if(RAG_MAINTENANCE_ACTIONS.includes(input.action))return JSON.stringify(await executeRagMaintenanceTool(input),null,2);
+          const { action, docId, snapshotPath, scope, directory, project }=input;
           const { getDatabase } = await import("../mcp-server/db/database.js");
           const db = await getDatabase();
           const effectiveDir = directory || project || ctxDir;
@@ -665,21 +673,6 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
             }
             const { deleteDocument } = await import("../mcp-server/ingest/pipeline.js");
             const result = scopeRemoval;
-            return JSON.stringify(result, null, 2);
-          }
-
-          if (action === "export_snapshot") {
-            const { exportSnapshot } = await import("../mcp-server/admin/snapshot.js");
-            const result = await exportSnapshot({ customDb: db, outputPath: snapshotPath || null });
-            return snapshotPath
-              ? `Snapshot exported successfully to ${snapshotPath}`
-              : JSON.stringify(result, null, 2);
-          }
-
-          if (action === "import_snapshot") {
-            if (!snapshotPath) throw new Error("snapshotPath parameter is required for import_snapshot action");
-            const { importSnapshot } = await import("../mcp-server/admin/snapshot.js");
-            const result = await importSnapshot({ customDb: db, snapshotPathOrData: snapshotPath });
             return JSON.stringify(result, null, 2);
           }
 

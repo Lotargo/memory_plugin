@@ -71,6 +71,14 @@ export function listAvailableSnapshots() {
 }
 
 export async function exportSnapshot({ customDb = null, customBlobDir = BLOBS_DIR, outputPath = null } = {}) {
+  if (!customDb && customBlobDir === BLOBS_DIR) {
+    const { ragMaintenanceRequest } = await import('../services/rag_maintenance_service.js');
+    const record = await ragMaintenanceRequest({ action:'export' });
+    const {data} = await ragMaintenanceRequest({action:'download',snapshotId:record.snapshotId});
+    const bytes=Buffer.from(data,'base64'), snapshot=JSON.parse(safeGunzip(bytes).toString('utf8'));
+    if(outputPath) {const file=validateSnapshotPath(outputPath,true);writeFileSync(file,file.endsWith('.gz')?bytes:JSON.stringify(snapshot,null,2),{flag:'wx'});return {snapshot,outputPath:file,snapshotId:record.snapshotId};}
+    return {snapshot,outputPath:record.outputPath,snapshotId:record.snapshotId};
+  }
   return withSnapshotLock(MEMORY_DIR, () => exportSnapshotLocked({ customDb, customBlobDir, outputPath }));
 }
 async function exportSnapshotLocked({ customDb = null, customBlobDir = BLOBS_DIR, outputPath = null } = {}) {
@@ -138,6 +146,13 @@ async function exportSnapshotLocked({ customDb = null, customBlobDir = BLOBS_DIR
 }
 
 export async function importSnapshot({ customDb = null, customBlobDir = BLOBS_DIR, snapshotPathOrData } = {}) {
+  if (!customDb && customBlobDir === BLOBS_DIR) {
+    const { ragMaintenanceRequest, stageRagFile } = await import('../services/rag_maintenance_service.js');
+    const staged=typeof snapshotPathOrData==='string'?await stageRagFile(snapshotPathOrData):await ragMaintenanceRequest({action:'stage',fileName:'legacy-input.json',data:Buffer.from(JSON.stringify(snapshotPathOrData)).toString('base64')});
+    const fields={operation:'import',snapshotId:staged.snapshotId,mode:'merge'},preview=await ragMaintenanceRequest({action:'preview',...fields});
+    const result=await ragMaintenanceRequest({action:'apply',...fields,previewToken:preview.previewToken,confirm:true});
+    return {...result,...Object.fromEntries(['documents','sections','medium_chunks','micro_chunks','graph_edges','knowledge_links','document_scopes','blobs'].map(key=>[key,staged.counts[key]||0]))};
+  }
   return withSnapshotLock(MEMORY_DIR, () => importSnapshotLocked({ customDb, customBlobDir, snapshotPathOrData }));
 }
 async function importSnapshotLocked({ customDb = null, customBlobDir = BLOBS_DIR, snapshotPathOrData } = {}) {
@@ -373,6 +388,12 @@ async function importSnapshotLocked({ customDb = null, customBlobDir = BLOBS_DIR
 }
 
 export async function hardResetDatabase({ customDb = null, customBlobDir = BLOBS_DIR } = {}) {
+  if (!customDb && customBlobDir === BLOBS_DIR) {
+    const {ragMaintenanceRequest}=await import('../services/rag_maintenance_service.js');
+    const preview=await ragMaintenanceRequest({action:'preview',operation:'reset'});
+    const result=await ragMaintenanceRequest({action:'apply',operation:'reset',previewToken:preview.previewToken,confirm:true});
+    return {...result,purgedDocuments:preview.before.documents,purgedChunks:preview.before.micro_chunks,purgedBlobs:0,blobsRetained:true};
+  }
   return withSnapshotLock(MEMORY_DIR, () => hardResetLocked({ customDb, customBlobDir }));
 }
 async function hardResetLocked({ customDb = null, customBlobDir = BLOBS_DIR } = {}) {

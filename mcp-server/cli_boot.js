@@ -30,7 +30,10 @@ if (major < MIN_MAJOR || (major === MIN_MAJOR && minor < MIN_MINOR)) {
 }
 
 // Version is OK — hand off to the real CLI.
-if (process.argv[2] === 'prompts') {
+if (process.argv[2] === 'rag-maintenance') {
+  const { handleRagMaintenanceCommand } = await import('./cli/rag_maintenance_commands.js');
+  await handleRagMaintenanceCommand(process.argv.slice(3));
+} else if (process.argv[2] === 'prompts') {
   const { handlePromptCommand } = await import('./cli/prompt_commands.js');
   await handlePromptCommand(process.argv.slice(3));
 } else if (process.argv[2] === 'notebook') {

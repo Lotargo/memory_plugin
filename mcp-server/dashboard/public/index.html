@@ -140,16 +140,20 @@
   </dialog>
   <dialog id="maintenanceDialog" class="dialog persona-dialog" aria-labelledby="maintenanceHeading">
     <div class="dialog-heading"><h2 id="maintenanceHeading">Обслуживание памяти</h2><button type="button" id="maintenanceClose" class="button ghost">Закрыть</button></div>
-    <p class="caption">Локальные операции. Перед записью проверьте область и изменения. RAG import/reset и удаление плагина пока доступны через CLI.</p>
+    <p class="caption">Локальные операции. Перед записью проверьте область и изменения. Операции RAG охватывают все локальные области знаний.</p>
     <div class="persona-controls">
-      <div class="field"><label for="maintenanceOperation">Операция</label><select id="maintenanceOperation"><option value="migrate-titles">Добавить legacy-заголовки</option><option value="migrate-persona">Уточнить legacy-инструкции</option><option value="reset-settings">Сбросить настройки поиска, моделей и источников</option><option value="restore-settings">Восстановить настройки из резервной копии</option></select></div>
+      <div class="field"><label for="maintenanceOperation">Операция</label><select id="maintenanceOperation"><option value="migrate-titles">Добавить legacy-заголовки</option><option value="migrate-persona">Уточнить legacy-инструкции</option><option value="reset-settings">Сбросить настройки поиска, моделей и источников</option><option value="restore-settings">Восстановить настройки из резервной копии</option><option value="rag-export">Экспортировать все локальные знания RAG</option><option value="rag-import">Импортировать снимок RAG</option><option value="rag-reset">Сбросить все локальные знания RAG</option></select></div>
       <div class="field" id="maintenanceTargetField"><label for="maintenanceTarget">Хранилище Notebook</label><select id="maintenanceTarget"></select></div>
       <div class="field" id="maintenanceBackupField" hidden><label for="maintenanceBackup">Резервная копия настроек</label><select id="maintenanceBackup"></select></div>
+      <div class="field" id="maintenanceRagFileField" hidden><label for="maintenanceRagFile">Добавить файл снимка</label><input id="maintenanceRagFile" type="file" accept=".json,.gz" aria-describedby="maintenanceRagFileHint maintenanceError"><p id="maintenanceRagFileHint" class="caption">JSON / JSON.gz до 32 МиБ; распакованный JSON до 128 МиБ. Файл проверяется и сохраняется локально для предпросмотра.</p></div>
+      <div class="field" id="maintenanceRagSnapshotField" hidden><label for="maintenanceRagSnapshot">Проверенный снимок RAG</label><select id="maintenanceRagSnapshot" aria-describedby="maintenanceError"></select><button type="button" id="maintenanceRagDownload" class="button ghost">Скачать выбранный снимок</button></div>
+      <div class="field" id="maintenanceRagModeField" hidden><label for="maintenanceRagMode">Режим импорта</label><select id="maintenanceRagMode"><option value="merge">Объединить: заменить затронутые документы целиком</option><option value="replace">Заменить все локальные знания RAG</option></select></div>
       <button type="button" id="maintenanceRefresh" class="button secondary">Обновить состояние</button>
     </div>
     <p id="maintenanceHint" class="caption"></p>
     <p id="maintenanceError" class="inline-error" role="alert" hidden></p>
     <p id="maintenanceResult" role="status" class="prompt-path"></p>
+    <details id="maintenanceRagReceipts" hidden><summary>Последние завершённые операции RAG</summary><ul id="maintenanceRagReceiptList"></ul></details>
     <div id="maintenancePreview"></div>
     <div class="dialog-actions"><button type="button" id="maintenanceReview" class="button secondary">Проверить изменения</button><button type="button" id="maintenanceApply" class="button primary" disabled>Подтвердить изменения</button></div>
   </dialog>

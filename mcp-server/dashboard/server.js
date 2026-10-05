@@ -1,6 +1,6 @@
 import {knowledgeRemovalRequest} from '../tools/core/knowledge_removal_core.js';
 import http from "node:http";
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes, timingSafeEqual, createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { notebookOverview, readNotebook, readNotebookCollection, mutateNotebook, previewNotebookPersona } from "../services/notebook_service.js";
 import { assertWebPort, parseWebCommand, WEB_USAGE } from "./options.js";
@@ -15,6 +15,7 @@ import { modelsRequest } from '../services/model_service.js';
 import { resourceOverview } from '../services/resource_service.js';
 import { promptRequest } from '../services/prompt_service.js';
 import { maintenanceRequest } from '../services/maintenance_service.js';
+import { ragMaintenanceRequest, RAG_FILE_LIMIT } from '../services/rag_maintenance_service.js';
 import { directiveTransferRequest } from '../services/directive_transfer_service.js';
 import { startSnapshotScheduler, stopSnapshotScheduler } from '../admin/cloud_snapshots.js';
 
@@ -51,7 +52,9 @@ assets.set('/directive_transfer.js', ['directive_transfer.js', 'text/javascript;
 export async function startDashboard({ port = 0, token = randomBytes(32).toString("hex"), runtime, onStop } = {}) {
   assertWebPort(port);
   if (!/^[a-f0-9]{64}$/.test(token)) throw new Error('Invalid panel connection token');
-  const cookieName = runtime ? `memory_session_${runtime.storageId.slice(0, 12)}` : null;
+  // Foreground panels also need HttpOnly authentication for native downloads;
+  // the token itself never enters a URL/query or DOM download link.
+  const cookieName = `memory_session_${(runtime?.storageId || createHash('sha256').update(token).digest('hex')).slice(0,12)}`;
   let origin;
   const server = http.createServer(async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
@@ -140,23 +143,33 @@ export async function startDashboard({ port = 0, token = randomBytes(32).toStrin
         if (url.search) return json(400, { code: 'INVALID', error: 'Maintenance status takes no parameters.' });
         return json(200, await maintenanceRequest({ action: 'status' }));
       }
+      if (req.method === 'GET' && url.pathname === '/api/rag-maintenance') {
+        if (url.search) return json(400, { code: 'INVALID', error: 'RAG status takes no parameters.' });
+        return json(200, await ragMaintenanceRequest({ action: 'status' }));
+      }
+      if (req.method === 'GET' && url.pathname === '/api/rag-maintenance/download') {
+        if([...url.searchParams.keys()].length!==1 || url.searchParams.getAll('snapshotId').length!==1)return json(400,{code:'INVALID',error:'Choose one exact RAG snapshot ID.'});
+        const file=await ragMaintenanceRequest({action:'download',snapshotId:url.searchParams.get('snapshotId')});
+        res.writeHead(200,{'Content-Type':'application/gzip','Content-Disposition':`attachment; filename="${file.fileName}"`});res.end(Buffer.from(file.data,'base64'));return;
+      }
       if (req.method === 'GET' && url.pathname === '/api/persona') {
         const input = Object.fromEntries(url.searchParams);
         if (Object.keys(input).some(key => !['key', 'client'].includes(key)) || [...url.searchParams.keys()].some(key => url.searchParams.getAll(key).length > 1)) return json(400, { code: 'INVALID', error: 'Unknown or repeated persona parameter.' });
         return json(200, await previewNotebookPersona(input));
       }
-      if (req.method === "POST" && ['/api/maintenance', '/api/prompts', '/api/directive-transfer', '/api/notebook', '/api/knowledge-links','/api/knowledge-content','/api/knowledge-removal','/api/projects','/api/settings','/api/snapshots','/api/models'].includes(url.pathname)) {
+      if (req.method === "POST" && ['/api/rag-maintenance', '/api/maintenance', '/api/prompts', '/api/directive-transfer', '/api/notebook', '/api/knowledge-links','/api/knowledge-content','/api/knowledge-removal','/api/projects','/api/settings','/api/snapshots','/api/models'].includes(url.pathname)) {
         if (req.headers.origin !== origin || req.headers["content-type"] !== "application/json") return json(403, { error: "Same-origin JSON required." });
         let size = 0;
         const chunks = [];
         for await (const chunk of req) {
           size += chunk.length;
-          if (size > (url.pathname === '/api/knowledge-content' ? 3 * 1024 * 1024 : 256000)) { json(413, { error: "Request too large." }); return; }
+          if (size > (url.pathname === '/api/rag-maintenance' ? Math.ceil(RAG_FILE_LIMIT/3)*4+4096 : url.pathname === '/api/knowledge-content' ? 3 * 1024 * 1024 : 256000)) { json(413, { error: "Request too large." }); return; }
           chunks.push(chunk);
         }
         let input;
         try { input = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return json(400, { error: "Invalid JSON." }); }
         if (!input || typeof input !== "object" || Array.isArray(input)) return json(400, { error: "Object required." });
+        if (url.pathname === '/api/rag-maintenance') return json(200, await ragMaintenanceRequest(input));
         if (url.pathname === '/api/maintenance') return json(200, await maintenanceRequest(input));
         if (url.pathname === '/api/prompts') return json(200, await promptRequest(input));
         if (url.pathname === '/api/directive-transfer') return json(200, await directiveTransferRequest(input));

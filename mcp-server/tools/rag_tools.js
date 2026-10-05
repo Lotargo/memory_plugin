@@ -10,6 +10,7 @@ import { readKnowledgeDocument, listKnowledgeDocuments } from "./core/knowledge_
 import { KNOWLEDGE_INSPECT_DESCRIPTION, KNOWLEDGE_INSPECT_FIELDS, inspectKnowledgeTool } from "./core/knowledge_inspect_core.js";
 import { KNOWLEDGE_LINKS_DESCRIPTION, KNOWLEDGE_LINKS_FIELDS, knowledgeLinksTool } from './core/knowledge_links_core.js';
 import { KNOWLEDGE_CONTENT_DESCRIPTION, KNOWLEDGE_CONTENT_FIELDS, knowledgeContentTool } from './core/knowledge_content_core.js';
+import { RAG_MAINTENANCE_ACTIONS, executeRagMaintenanceTool } from './core/rag_maintenance_core.js';
 
 export function registerRagTools(server) {
   const inspectSchema = Object.fromEntries(Object.entries(KNOWLEDGE_INSPECT_FIELDS).map(([key, field]) => {
@@ -162,15 +163,21 @@ export function registerRagTools(server) {
       description:
         "Manage the project-isolated RAG knowledge base: inspect stats, list documents/notes with source metadata, read full raw document/note, unlink/delete documents, or export/import complete snapshots.",
       inputSchema: z.object({
-        action: z.enum(["stats", "list", "read_document", "delete", "export_snapshot", "import_snapshot"]).describe("Management action"),
+        action: z.enum(["stats", "list", "read_document", "delete", "export_snapshot", "import_snapshot", "rag_status", "reset_rag", "rag_receipt"]).describe("Management action; import/reset return a preview first, then apply with snapshotId/previewToken/confirm"),
         docId: optStr().describe("Document ID, title, or path (required for read_document and delete)"),
         snapshotPath: optStr().describe("File path for snapshot export/import"),
+        snapshotId: optStr().describe('Immutable staged RAG snapshot ID from the import preview'),
+        importMode: z.enum(['merge','replace']).optional().describe('Merge replaces affected documents completely; replace targets all local RAG'),
+        previewToken: optStr().describe('Fresh RAG import/reset preview token'),
+        confirm: z.boolean().optional().describe('Explicit confirmation of reviewed all-local-RAG consequences'),
+        operationId: optStr().describe('Committed RAG operation receipt ID'),
         scope: z.enum(["all", "project", "global"]).nullish().describe("For stats/list/read: global + current project by default. Delete defaults to the current project (or global outside Git); pass all/global explicitly for broader removal"),
         directory: optStr().describe("Optional workspace/project directory path to target"),
         project: optStr().describe("Alias for directory"),
       }),
     },
-    async ({ action, docId, snapshotPath, scope, directory, project }) => {
+    async ({ action, docId, snapshotPath, snapshotId, importMode, previewToken, confirm, operationId, scope, directory, project }) => {
+      if (RAG_MAINTENANCE_ACTIONS.includes(action)) return {content:[{type:'text',text:JSON.stringify(await executeRagMaintenanceTool({action,docId,snapshotPath,snapshotId,importMode,previewToken,confirm,operationId,scope,directory,project}),null,2)}]};
       if (action === "read_document") {
         return {
           content: [{
@@ -249,21 +256,6 @@ export function registerRagTools(server) {
         }
         const { deleteDocument } = await import("../ingest/pipeline.js");
         const result = scopeRemoval;
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-      }
-
-      if (action === "export_snapshot") {
-        const { exportSnapshot } = await import("../admin/snapshot.js");
-        const result = await exportSnapshot({ customDb: db, outputPath: snapshotPath || null });
-        return {
-          content: [{ type: "text", text: snapshotPath ? `Snapshot exported successfully to ${snapshotPath}` : JSON.stringify(result, null, 2) }],
-        };
-      }
-
-      if (action === "import_snapshot") {
-        if (!snapshotPath) throw new Error("snapshotPath parameter is required for import_snapshot action");
-        const { importSnapshot } = await import("../admin/snapshot.js");
-        const result = await importSnapshot({ customDb: db, snapshotPathOrData: snapshotPath });
         return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       }
 

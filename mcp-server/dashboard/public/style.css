@@ -281,3 +281,9 @@ select,.appearance-control select,.list-filter-row select {
 #maintenanceClose { flex-shrink:0; }
 #maintenancePreview h3 { overflow-wrap:anywhere; }
 #maintenancePreview details { margin-block:.75rem; }
+#maintenanceDialog .persona-controls {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}
+#maintenanceDialog .persona-controls .field {min-width:0}
+#maintenanceDialog .persona-controls>.field:first-child,
+#maintenanceRagModeField,#maintenanceRefresh {grid-column:1/-1}
+#maintenanceRefresh {justify-self:start}
+@media(max-width:720px) {#maintenanceDialog .persona-controls {grid-template-columns:minmax(0,1fr)}}

@@ -3,6 +3,7 @@ import BaseMemoryPlugin from "./index.js";
 import { KNOWLEDGE_INSPECT_DESCRIPTION, KNOWLEDGE_INSPECT_FIELDS, inspectKnowledgeTool } from "../mcp-server/tools/core/knowledge_inspect_core.js";
 import { KNOWLEDGE_LINKS_DESCRIPTION, KNOWLEDGE_LINKS_FIELDS, knowledgeLinksTool } from '../mcp-server/tools/core/knowledge_links_core.js';
 import { KNOWLEDGE_CONTENT_DESCRIPTION, KNOWLEDGE_CONTENT_FIELDS, knowledgeContentTool } from '../mcp-server/tools/core/knowledge_content_core.js';
+import { RAG_MAINTENANCE_ACTIONS, executeRagMaintenanceTool } from '../mcp-server/tools/core/rag_maintenance_core.js';
 import { manageSnapshots, startSnapshotScheduler, stopSnapshotScheduler } from "../mcp-server/admin/cloud_snapshots.js";
 import { SNAPSHOT_DESCRIPTION, SNAPSHOT_PROPERTIES } from "../mcp-server/tools/snapshot_tools.js";
 import {
@@ -639,9 +640,14 @@ async function v2Setup(ctx) {
         "Manage the project-isolated RAG knowledge base: inspect stats, list documents/notes with source metadata, read full raw document/note, unlink/delete documents, or export/import complete snapshots.",
       input: obj(
         {
-          action: str("Management action: 'stats', 'list', 'read_document', 'delete', 'export_snapshot', 'import_snapshot'"),
+          action: str("Management action: stats, list, read_document, delete, export_snapshot, import_snapshot, rag_status, reset_rag, rag_receipt. Import/reset return preview, then require previewToken and confirm."),
           docId: str("Document ID, title, or path (required for read_document and delete)"),
           snapshotPath: str("File path for snapshot export/import"),
+          snapshotId: str('Immutable RAG input ID from preview'),
+          importMode: str('merge or replace; all local RAG scopes'),
+          previewToken: str('Fresh RAG preview token'),
+          confirm: bool('Explicit approval of reviewed all-local-RAG effects'),
+          operationId: str('Committed RAG receipt ID'),
           scope: str("For stats/list/read: global + current project by default. Delete defaults to the current project (or global outside Git); pass all/global explicitly for broader removal"),
           directory: str("Optional workspace/project directory path to target"),
           project: str("Alias for directory"),
@@ -649,6 +655,7 @@ async function v2Setup(ctx) {
         ["action"]
       ),
       execute: async (input) => {
+        if(RAG_MAINTENANCE_ACTIONS.includes(input?.action))return {content:JSON.stringify(await executeRagMaintenanceTool(input),null,2)};
         const sharedCtx = { worktree: null, directory: effectiveDir(input) };
         if (input?.action === "read_document") {
           return { content: JSON.stringify(await readKnowledgeDocument(input, sharedCtx), null, 2) };
@@ -707,16 +714,6 @@ async function v2Setup(ctx) {
           }
           const { deleteDocument } = await import("../mcp-server/ingest/pipeline.js");
           return { content: JSON.stringify(scopeRemoval, null, 2) };
-        }
-        if (input.action === "export_snapshot") {
-          const { exportSnapshot } = await import("../mcp-server/admin/snapshot.js");
-          const result = await exportSnapshot({ customDb: db, outputPath: input.snapshotPath || null });
-          return { content: input.snapshotPath ? `Snapshot exported successfully to ${input.snapshotPath}` : JSON.stringify(result, null, 2) };
-        }
-        if (input.action === "import_snapshot") {
-          if (!input.snapshotPath) throw new Error("snapshotPath parameter is required for import_snapshot action");
-          const { importSnapshot } = await import("../mcp-server/admin/snapshot.js");
-          return { content: JSON.stringify(await importSnapshot({ customDb: db, snapshotPathOrData: input.snapshotPath }), null, 2) };
         }
         throw new Error(`Unknown action: ${input.action}`);
       },

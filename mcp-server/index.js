@@ -41,6 +41,7 @@ if (cliArgs[0] === "snapshots") {
 // server that silently blocks on stdin.
 const CLI_COMMANDS = new Set([
   "maintenance",
+  "rag-maintenance",
   "notebook",
   "prompts",
   "web",

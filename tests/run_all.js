@@ -40,6 +40,7 @@ const testSuites = [
   { category: "Integration", name: "persona_preview", file: "tests/integration/persona_preview.test.js" },
   { category: "Integration", name: "prompt_service", file: "tests/integration/prompt_service.test.js" },
   { category: "Integration", name: "maintenance", file: "tests/integration/maintenance.test.js" },
+  { category: "Integration", name: "rag_maintenance", file: "tests/integration/rag_maintenance.test.js" },
   { category: "Integration", name: "settings", file: "tests/integration/settings.test.js" },
   { category: "Integration", name: "models", file: "tests/integration/models.test.js" },
   { category: "Integration", name: "resources", file: "tests/integration/resources.test.js" },

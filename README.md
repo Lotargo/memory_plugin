@@ -335,7 +335,7 @@ Higher-priority platform and safety instructions remain authoritative.
 
 The panel's **Обслуживание** reviews title migration for one Notebook and global legacy persona classification before writing. It shows stable IDs assigned to old records, checks the Notebook and source-link versions, and verifies a pinned full local ZIP before publishing through the shared recovery journal. Knowledge-link migration must already be complete; use **Знания → Подготовить связи** if needed. Client files are synchronized separately through **Инструкции → Файлы клиентов**.
 
-Settings reset/restore in **Обслуживание** covers search, models and source-access preferences, with a local integrity-checked backup and a fresh preview before restoration. Storage mode, cloud credentials, snapshot schedule, migration guards, port and startup remain preserved. Model owners and existing vectors require separate runtime commands or reindexing. RAG import/reset, diagnostics and uninstall UI remain planned.
+Settings reset/restore in **Обслуживание** covers search, models and source-access preferences, with a local integrity-checked backup and a fresh preview before restoration. Storage mode, cloud credentials, snapshot schedule, migration guards, port and startup remain preserved. Model owners and existing vectors require separate runtime commands or reindexing. Isolated diagnostics, cleanup and uninstall UI remain planned.
 
 ```bash
 memory-cli maintenance status
@@ -347,6 +347,26 @@ memory-cli maintenance preview --operation restore-settings --backup-id <id>
 ```
 
 `memory-plugin maintenance` accepts the same commands. `maintenance status` lists known stores and settings backup IDs; `maintenance help` describes all four operations. The TUI now reviews reset and title migration for one selected store. The legacy explicit title/persona CLI commands also use the shared backup and version checks; automatic prompt sync belongs only to the legacy persona command, with failures reported as partial.
+
+**Обслуживание** also exports, imports and resets **all local RAG scopes** through one service shared with CLI/TUI/MCP and both OpenCode registrations. Export saves and downloads a verified `.json.gz` containing documents/Notes, hierarchy, vectors, scopes, links, graph and deletion tombstones. It excludes Notebook files, identity registration and configuration. Browser uploads accept `.json` / `.json.gz` up to 32 MiB (128 MiB unpacked); the file is validated and frozen under a snapshot ID before review. A knowledge-link migration is required before export or mutation.
+
+Import has two explicit modes: `merge` keeps documents absent from the input and completely replaces each affected document with its imported hierarchy and scopes; `replace` replaces all local RAG. Duplicate IDs/paths or broken relational references fail before publication. Imported source links require the exact Notebook key, unique stable fact ID and matching body; uncertain links retain a review state. Vectors are kept only when their per-document embedding provenance and dimension match the current model; otherwise imported vectors are cleared, the document becomes lexical-only and the result requests reindexing in **Модели**.
+
+Import/reset show counts, sources/scopes and removed or uncertain Notebook links, require a fresh preview and explicit confirmation, and create a verified **pinned full local ZIP** before publication. Reset removes RAG rows, FTS, vectors, scopes, links and graph while preserving Notebook, project identities, settings, existing snapshot history and deletion tombstones. Physical unused blobs remain for separate cleanup. SQLite commits data and the operation receipt together; after a lost response, inspect recent completed operations before retrying. Restore the full ZIP through **Настройки → Снимки** if needed; full restore also restores the historical Notebook and registry, so review its own consequences.
+
+```bash
+memory-cli rag-maintenance status
+memory-cli rag-maintenance export
+memory-cli rag-maintenance stage --source-path <file.json.gz>
+memory-cli rag-maintenance preview --operation import --snapshot-id <id> --mode merge
+memory-cli rag-maintenance apply --operation import --snapshot-id <id> --mode merge --preview-token <token> --confirm
+memory-cli rag-maintenance preview --operation reset
+memory-cli rag-maintenance apply --operation reset --preview-token <token> --confirm
+memory-cli rag-maintenance receipt --operation-id <id>
+memory-cli rag-maintenance download --snapshot-id <id> --output-path <new-file.json.gz>
+```
+
+`memory-plugin rag-maintenance` accepts the same commands. `manage_knowledge_base` exposes `rag_status`, `export_snapshot`, `import_snapshot`, `reset_rag`, and `rag_receipt`. Import/reset return a preview first; apply uses its immutable `snapshotId` (import), `importMode`, `previewToken` and `confirm:true`. Explicit project/scoped fields are rejected for these whole-RAG operations. CLI output files must be new files; existing export paths are not overwritten. Custom-database low-level helpers remain compatibility primitives for isolated callers, rather than reviewed user endpoints. Maintenance runs synchronously under shared locks; background execution and cancellation are not provided for these bounded operations.
 
 ---
 

@@ -7,6 +7,10 @@ import {
 } from "../memory.js";
 
 export async function handleDirectCommands(cliArgs) {
+  if (cliArgs[0] === 'rag-maintenance') {
+    const { handleRagMaintenanceCommand } = await import('./rag_maintenance_commands.js');
+    await handleRagMaintenanceCommand(cliArgs.slice(1)); return true;
+  }
   if (cliArgs[0] === 'maintenance') {
     const { handleMaintenanceCommand } = await import('./maintenance_commands.js');
     await handleMaintenanceCommand(cliArgs.slice(1)); return true;
