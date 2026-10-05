@@ -1,0 +1,75 @@
+# Local marketplaces for Codex and Claude Code
+
+The marketplace is an alternative installation channel for the same memory engine. A client uses either a direct `memory-agent` MCP registration or `memory@lotargo-memory-local`. Other clients can use their own channel while sharing the existing Notebook/RAG storage.
+
+## Build a prepared local catalog
+
+Run from the checkout with Node.js >= 22.5 and npm installed:
+
+```powershell
+node mcp-server/boot.js marketplace build --output "/path/to/project\.local-marketplace\build-2026-10-05"
+```
+
+Choose a new absolute output directory for every build. `--memory-dir <path>` explicitly selects the shared storage; it defaults to the engine's normal `MEMORY_DIR` resolution. Installation refuses a migration if the direct registration uses another data directory. User data must stay outside the output directory.
+
+The builder copies only npm-packaged source files plus the dependency lockfile, computes a source digest, and prepares locked production dependencies with lifecycle scripts disabled. It does not register clients, start the web panel, ingest memories, fetch models, or publish anything. `--source-only` creates a catalog for inspection without preparing dependencies; installation rejects such a build.
+
+The output contains:
+
+- `runtime/`: a fixed source/dependency snapshot, shared by both adapters.
+- `codex/`: an `.agents/plugins/marketplace.json` catalog and a Codex plugin.
+- `claude/`: a `.claude-plugin/marketplace.json` catalog and a Claude Code plugin.
+- `local-marketplace.json`: preparation state, version, digest, Node path and data directory.
+
+This artifact is local to the computer on which it was built: its adapters record absolute runtime, Node and data paths. Keep the output directory while either marketplace or direct registration refers to it. It is not a portable installer or a public marketplace submission. The host's plugin cache contains the small adapter, skill and SessionStart hook; it does not contain the shared memory database or dependency tree.
+
+## Install and migrate
+
+```powershell
+node mcp-server/boot.js marketplace install --client codex --path "/path/to/project\.local-marketplace\build-2026-10-05"
+node mcp-server/boot.js marketplace install --client claude --path "/path/to/project\.local-marketplace\build-2026-10-05"
+```
+
+Each command validates the runtime and the existing registration before using the client's native marketplace/plugin commands. Once the new plugin is enabled, it removes the owned direct MCP registration, managed instruction blocks and unchanged global skill copies for that client. It preserves unrelated configuration, user-authored instructions, the shared web panel and all memory data. Foreign/project-scoped registrations and modified skills stop migration before client writes. Failed native installation leaves the direct integration intact. If later legacy cleanup fails, the new plugin is removed and the command reports failure; inspect `marketplace status` and run direct setup to recover any partially removed legacy connection.
+
+Repeated installation from the same catalog is idempotent. A catalog name already pointing to another source is a conflict in Claude Code; explicitly remove the old catalog with `claude plugin marketplace remove lotargo-memory-local` before installing a new build. That native command also uninstalls its adapter. Keep the old runtime until you have switched every registration that uses it. For Codex, the equivalent catalog removal is `codex plugin marketplace remove lotargo-memory-local`.
+
+Direct installation through the native plugin UI is also possible, but it does not migrate a pre-existing direct setup. The adapter refuses to start a second MCP server while a direct `memory-agent` registration remains. Use the installation command above to complete the transition.
+
+## Instructions, scope and disabling
+
+The plugin bundles `using-memory` and a SessionStart hook. The hook returns the same managed memory instructions to the conversation instead of writing global `AGENTS.md`/`CLAUDE.md` files. It tells the agent to perform full recall through the exposed plugin MCP namespace and to pass the hook's workspace directory explicitly to project tools. Active personalization comes from that recall. Resume does not require another initialization if full active memory is already present.
+
+Codex requires review and trust of a plugin's current hook definition before running it. Installing the plugin alone does not prove automatic initialization. Review/trust SessionStart in the client, start a new session, and verify context delivery and tool availability. Existing conversations may retain instructions already in their context; use a new session after disabling or changing channels. Neither `enable-prompt`, persona synchronization nor `dev-link` reinstalls global instructions/skills for a client with this marketplace plugin enabled.
+
+Native plugin disable/uninstall controls the adapter's MCP server, skill and hook together. It does not delete shared memory. Direct `uninstall --codex`/`--claude` only removes direct artifacts. An explicit `uninstall --purge` still means deleting shared data and affects every client that uses that data directory.
+
+## Diagnose, switch back, remove
+
+```powershell
+node mcp-server/boot.js marketplace status
+node mcp-server/boot.js marketplace doctor --client codex
+node mcp-server/boot.js marketplace doctor --client claude
+node mcp-server/boot.js marketplace direct --client codex
+node mcp-server/boot.js marketplace direct --client claude
+node mcp-server/boot.js marketplace uninstall --client codex
+```
+
+`status` reports configured state and duplicate registrations. `doctor` asks the native client for the installed adapter path and performs real MCP initialize, tool discovery, `memory_info` and full `recall`; it verifies runtime version and storage location. It reports automatic SessionStart delivery as UNVERIFIED, because manually executing the adapter does not prove client hook trust or agent behavior. The existing `doctor --codex` remains the direct-launcher diagnostic and points marketplace users to this command.
+
+`direct` removes the marketplace adapter and runs targeted direct setup from the current installed engine. Codex and Claude direct setup both use Node plus that engine's `boot.js`, avoiding an implicit change to the npm registry's latest release. It does not unregister the catalog or delete its runtime/data. `marketplace uninstall` removes only the native adapter and preserves direct artifacts, runtime, catalog and memory. `CODEX_HOME` and `CLAUDE_CONFIG_DIR` are supported for isolated client profiles.
+
+## Acceptance
+
+`npm test` includes hermetic packaging, channel transitions, duplicate-launch refusal, modified-skill protection, data-directory mismatch, hook output, stored-memory retention and real adapter MCP protocol tests. Native operations are simulated in that suite.
+
+For installed client binaries, run the separate isolated acceptance test:
+
+```powershell
+$env:MEMORY_MARKETPLACE_LIVE = '1'
+node tests/smoke/marketplace_clients_live.test.js
+```
+
+It creates temporary client homes, validates Claude manifests, installs using both native CLIs, checks native listings, executes the resolved installed adapter and marketplace doctor, repeats installation and switches back to direct setup. Its fixture runtime reuses existing checkout dependencies; it does not make model requests or copy authentication. A production build separately prepares dependencies with npm. Desktop rendering, client hook trust/delivery and actual agent use require acceptance in a new real client session.
+
+Format references: [OpenAI plugin packaging](https://developers.openai.com/plugins/build/plugins), [Claude marketplaces](https://code.claude.com/docs/en/plugin-marketplaces), [Claude MCP lifecycle](https://code.claude.com/docs/en/mcp).

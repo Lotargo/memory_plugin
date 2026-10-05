@@ -69,6 +69,8 @@ A profile system should remain optional and should not make the common setup pat
 
 Functional implementation plan: [Local UI panel](dev_docs/PLAN_LOCAL_UI_PANEL.md). It defines staged delivery, management capabilities and acceptance criteria; visual design and implementation stack remain open.
 
+Knowledge-management implementation detail: [UI and engine plan](dev_docs/PLAN_KNOWLEDGE_UI_ENGINE.md). K0–K6 are implemented and accepted on isolated stores: knowledge/chunk inspection, stable links/recovery, staged Note/source editing, scoped deletion previews, saved graph and trial retrieval. [K0/K1 report](dev_docs/KNOWLEDGE_UI_K0_K1_REPORT.md), [K2 report](dev_docs/KNOWLEDGE_UI_K2_REPORT.md), [K3 report](dev_docs/KNOWLEDGE_UI_K3_REPORT.md), [K4 report](dev_docs/KNOWLEDGE_UI_K4_REPORT.md), [K5 report](dev_docs/KNOWLEDGE_UI_K5_REPORT.md), [K6 final acceptance](dev_docs/KNOWLEDGE_UI_K6_REPORT.md). Browser flows and CLI/MCP/both OpenCode surfaces, an actual npm installation, cached real CPU ONNX and two live Turso checkpoints in a disposable namespace passed. User data/configuration were not migrated. Power-loss durability and arbitrary OS termination remain unverified. Agent-usage telemetry and the broader panel plan remain separate.
+
 Add a local web dashboard as a visual management interface for `memory_plugin`.
 
 The CLI should remain the primary automation-friendly interface, but not every memory-management task is convenient to perform through commands. A dashboard can expose the same underlying engine through a more discoverable interface without moving control or storage away from the user.

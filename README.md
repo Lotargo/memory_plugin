@@ -147,9 +147,21 @@ npx -y @lotargo/memory_plugin uninstall --codex
 
 Claude Code, Gemini CLI, and Codex setup/uninstall use their native MCP lifecycle commands when available. An ownership-checked config edit is retained as a compatibility fallback for missing, older, or non-functional client CLIs. Antigravity remains a separate integration because it uses a different config layout.
 
+### Local Marketplaces (Codex / Claude Code)
+
+Build a separate local catalog from this checkout, then install it with migration from direct setup:
+
+```powershell
+node mcp-server/boot.js marketplace build --output "/path/to/project\.local-marketplace\build-2026-10-05"
+node mcp-server/boot.js marketplace install --client codex --path "/path/to/project\.local-marketplace\build-2026-10-05"
+node mcp-server/boot.js marketplace install --client claude --path "/path/to/project\.local-marketplace\build-2026-10-05"
+```
+
+Use one active installation channel per client. Both channels share the engine and existing storage; marketplace removal retains memory. Builds use a fixed prepared runtime outside the client cache and are local to the computer. The installer detects duplicate registrations, changed skills and mismatched data directories. Codex requires review/trust of the bundled SessionStart hook for automatic initialization. See [MARKETPLACE.md](MARKETPLACE.md) for diagnosis, switching back, removal, updates and acceptance boundaries.
+
 ### Verify Codex
 
-Codex uses a direct executable chain (`node` -> `mcp-server/boot.js`) instead of an `npx`/`.cmd` launcher, avoiding Windows stdio handshake failures. Setup safely migrates legacy registrations in `~/.codex/config.toml`.
+Codex and Claude Code use a direct executable chain (`node` -> the installed engine's `mcp-server/boot.js`) instead of an `npx`/`.cmd` launcher, avoiding Windows stdio handshake failures and unintended registry-version changes. Setup safely migrates legacy owned registrations.
 
 ```bash
 npx -y @lotargo/memory_plugin doctor --codex
@@ -299,6 +311,18 @@ memory-cli sync-persona
 npm run persona:sync             # from the repository
 ```
 
+The local panel's **Инструкции → Файлы клиентов** reads prompt and persona status separately and reviews each global file before enable, disable or persona sync. It preserves text outside managed markers, verifies file/ownership/global-memory versions and saves a local backup. Marketplace-owned Codex/Claude channels are skipped; OpenCode uses native context. File status does not prove delivery to an active session. Removing prompt blocks does not disable MCP or the plugin.
+
+The same reviewed contract is available from both `memory-cli` and `memory-plugin`:
+
+```bash
+memory-cli prompts status
+memory-cli prompts preview --client codex --operation enable
+memory-cli prompts apply --client codex --operation enable --preview-token <token> --confirm
+```
+
+Clients: `codex`, `claude`, `gemini`, `antigravity`; operations: `enable`, `disable`, `sync`. Claude/Gemini previews also show any shared include change and its effect on other referencing clients. An interrupted file transaction blocks further writes; inspect the retained journal and files before `memory-cli prompts recover --confirm`. Recovery refuses to overwrite externally changed files. `prompts help` lists the contract; legacy all-client commands remain available through `memory-cli`.
+
 Legacy entries using `persona`, `behavior`, `speech`, `style`, `tone`, `preference(s)`, `instruction(s)`, `directive`, or `inject:1` metadata remain compatible. Permanently classify them as explicit directives with the idempotent migration:
 
 ```bash
@@ -324,7 +348,7 @@ The SQLite identity registry stores remote, path, and basename aliases. It suppo
 
 | Tool | Purpose |
 | :--- | :--- |
-| `link_project_memory` | Register the current Git identity and merge compatible legacy path/basename facts and RAG scope data. |
+| `link_project_memory` | Register the detected Git identity and migrate compatible memory of this exact legacy directory path through the shared project service. |
 | `unlink_project_memory` | Remove a path alias; optionally purge the identity record. |
 | `relink_project_memory` | Move/merge facts and RAG scope data to a new normalized remote identity. |
 
@@ -408,7 +432,7 @@ Every checkpoint is independent: one ZIP with DEFLATE level 9, containing Notebo
 
 The cloud stores metadata and the complete binary ZIP in **one `memory_snapshots` row** per checkpoint. Ordinary memory writes have no cloud side effects in this mode. An unchanged content hash causes **zero cloud calls**. Metadata lists omit BLOBs; fetching a selected ID reads only that archive. After schema creation, a changed-state upload issues one INSERT, independent of the number of facts or RAG chunks inside. A batch cleanup issues one DELETE for the selected period; billing still counts deleted rows, rather than counting the SQL command as one write.
 
-The scheduler runs while an MCP/OpenCode host is active, checks the persisted deadline locally every 30 seconds, and accepts any positive finite hour interval. After downtime it sends one current checkpoint, without replaying missed intervals. Each attempt first saves a local ZIP under `<memory>/storage/snapshots/`. A 429, quota `BLOCKED`/402 or network failure leaves that ZIP intact; there is only a latest-pending pointer, not a queue of uploads. Network failures use persisted exponential backoff (2–24 hours). Quota errors suspend automatic cloud attempts until a successful manual `upload`; scheduled local captures continue. `status` shows deadlines, pending ID and the last error. Manual upload bypasses the backoff and sends the current state.
+The scheduler runs while an MCP/OpenCode host or the web panel is active, checks the persisted deadline locally every 30 seconds, and accepts any positive finite hour interval. After downtime it sends one current checkpoint, without replaying missed intervals. Each attempt first saves a local ZIP under `<memory>/storage/snapshots/`. A 429, quota `BLOCKED`/402 or network failure leaves that ZIP intact; there is only a latest-pending pointer, not a queue of uploads. Network failures use persisted exponential backoff (2–24 hours). Quota errors suspend automatic cloud attempts until a successful manual `upload`; scheduled local captures continue. `status` shows deadlines, pending ID and the last error. Manual upload bypasses the backoff and sends the current state.
 
 Restore previews current/replacement counts and returns a token tied to the current state. Applying a fresh token creates a pinned pre-restore local backup, then **replaces** local Notebook/RAG/registry state and rebuilds FTS. Extra current entries are removed. A filesystem recovery journal handles interruption around the SQLite transaction. Restore does not upload automatically; the next upload creates a new checkpoint of the restored state. Global persona prompts are refreshed after a successful restore.
 
@@ -447,11 +471,15 @@ memory-cli models timer 10                 # auto-unload after 10 min idle (off 
 
 Commands reach the running MCP server through a file-based control channel (`<memory-dir>/control/`); AI agents use the same CLI, e.g. "unload the models and check memory is freed" → `memory-cli models unload`. When no server is running, `device`/`timer` changes simply persist and apply on next start.
 
+The **Модели → RAM и память GPU** panel and `memory-cli models status` use one local resource-monitoring service. It detects the server's OS/architecture and GPUs, shows system RAM, per-process RSS for the observer and registered clients, and reports each GPU separately. Windows uses native RAM statistics, NVIDIA measurements and unambiguous single-adapter GPU counters; Linux uses `/proc/meminfo`, NVIDIA and AMD sysfs; macOS discovers unified/shared/dedicated GPU memory with `system_profiler`. Apple Silicon RAM is never counted twice as VRAM. Unavailable values remain `null` in JSON; Intel/shared GPU allocation, macOS GPU usage, multi-adapter Windows counter attribution and unavailable driver metrics are explicitly unsupported rather than estimated. Linux RAM usage uses `MemAvailable`; macOS free-page accounting includes reclaimable cache and does not claim an available-memory estimate. Windows swap usage is currently unavailable.
+
+The panel refreshes every three seconds while its dialog and browser tab are visible. Native probes have timeouts and output limits, concurrent requests share cached readings, and hardware discovery is cached for one minute. Monitoring does not download/load models, reset idle unload timers, or access cloud services. Process RSS is not a model allocation measurement and process totals are not added together. JSON preserves the legacy `gpuMemory` field for the first measurable NVIDIA GPU and adds complete readings under `resources`. Windows native measurements are verified locally; Linux/macOS adapters have deterministic fixture coverage, with native Linux and macOS acceptance still required.
+
 ---
 
 ## Tool Reference
 
-The MCP server exposes **16 tools**. The native OpenCode plugin exposes the same 16 plus two OpenCode-specific helpers, for **18 total**.
+The MCP server exposes **22 tools**. The native OpenCode plugin exposes the same 22 plus two OpenCode-specific helpers, for **24 total**.
 
 ### Notebook and Cold Memory
 
@@ -472,7 +500,9 @@ The MCP server exposes **16 tools**. The native OpenCode plugin exposes the same
 | `link_project_memory` | `directory`, `remote` | Register Git identity and migrate compatible legacy data. |
 | `unlink_project_memory` | `directory`, `purge` | Remove an alias or purge its registry identity. |
 | `relink_project_memory` | `directory`, `remote` | Move/merge memory into a new normalized remote identity. |
+| `manage_project_memory` | `action`, `operation`, `directory`, `sourceKey`, `targetKey`, `remote`, `previewToken`, `confirm` | List/inspect and preview/apply Git identity registration, path unlink, project moves or explicit legacy migration. |
 | `link_knowledge` | `action`, `factText`, `docId`, `scope`, `startLine`, `endLine`, `relationType` | Link facts to documents/notes or inspect graph links. |
+| `manage_knowledge_links` | `action`, `scopeKey`, `operation`, `factRef`, `docId`, `linkId`, `fieldsJson`, `previewToken` | Explicit migration/status, scoped stable-link list and preview/apply create/update/delete. |
 
 ### RAG Knowledge Base
 
@@ -483,6 +513,8 @@ The MCP server exposes **16 tools**. The native OpenCode plugin exposes the same
 | `batch_query_knowledge_base` | `queries`, `scope`, `limit`, `instruction`, `resultMode`, `generateEmbeddings`, `directory` | Run several queries with one embedding batch. |
 | `manage_knowledge_base` | `action`, `scope`, `docId`, `snapshotPath`, `directory` | Stats, list, full raw read, scoped delete/unlink, snapshot export/import. |
 | `reindex_knowledge_base` | `model`, `dimension` | Rebuild vectors after changing model/dimension while preserving source and graph data. |
+| `manage_knowledge_removal` | `action`, `scopeKey`, `operation`, `docId`, `previewToken`, `confirm`, `confirmShared` | Preview/apply scoped unlink or full deletion; retry committed blob cleanup. |
+| `manage_knowledge_content` | `action`, `scopeKey`, `operation`, `docId`, `expectedVersion`, `fieldsJson`, `operationId`, `previewToken`, `confirmShared` | Read the editor, prepare/create/update Notes or sources, review impact, apply, inspect progress or cancel preparation. |
 
 ### OpenCode-Only Helpers
 
@@ -502,7 +534,12 @@ The MCP server exposes **16 tools**. The native OpenCode plugin exposes the same
 | `memory_plugin setup [client flags] [--mode <mode>]` | Configure clients, skills, prompts, and optional cloud mode/auth. |
 | `memory_plugin doctor --codex` | Validate Codex configuration and live MCP behavior. |
 | `memory-cli` | Open the interactive TUI. |
+| `memory-cli notebook targets` / `notebook read --key <key>` | Inspect exact Notebook stores, scoped refs and versions as JSON. |
+| `memory-cli notebook transfer preview\|apply ...` | Review/apply a single directive move through the shared panel service; `notebook help` lists both-version and confirmation flags. |
 | `memory_plugin dashboard [--port <0..65535>]` | Open the local Notebook dashboard; prints a private browser connection URL. |
+| `memory-plugin web [--port <0..65535>]` | Start the same web interface; `0` chooses a free port. |
+| `memory-cli knowledge help` | Inspect local Notes/sources, raw text, hierarchy, chunks, scoped links, graph and explicit trial retrieval as JSON, using an explicit scope key. |
+| `memory-cli web port [<0..65535>]` | Show or persist the default web port; takes effect on the next start. |
 | `memory-cli login ...` / `logout` / `auth-status` | Manage Turso authentication. |
 | `memory-cli link --dir <path> [--remote <url>]` | Link a Git project identity. |
 | `memory-cli unlink --dir <path> [--purge]` | Remove an alias or registry identity. |
@@ -517,21 +554,131 @@ The MCP server exposes **16 tools**. The native OpenCode plugin exposes the same
 
 The TUI provides retrieval configuration, model management, Notebook/RAG browsing, reindexing, snapshots, cloud settings, prompt integration, diagnostics, and reset actions. Use Up/Down, Enter, and Backspace to navigate.
 
+TUI Notebook edits use the same scoped service as the web panel. Enter a new title (or keep it with Enter), then a new body; an empty body cancels. Changes preserve date, metadata and source identity. Deletion reviews the selected store and source links, requires confirmation, and asks separately before removing a KEEP-protected record. If another client changes the record or its links, reload and review instead of overwriting it. A persona synchronization failure is reported as partial success after the Notebook is saved; existing agent sessions may need a context refresh.
+
+To move one directive, open its concrete Notebook store and choose **Перенести инструкцию**. Select the destination, review both stores, the ID change and source links, then confirm. If a linked document is unavailable in the destination, opening it to that scope requires a separate reviewed confirmation; adding global scope makes that source visible across projects. Existing document scopes remain. The service saves a verified pinned local ZIP and publishes both Notebook files and links through the recovery journal. Date, TTL, KEEP, disabled state and metadata travel with the record. Prepare knowledge links first (`memory-cli knowledge migrate`); preview never migrates automatically. Duplicate bodies, replacement-history chains, unresolved links and independent graph edges block the move with an explanation. Existing client sessions may require refreshed context.
+
 ### Local dashboard
 
-The initial dashboard supports global/project Notebook browsing, search, record editing, metadata, protected deletion, and directive enable/disable with a preview from the shared persona builder. It runs against the same local storage as CLI/MCP in `only-local` and `cloud-snapshots` modes. RAG editing, cloud administration, model controls, and client setup remain available through the existing CLI/TUI.
+In Notebook, **Все хранилища** lists global and all known project stores together, with the exact owning scope on every row. It is a browsing view: **Открыть хранилище записи** selects the concrete store before editing, so repeated record IDs in other projects are safe. Unavailable or conflicting stores are reported as omissions. This administrative view does not change agent retrieval: `scope: all` still means global plus the current project.
+
+**Дополнительные фильтры** combines record kind, exact tags (any comma-separated tag), inclusive creation dates and text search. State filters include expired and superseded records; **Сбросить фильтры** clears the search and returns to current records. **Заменить новой записью** reviews changes before creating a fresh ID/date with `supersedes`/`supersededBy`. The original keeps its metadata and source links in history; evidence is not copied to the replacement. A stale version or already superseded target blocks publication and preserves the draft. Replacement uses the same local Notebook journal as other edits.
+
+**Управление проектами** opens shared project administration: detected Git registration, exact path-alias unlink, memory relink/merge into a known Git scope, and explicit legacy migration. Stored projects remain selectable without a checkout. Preview shows counts, aliases, duplicates, conflicts and consequences. Same text with different record metadata blocks a move; colliding IDs and imported replacement-history references are remapped together with source links. Ordinary unlink keeps memory and Git auto-detection. The existing explicit `unlink --purge` removes only registry identity/aliases, retaining memory.
+
+Every applied operation creates a pinned, validated full local checkpoint in the regular snapshot catalog, usable through `memory-cli snapshots list --location local` and `memory-cli snapshots restore <backupId> --location local` (restore first returns its own preview). No cloud upload, remote Git modification, model loading or network access is performed. Publication uses the shared SQL ledger/Notebook journal; stale previews fail closed. Conflicting store headers, ambiguous fact links and incompatible duplicate history require explicit repair before moving.
+
+The same structured contract is exposed through MCP and both OpenCode surfaces, and CLI:
+
+```bash
+memory-cli projects list
+memory-cli projects inspect --dir <absolute-git-path>
+memory-cli projects preview --operation relink --source <sourceKey> --target <targetKey>
+memory-cli projects apply --operation relink --source <sourceKey> --target <targetKey> --token <previewToken> --confirm
+```
+
+The old `link`, `unlink`, `relink` commands and TUI project operations call this service too. Existing explicit mutation commands apply with backup; `projects preview/apply` supports separate review and confirmation. New Git registration outside a repository is rejected even with an explicit remote. Explicit legacy migration accepts a known target or an existing Git directory. A memory move leaves repository Git settings unchanged: opening a repository with the old remote still resolves the old Git identity.
+
+
+The dashboard supports global/project Notebook browsing, search, record editing, metadata, protected deletion, and directive enable/disable with a preview from the shared persona builder. It runs against the same local storage as CLI/MCP in `only-local` and `cloud-snapshots` modes. In **Инструкции → Предпросмотр**, select a client to inspect inclusion/exclusion reasons and open a record in its exact store. OpenCode shows the actual shared system/session builders, including V1/V2 routing policy differences; its expired directives remain marked facts in session memory. Codex, Claude Code, Gemini CLI and Antigravity show a **partial global persona template**: installed client files, plugin-owned instructions, recall and active sessions are not inspected. Refresh reads current memory; preview never writes prompts or proves agent usage.
+
+Open **Настройки** in the sidebar (or inside **Область** on mobile) to change storage, snapshot schedules, search/model/compute parameters, source access, web port and autostart. Changes are validated and version-checked against other clients. Cloud settings support database URL/token credentials in the shared encrypted store, explicit connection checks and logout. Local snapshots, manual upload, metadata lists, pin/unpin, restore and protected date-range cleanup use the existing snapshot engine and fresh confirmation previews. Saving model/dimension changes flags a required separate reindex; it never downloads models or rebuilds vectors. Open **Модели** to download and validate an embedding/reranker, inspect disk cache and registered client processes, load/unload RAM/VRAM sessions or apply CPU/GPU, and preview a transactional rebuild of all local knowledge vectors. Long operations run in isolated processes with persisted progress and results; closing the dialog does not cancel them. Runtime commands target one fresh registered client supporting control protocol 2. Legacy or unregistered process coverage remains unknown. Cache deletion requires a fresh preview and closed registered clients. Model administration never substitutes the requested model or purges a failed download; reindex uses only the exact locally cached model. Other authorization methods and client setup remain available through CLI/TUI.
+
+The **Знания** section adds local browsing of Notes and sources, metadata filters, saved normalized text pages, section → medium → micro inspection, navigation between Notebook facts and documents, and previewed link editing. Select a registered project or persisted RAG scope even when its original checkout is unavailable. The **Включить глобальные источники** option explicitly adds global sources. Browsing does not load models, refresh files/URLs or access the cloud. Unrecorded source coordinates and legacy embedding provenance stay UNKNOWN; recorded model/dimension is shown when it matches the stored chunk vector. Legacy links show `needs_review`. Missing/corrupt raw blobs are diagnosed. Raw viewing is limited to 16 MiB with 20,000-character pages; vectors are represented by metadata only.
+
+Notebook, instruction previews, saved source pages and chunks render Markdown, KaTeX formulas and fenced Mermaid diagrams using local pinned assets. Notebook/source/chunk views retain an exact source toggle. Raw HTML and unsafe links are suppressed, diagrams run in strict mode, and invalid or oversized diagrams preserve their code with a visible explanation. Pagination renders each saved-text page independently. Dropdown arrows reserve space inside the control; clicking content no longer draws a focus frame, while keyboard focus remains visible.
+
+The same service is exposed by MCP and native OpenCode `inspect_knowledge` and `memory-cli knowledge`:
+
+```bash
+memory-cli knowledge targets
+memory-cli knowledge list --scope-key global --source-type note
+memory-cli knowledge read <docId> --scope-key <registered-key> --start-line 3
+memory-cli knowledge hierarchy <docId> --scope-key <registered-key> --level micro
+memory-cli knowledge chunk <docId> --scope-key <registered-key> --level micro --chunk-id <chunkId>
+```
+
+New inspection calls use exact IDs and explicit scope keys; existing `manage_knowledge_base` calls retain their previous defaults. K2 link management uses stable fact IDs and linkId, fresh preview tokens, source revision checks and a shared recovery journal. Open **Добавить связь → Подготовить связи** or the knowledge editor's **Подготовить хранилище** to explicitly activate it: migration first creates and verifies a full local backup, then writes a report. Opening the panel never migrates memory. Ambiguous legacy links remain `needs_review`; changed sources require renewed manual binding. Scoped deletion previews, saved graph and trial retrieval use the same engine contracts described below. The [knowledge service contract](mcp-server/services/KNOWLEDGE_CONTRACT.md) records these boundaries.
+
+K3 adds **Новая Note**, **Добавить источник**, **Редактировать Note**, **Обновить источник**, and **Метаданные**. Note editing preserves docId, virtual path, omitted kind/tags and scopes. Source refresh explicitly reads its stored file/URL or accepts new text and preserves source type. Preparation produces a rendered preview, actual indexing progress and affected links. Publication requires a fresh version/token; shared changes require confirmation for every owning scope, with private links represented only by counts. Tags/kind alone keep the index; title/content changes rebuild it. Failed embeddings keep the saved revision. Explicit lexical indexing clears previous vectors. Missing section targets become `orphaned`; exact unchanged bindings can remain valid. After a conflict, the editor retains changed fields and refreshes untouched fields from the other client's revision.
+
+**Убрать из области** removes one ownership scope and links that lose visibility, retaining the document/index in other scopes and links still visible through global. **Удалить полностью** previews all-scope impact and exact hierarchy/FTS/vector/link/edge cleanup; shared full deletion requires separate confirmation. Notebook facts remain. Common blobs survive until their last document; post-commit cleanup failure reports `saved` with `cleanupPending`, and `knowledge remove cleanup` retries it. Historical snapshots remain available for explicit restore. MCP/OpenCode `manage_knowledge_removal` and CLI `knowledge remove preview|apply` use fresh tokens and explicit `--confirm` (also `--confirm-shared` for shared full deletion).
+
+**Граф области / Граф источника** reads the saved graph with document/node/relation filters, checks both endpoints, and offers primary-entity navigation. An SVG overview and directed edge list show the same bounded page. Own manual links are edited/deleted through K2; structural edges are rebuilt from the source. Symbols remain name-only/nonunique, legacy structural origin is unrecorded, arbitrary edge provenance remains UNKNOWN. Limits: 5000 context documents, 10000 Notebook entries per scope, 5000 edge candidates; API pages up to 100, UI 40 and diagram up to 36 nodes. Truncation/completeness are explicit. No bulk edge deletion is introduced.
+
+**Пробный поиск** explicitly selects lexical or dense and index or snippet output. Lexical never loads embeddings/reranker. Dense uses the exact locally cached model without download, model substitution or cache purge; an unavailable model disables that choice. Snippets can expand verified table/code policy parents in the same document/section; index mode returns identity/metadata without text expansion. Results include saved revision, actual returned fragment, policy, available scores and source/chunk navigation. Missing scores are null, legacy model provenance is UNKNOWN; results do not prove injection or agent use. Limits: 1000 query characters, 20 API hits (UI 5), 20000 text characters per hit, and dense scan bounded to at most 50000 micro-chunks (or a smaller configured limit).
+
+```bash
+memory-cli knowledge remove preview --scope-key <key> --operation unlink-scope --doc-id <docId>
+memory-cli knowledge remove apply --scope-key <key> --operation unlink-scope --doc-id <docId> --preview-token <token> --confirm
+memory-cli knowledge graph --scope-key <key> --doc-id <docId> --node-type fact
+memory-cli knowledge search-status --scope-key <key>
+memory-cli knowledge search --scope-key <key> --query "material decision" --search-mode lexical --result-mode snippet --policy-expansion true
+```
+
+These graph/search actions extend MCP/OpenCode `inspect_knowledge`, without requiring a running panel. After adding backend routes, restart an existing dashboard.
+
+The same service works without the panel through MCP/OpenCode `manage_knowledge_content` and CLI:
+
+```bash
+memory-cli knowledge content read --scope-key <key> --doc-id <docId>
+memory-cli knowledge content prepare --scope-key <key> --operation update-note --doc-id <docId> --expected-version <version-from-read> --fields-json '{"title":"Revised note","content":"New Markdown text","indexMode":"lexical"}'
+memory-cli knowledge content apply --scope-key <key> --operation-id <operationId> --preview-token <token-from-preview>
+memory-cli knowledge content status --scope-key <key> --operation-id <operationId>
+```
+
+Use `--confirm-shared` only after reviewing the prepared shared-document effects. `prepare` waits in CLI; MCP/HTTP `start` returns an operationId for polling. Preparations survive separate CLI invocations for 30 minutes in transient local staging (50 retained operations, 64 MiB each) and are excluded from snapshots. Cancellation discards preparation; a started network/model call may finish, and committed publication cannot be cancelled. Text editing is limited to 2 MiB normalized content, 32 MiB file/URL input, 5000 micro-chunks and 5000 affected links. Recorded model/dimension provenance travels with the saved metadata; vector search excludes known incompatible spaces. Legacy unknown provenance remains unverified. Older ingest calls reject unconfirmed shared updates and implicit type conversion; `remember_note` still creates a new Note.
+
+CLI and MCP/OpenCode use the same mutation service:
+
+```bash
+memory-cli knowledge migrate
+memory-cli knowledge link list --scope-key <registered-key>
+memory-cli knowledge link preview --operation create --scope-key <registered-key> --fact-ref id:<factId> --doc-id <docId> --fields-json '{"relationType":"SUPPORTS","startLine":3,"endLine":5}'
+memory-cli knowledge link apply --operation create --scope-key <registered-key> --fact-ref id:<factId> --doc-id <docId> --fields-json '{"relationType":"SUPPORTS","startLine":3,"endLine":5}' --preview-token <token-from-preview>
+```
+
+Full ZIP v2 and RAG v4 preserve K2 revisions and bindings; older formats remain readable and require explicit reconciliation for unknown legacy identities. Notebook writes and full restores recover pending publication after a process exit; an unexpected external file edit produces `RECOVERY_REQUIRED` instead of an overwrite. Process-interruption recovery is tested locally; power-loss durability is unverified. RAG-only import does not restore Notebook files.
 
 From this checkout, run:
 
 ```bash
-node mcp-server/boot.js dashboard
+node mcp-server/boot.js web
 ```
 
-With this checkout installed or linked, use `memory_plugin dashboard` (or `memory-cli dashboard`). Open the complete URL printed in the terminal. The server listens on `127.0.0.1`, uses a fresh connection token for each run, and does not load models or poll cloud services. The browser removes the token from its address and keeps it in memory only; reopen the original printed URL to reconnect after reloading. Stop the server with `Ctrl+C`. No frontend build or cloud login is required.
+With this checkout installed or linked, use `memory-plugin web` (also `memory_plugin web` or `memory-cli web`). The existing `dashboard` command remains an alias. This command starts or reuses a detached local panel and exits; closing the terminal or an MCP client leaves the panel running. Installation, setup and MCP/OpenCode startup ensure the panel is available when `webAutoStart` is enabled (the default). Windows installs an owned, hidden per-user Startup launcher so the same panel returns at the next login. Other platforms currently ensure startup on installation/client launch, without installing an OS login service. CI and `MEMORY_DISABLE_WEB_AUTOSTART=1` suppress automatic launch and Startup registration.
+
+The server listens only on `127.0.0.1`. Open the private connection URL printed by the command once; an HttpOnly, SameSite=Strict cookie reconnects the browser after a reload or panel restart. The browser removes the token from the address. The managed port and secret are retained in `<MEMORY_DIR>/web/connection.json`, outside full-memory snapshots; keep this private file locally. Concurrent clients share one verified panel per data directory. A changed installed build restarts the panel on its next managed launch. Only an explicitly saved cloud-snapshots / scheduled configuration enables the shared snapshot scheduler in the managed or foreground panel; its persisted deadline prevents duplicate sends from other clients. Ordinary reads never poll the cloud. Persona synchronization and model loading remain disabled in the panel process. No frontend build or cloud login is required.
+
+```bash
+memory-plugin web status          # running version, process and connection URL
+memory-plugin web restart         # reload the installed build at the saved address
+memory-plugin web stop            # stop this instance; keep its saved connection
+memory-plugin web autostart off   # disable install/client/login auto-launch
+memory-plugin web autostart on    # re-enable and start the panel
+memory-plugin web --foreground    # temporary panel until Ctrl+C
+```
+
+`autostart off` leaves an already running instance available; use `web stop` to stop it too. Full plugin uninstall removes its owned Startup entry and stops the managed panel, retaining memory and connection files unless an explicit data purge was requested. Removing just one client keeps the shared panel. After updating an already linked checkout, rerun `npm link --ignore-scripts` to register binary aliases if necessary.
+
+By default, port `0` lets the OS choose a free port on the first managed launch; subsequent launches reuse that address. Set a preferred port through the TUI's **WEB INTERFACE → Web Interface Port**, or use:
+
+```bash
+memory-cli web port 8765        # save the port for subsequent starts
+memory-cli web port             # show the saved port
+memory-plugin web               # use the saved port
+memory-plugin web --port 8766    # override for one run
+memory-plugin web --port 0       # temporary foreground instance on a free port
+memory-cli web port 0            # clear preferred port; managed saved address remains
+```
+
+A busy fixed port causes a clear error and a nonzero exit; the command does not change the saved setting. Ports accept integers from `0` to `65535`. Changing the setting affects future starts; restart an already running panel to use it.
+
+Panel edits remain local in both supported storage modes and appear in subsequent full snapshots through the shared engine. Snapshot restoration invalidates drafts whose Notebook version changed. Former `only-cloud` installations show `MIGRATION_REQUIRED`, disable editing, and require the existing explicit backup/restore flow; viewing the panel never migrates, merges, or restores memory automatically.
 
 The sidebar includes project search and a **Theme** selector with system, light, and dark options. On smaller screens, open **Область** to access them. Only the appearance choice is saved in a local browser cookie; it persists across dashboard ports. Project labels are shortened for display without changing their storage identities.
 
-Saving shows a field comparison and checks the store version. If another client changes the store, the draft stays open; **Обновить и сравнить** loads fresh data and preserves only your edited fields for a new review. Legacy records cannot be automatically matched after a conflict. Changes to linked record text and deletion are blocked until the shared link migration service is available; metadata editing remains supported.
+Saving shows a field comparison and checks the store version. If another client changes the store or its links, the draft stays open; **Обновить и сравнить** loads fresh data and preserves only your edited fields for a new review. Legacy records cannot be automatically matched after a conflict. Before explicit link migration, linked text/deletion remains guarded. After migration, editing text keeps the same fact/link ownership; deletion previews and removes only that fact's links. Unresolved legacy ownership still fails closed.
 
 ---
 
@@ -565,6 +712,8 @@ Configuration is stored in `<memory-dir>/config.json`.
 | Key | Default | Meaning |
 | :--- | :--- | :--- |
 | `mode` | `only-local` | `only-local` or `cloud-snapshots` |
+| `webPort` | `0` | Loopback web port (`0` automatically selects a free port); CLI `--port` overrides for one run |
+| `webAutoStart` | `true` | Ensure background UI on install/client launch; restore it at Windows user login |
 | `snapshotSyncMode` | `manual` | `manual`, `scheduled`, `off`; automatic uploads only in `cloud-snapshots` |
 | `snapshotIntervalHours` | `24` | Arbitrary positive hours, including fractional values and `168` (weekly) |
 | `fusionAlgorithm` | `rsf` | `rsf`, `rrf`, `semantic_only`, or `lexical_only` |
