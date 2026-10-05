@@ -1,4 +1,5 @@
-import { GLOBAL_KEY, projectKey } from "./memory.js";
+import { GLOBAL_KEY, projectKey, MEMORY_DIR } from "./memory.js";
+import { withSnapshotLock } from './storage/snapshot_lock.js';
 
 export async function resolveRagScopeKey(scope = "project", ctx = {}) {
   if (scope === "global") return GLOBAL_KEY;
@@ -39,6 +40,9 @@ export async function resolveManageRagScopeKeys(action, scope, ctx = {}) {
 }
 
 export async function addDocumentScope(db, docId, scopeKey) {
+  return withSnapshotLock(MEMORY_DIR, () => addScopeLocked(db, docId, scopeKey));
+}
+async function addScopeLocked(db, docId, scopeKey) {
   const key = scopeKey || GLOBAL_KEY;
   await db
     .prepare(
@@ -49,35 +53,19 @@ export async function addDocumentScope(db, docId, scopeKey) {
 }
 
 export async function removeDocumentScopes(db, docId, scopeKeys, { deferFinalRemoval = false } = {}) {
+  return withSnapshotLock(MEMORY_DIR, () => removeScopesLocked(db, docId, scopeKeys, { deferFinalRemoval }));
+}
+async function removeScopesLocked(db, docId, scopeKeys, { deferFinalRemoval = false } = {}) {
   const keys = Array.isArray(scopeKeys) ? [...new Set(scopeKeys.filter(Boolean))] : [];
-  if (keys.length === 0) return { removedScopes: [], remainingScopes: 0 };
-  const placeholders = keys.map(() => "?").join(",");
-  const existing = await db
-    .prepare(`SELECT scope_key FROM document_scopes WHERE doc_id = ? AND scope_key IN (${placeholders})`)
-    .all(docId, ...keys);
-  if (deferFinalRemoval) {
-    const total = await db.prepare("SELECT COUNT(*) AS cnt FROM document_scopes WHERE doc_id = ?").get(docId);
-    if (Number(total?.cnt || 0) === existing.length) {
-      // The caller will purge the document. Leave its last scope intact until
-      // deleteDocument commits the purge and durable cloud deletion together.
-      return { removedScopes: existing.map((row) => row.scope_key), remainingScopes: 0 };
-    }
-  }
-  await db
-    .prepare(`DELETE FROM document_scopes WHERE doc_id = ? AND scope_key IN (${placeholders})`)
-    .run(docId, ...keys);
-  const remaining = await db
-    .prepare("SELECT COUNT(*) AS cnt FROM document_scopes WHERE doc_id = ?")
-    .get(docId);
-  const remainingScopes = remaining?.cnt || 0;
-  if (existing.length > 0 && remainingScopes > 0) {
-    const { touchDocument } = await import("./graph/knowledge_linker.js");
-    await touchDocument(db, docId);
-  }
-  return {
-    removedScopes: existing.map((row) => row.scope_key),
-    remainingScopes,
-  };
+  if (!keys.length) return {removedScopes:[],remainingScopes:0};
+  const {removalState,publishRemoval} = await import('./storage/knowledge_removal.js');
+  const {BLOBS_DIR} = await import('./db/database.js');
+  const state = removalState(db.localDb,docId,keys);
+  if (!state) return {removedScopes:[],remainingScopes:0};
+  if (!state.removedScopes.length) return {removedScopes:[],remainingScopes:state.scopes.length};
+  // Kept only for callers explicitly retaining the last scope until a purge.
+  if (deferFinalRemoval && state.purge) return {removedScopes:state.removedScopes,remainingScopes:0};
+  return publishRemoval(db,state,BLOBS_DIR);
 }
 
 export function scopeFilterSql(scopeKeys, column = "ds.scope_key") {

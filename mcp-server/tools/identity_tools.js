@@ -1,6 +1,5 @@
 import * as z from "zod/v4";
-import { basename } from "node:path";
-import { GLOBAL_KEY, scopeKey, canonicalPath, readMemory, writeMemory, storeFilePath } from "../memory.js";
+import { GLOBAL_KEY, scopeKey, readMemory } from "../memory.js";
 import { factBody } from "../fact_format.js";
 import { optStr, optNum, defStr, defBool, requireProjectKey } from "./helpers.js";
 
@@ -77,220 +76,20 @@ export function registerIdentityTools(server) {
     }
   );
 
-  server.registerTool(
-    "link_project_memory",
-    {
-      description: "Link the current directory to a Git-based project identity, register aliases, and optionally migrate legacy/path stores.",
-      inputSchema: z.object({
-        directory: optStr().describe("Directory path to link (default: current directory)"),
-        remote: optStr().describe("Optional explicit remote URL to use as primary identity key"),
-      }),
-    },
-    async ({ directory, remote }) => {
-      const { getDatabase } = await import("../db/database.js");
-      const { resolveProjectIdentity, upsertIdentity, registerAlias, normalizeRemoteUrl } = await import("../identity.js");
-      const db = await getDatabase();
-
-      const dir = directory || process.cwd();
-      const identity = await resolveProjectIdentity(dir);
-      if (!identity && !remote) {
-        throw new Error("No Git repository detected and no remote URL specified.");
-      }
-
-      let key = identity ? identity.key : `git:${normalizeRemoteUrl(remote)}`;
-      let name = identity ? identity.name : basename(dir) || "unbound";
-      let primaryRemote = remote ? normalizeRemoteUrl(remote) : (identity ? identity.primaryRemote : null);
-
-      await upsertIdentity(db, { key, name, primaryRemote });
-
-      const aliases = [];
-      if (primaryRemote) {
-        aliases.push({ alias: `remote:${primaryRemote}`, kind: "remote" });
-      }
-      aliases.push({ alias: `path:${canonicalPath(dir)}`, kind: "path" });
-      aliases.push({ alias: `basename:${name}`, kind: "basename" });
-
-      for (const a of aliases) {
-        await registerAlias(db, { alias: a.alias, identityKey: key, kind: a.kind });
-      }
-
-      let migrated = false;
-      const legacyPathKey = canonicalPath(dir);
-      const legacyEntries = await readMemory(legacyPathKey);
-      if (legacyEntries && legacyEntries.length > 0) {
-        const gitEntries = await readMemory(key);
-        const seen = new Set(gitEntries.map((e) => factBody(e).toLowerCase().trim()));
-        let mergedCount = 0;
-        for (const entry of legacyEntries) {
-          const body = factBody(entry).toLowerCase().trim();
-          if (!seen.has(body)) {
-            seen.add(body);
-            gitEntries.push(entry);
-            mergedCount++;
-          }
-        }
-        if (mergedCount > 0) {
-          await writeMemory(key, gitEntries);
-          migrated = true;
-        }
-        try {
-          const legacyFp = storeFilePath(legacyPathKey);
-          const { existsSync } = await import("node:fs");
-          if (existsSync(legacyFp)) {
-            const { unlink } = await import("node:fs/promises");
-            await unlink(legacyFp);
-          }
-        } catch (e) {}
-      }
-      const { moveKnowledgeScope } = await import("../graph/knowledge_linker.js");
-      const migratedKnowledge = await moveKnowledgeScope(db, legacyPathKey, key);
-      if (migratedKnowledge.movedLinks > 0 || migratedKnowledge.movedDocuments > 0) migrated = true;
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                status: "success",
-                key,
-                name,
-                primaryRemote,
-                aliases: aliases.map((a) => a.alias),
-                migrated,
-              },
-              null,
-              2
-            ),
-          },
-        ],
-      };
-    }
-  );
-
-  server.registerTool(
-    "unlink_project_memory",
-    {
-      description: "Remove the path alias link for the specified project directory.",
-      inputSchema: z.object({
-        directory: optStr().describe("Directory path to unlink (default: current directory)"),
-        purge: defBool(false).describe("If true, completely purge the project identity from the SQLite store"),
-      }),
-    },
-    async ({ directory, purge }) => {
-      const { getDatabase } = await import("../db/database.js");
-      const { unregisterAlias, removeIdentity, resolveProjectIdentity } = await import("../identity.js");
-      const db = await getDatabase();
-
-      const dir = directory || process.cwd();
-      const alias = `path:${canonicalPath(dir)}`;
-      await unregisterAlias(db, alias);
-
-      let key = null;
-      if (purge) {
-        const identity = await resolveProjectIdentity(dir);
-        if (identity) {
-          key = identity.key;
-          await removeIdentity(db, key);
-        }
-      }
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                status: "success",
-                alias,
-                purgedIdentityKey: key,
-              },
-              null,
-              2
-            ),
-          },
-        ],
-      };
-    }
-  );
-
-  server.registerTool(
-    "relink_project_memory",
-    {
-      description: "Move or merge project memories from the current identity to a new target identity.",
-      inputSchema: z.object({
-        directory: optStr().describe("Directory path to relink (default: current directory)"),
-        remote: z.string().describe("New target remote URL / identity key to move memories to"),
-      }),
-    },
-    async ({ directory, remote }) => {
-      const { getDatabase } = await import("../db/database.js");
-      const { resolveProjectIdentity, upsertIdentity, removeIdentity, normalizeRemoteUrl } = await import("../identity.js");
-      const db = await getDatabase();
-
-      const dir = directory || process.cwd();
-      const sourceIdentity = await resolveProjectIdentity(dir);
-      if (!sourceIdentity) {
-        throw new Error("Source project identity not detected.");
-      }
-
-      const targetKey = `git:${normalizeRemoteUrl(remote)}`;
-      const sourceKey = sourceIdentity.key;
-
-      if (sourceKey === targetKey) {
-        return { content: [{ type: "text", text: "Source and target identities are already identical." }] };
-      }
-
-      const sourceFacts = await readMemory(sourceKey);
-      const targetFacts = await readMemory(targetKey);
-      const seen = new Set(targetFacts.map((e) => factBody(e).toLowerCase().trim()));
-
-      let mergedCount = 0;
-      for (const f of sourceFacts) {
-        const body = factBody(f).toLowerCase().trim();
-        if (!seen.has(body)) {
-          seen.add(body);
-          targetFacts.push(f);
-          mergedCount++;
-        }
-      }
-
-      await writeMemory(targetKey, targetFacts);
-
-      await upsertIdentity(db, { key: targetKey, name: sourceIdentity.name, primaryRemote: normalizeRemoteUrl(remote) });
-      await db.prepare("UPDATE project_aliases SET identity_key = ? WHERE identity_key = ?;").run(targetKey, sourceKey);
-      const { moveKnowledgeScope } = await import("../graph/knowledge_linker.js");
-      const movedKnowledge = await moveKnowledgeScope(db, sourceKey, targetKey);
-      await removeIdentity(db, sourceKey);
-
-      try {
-        const sourceFp = storeFilePath(sourceKey);
-        const { existsSync } = await import("node:fs");
-        if (existsSync(sourceFp)) {
-          const { unlink } = await import("node:fs/promises");
-          await unlink(sourceFp);
-        }
-      } catch (e) {}
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                status: "success",
-                sourceKey,
-                targetKey,
-                mergedFacts: mergedCount,
-                movedKnowledgeLinks: movedKnowledge.movedLinks,
-                movedRagDocuments: movedKnowledge.movedDocuments,
-              },
-              null,
-              2
-            ),
-          },
-        ],
-      };
-    }
-  );
+  server.registerTool('manage_project_memory', {
+    description: 'Inspect Git identities and preview/apply scoped project link, unlink, relink or legacy migration with backup and conflict checks.',
+    inputSchema: z.object({ action: z.enum(['list','inspect','preview','apply']), operation: optStr(), directory: optStr(), sourceKey: optStr(), targetKey: optStr(), remote: optStr(), previewToken: optStr(), confirm: defBool(false) }),
+  }, async input => {
+    const { projectRequest } = await import('../services/project_service.js');
+    return { content: [{ type: 'text', text: JSON.stringify(await projectRequest(input), null, 2) }] };
+  });
+  for (const operation of ['link','unlink','relink']) {
+    server.registerTool(`${operation}_project_memory`, {
+      description: `${operation} project memory through shared Git identity administration; moves create a verified local backup and reject ambiguous records.`,
+      inputSchema: z.object({ directory: optStr(), remote: optStr(), ...(operation === 'unlink' ? { purge: defBool(false) } : {}) }),
+    }, async input => {
+      const { executeProjectOperation } = await import('../services/project_service.js');
+      return { content: [{ type:'text', text:JSON.stringify(await executeProjectOperation(operation, input), null, 2) }] };
+    });
+  }
 }

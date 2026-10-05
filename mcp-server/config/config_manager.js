@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { MEMORY_DIR, ensureDirSync } from "../memory.js";
 import { atomicWrite } from "../storage/snapshot_lock.js";
+import { assertWebPort, DEFAULT_WEB_PORT } from "../dashboard/options.js";
 
 const CONFIG_FILE = path.join(MEMORY_DIR, "config.json");
 export const STORAGE_MODES = Object.freeze(["only-local", "cloud-snapshots"]);
@@ -37,6 +38,8 @@ function normalizeLoadedConfig(parsed) {
   delete config.conflictStrategy;
   delete config.failoverUrl;
   assertStorageMode(config.mode);
+  assertWebPort(config.webPort);
+  if (typeof config.webAutoStart !== 'boolean') throw new Error('webAutoStart must be boolean');
   return Object.freeze(config);
 }
 
@@ -55,6 +58,8 @@ export const DEFAULT_CONFIG = {
   executionDevice: "cpu",  // "cpu" | "webgpu"
   modelUnloadTimeoutMinutes: 0, // Idle auto-unload for ML models (0 = never unload)
   mode: "only-local",     // "only-local" | "cloud-snapshots"
+  webPort: DEFAULT_WEB_PORT, // 0 = automatic; otherwise a fixed loopback port
+  webAutoStart: true, // install/client startup; Windows user login restores the panel
   snapshotSyncMode: "manual", // manual | scheduled | off; only cloud-snapshots schedules uploads
   snapshotIntervalHours: 24, // Any positive finite number, e.g. 0.5 or 168
   legacyCloudBackupRequired: false, // Pending read-only cloud backup after removal of live sync

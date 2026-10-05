@@ -82,7 +82,7 @@ export function toVectorBytes(value) {
   return null;
 }
 
-export async function vectorSearch(db, queryVector, limit = 30, minSim = 0.25, scopeKeys = null) {
+export async function vectorSearch(db, queryVector, limit = 30, minSim = 0.25, scopeKeys = null, queryModel = null, scanLimitOverride = null) {
   if (!queryVector || queryVector.length === 0) return [];
 
   const vectorDim = queryVector.length;
@@ -90,7 +90,7 @@ export async function vectorSearch(db, queryVector, limit = 30, minSim = 0.25, s
   const tempView = new Uint8Array(tempBuf);
   const tempVec = new Float32Array(tempBuf);
 
-  const scanLimit = Number(getConfig().vectorScanLimit) || 0;
+  const scanLimit = scanLimitOverride === null ? Number(getConfig().vectorScanLimit) || 0 : Number(scanLimitOverride);
   const scoped = Array.isArray(scopeKeys) && scopeKeys.length > 0;
   const scopeClause = scoped
     ? `WHERE EXISTS (
@@ -101,16 +101,18 @@ export async function vectorSearch(db, queryVector, limit = 30, minSim = 0.25, s
     : "";
   const scanSql = scanLimit > 0
     ? `
-      SELECT m.id, m.section_id, m.doc_id, m.content, m.vector, s.breadcrumbs
+      SELECT m.id, m.section_id, m.doc_id, m.content, m.vector, s.breadcrumbs, d.metadata_json
       FROM micro_chunks m
-      JOIN sections s ON m.section_id = s.id
+      JOIN sections s ON m.section_id = s.id AND s.doc_id = m.doc_id
+      JOIN documents d ON d.id = m.doc_id
       ${scopeClause}
       LIMIT ?;
     `
     : `
-      SELECT m.id, m.section_id, m.doc_id, m.content, m.vector, s.breadcrumbs
+      SELECT m.id, m.section_id, m.doc_id, m.content, m.vector, s.breadcrumbs, d.metadata_json
       FROM micro_chunks m
-      JOIN sections s ON m.section_id = s.id
+      JOIN sections s ON m.section_id = s.id AND s.doc_id = m.doc_id
+      JOIN documents d ON d.id = m.doc_id
       ${scopeClause};
     `;
 
@@ -119,6 +121,8 @@ export async function vectorSearch(db, queryVector, limit = 30, minSim = 0.25, s
   const rows = scanLimit > 0 ? await stmt.all(...scopeParams, scanLimit) : await stmt.all(...scopeParams);
   const scored = [];
   for (const r of rows) {
+    const provenance = parseDocumentMetadata(r.metadata_json).embedding_provenance;
+    if (provenance && (provenance.model !== (queryModel || getConfig().embeddingModel || 'Xenova/multilingual-e5-small') || provenance.dimension !== vectorDim)) continue;
     // node:sqlite returns BLOBs as plain Uint8Array (NOT Buffer), the Turso
     // client may return base64 strings or {type:"Buffer",data:[...]}.
     // A Buffer.isBuffer() gate here silently dropped every local row and made
@@ -350,6 +354,7 @@ export async function hybridQuery({
   generateEmbeddings = true,
   policyExpansion = null, // null = use config default
   scopeKeys = null, // null = all documents; tool surfaces pass global/current-project keys
+  vectorScanLimit = null,
   _precomputedVector = null, // internal: skip embedText if batch already computed
 }) {
   const db = customDb || await getDatabase();
@@ -385,7 +390,7 @@ export async function hybridQuery({
     }));
   } else if (algo === "semantic_only" || algo === "vector_only") {
     const queryVector = await getQueryVector();
-    const vectorHits = await vectorSearch(db, queryVector, limit * 4, 0.10, scopeKeys);
+    const vectorHits = await vectorSearch(db, queryVector, limit * 4, 0.10, scopeKeys, embModel, vectorScanLimit);
     fusedHits = vectorHits.map((hit) => ({
       ...hit,
       score: hit.cosine_sim,
@@ -393,13 +398,13 @@ export async function hybridQuery({
   } else if (algo === "rrf") {
     const bm25Hits = await bm25Search(db, query, 30, scopeKeys);
     const queryVector = await getQueryVector();
-    const vectorHits = await vectorSearch(db, queryVector, 30, 0.10, scopeKeys);
+    const vectorHits = await vectorSearch(db, queryVector, 30, 0.10, scopeKeys, embModel, vectorScanLimit);
     fusedHits = rrfFusion(bm25Hits, vectorHits, 60, scoreThreshold);
   } else {
     // Default: RSF
     const bm25Hits = await bm25Search(db, query, 30, scopeKeys);
     const queryVector = await getQueryVector();
-    const vectorHits = await vectorSearch(db, queryVector, 30, 0.10, scopeKeys);
+    const vectorHits = await vectorSearch(db, queryVector, 30, 0.10, scopeKeys, embModel, vectorScanLimit);
     fusedHits = rsfFusion(bm25Hits, vectorHits, alphaWeight, scoreThreshold);
   }
 
@@ -465,9 +470,9 @@ export async function hybridQuery({
              d.title as doc_title, d.path as doc_path, d.metadata_json,
              d.created_at as doc_created_at, d.updated_at as doc_updated_at
       FROM micro_chunks m
-      JOIN sections s ON m.section_id = s.id
+      JOIN sections s ON m.section_id = s.id AND s.doc_id = m.doc_id
       JOIN documents d ON m.doc_id = d.id
-      LEFT JOIN medium_chunks med ON m.medium_id = med.id
+      LEFT JOIN medium_chunks med ON m.medium_id = med.id AND med.doc_id = m.doc_id AND med.section_id = m.section_id
       WHERE m.id IN (${placeholders});
     `).all(...topIds);
 
@@ -495,7 +500,7 @@ export async function hybridQuery({
     if (uniquePolicySourceIds.length > 0) {
       const policyPlaceholders = uniquePolicySourceIds.map(() => "?").join(",");
       const expandedRows = await db.prepare(`
-        SELECT id, content, block_type FROM medium_chunks WHERE id IN (${policyPlaceholders});
+        SELECT id, doc_id, section_id, content, block_type FROM medium_chunks WHERE id IN (${policyPlaceholders});
       `).all(...uniquePolicySourceIds);
       expandedContentMap = new Map(expandedRows.map((r) => [r.id, r]));
     }
@@ -513,12 +518,13 @@ export async function hybridQuery({
       let snippet = hit.content;
       let paragraphContext = detail.medium_content || hit.content;
 
-      if (usePolicyExpansion && detail.policy_source_id && (detail.retrieval_policy === "table_summary" || detail.retrieval_policy === "code_signature")) {
-        const expanded = expandedContentMap.get(detail.policy_source_id);
-        if (expanded) {
-          snippet = expanded.content;
-          paragraphContext = expanded.content;
-        }
+      const expanded = expandedContentMap.get(detail.policy_source_id);
+      const expansionApplied = usePolicyExpansion &&
+        ["table_summary", "code_signature"].includes(detail.retrieval_policy) &&
+        expanded?.doc_id === detail.doc_id && expanded.section_id === detail.section_id;
+      if (expansionApplied) {
+        snippet = expanded.content;
+        paragraphContext = expanded.content;
       }
 
       results.push({
@@ -537,10 +543,13 @@ export async function hybridQuery({
         snippet,
         paragraph_context: paragraphContext,
         full_section_content: detail.section_content,
+        bm25_rank: hit.bm25_rank ?? null, fts_rank: hit.fts_rank ?? null,
+        policy_source_id: detail.policy_source_id ?? null, stored_retrieval_policy: detail.retrieval_policy ?? "UNKNOWN",
+        fragment: {level:expansionApplied ? "medium" : "micro", chunkId:expansionApplied ? detail.policy_source_id : hit.id},
         score: parseFloat((hit.score || 0).toFixed(4)),
         rsf_score: hit.rsf_score ? parseFloat(hit.rsf_score.toFixed(4)) : null,
         rrf_score: hit.rrf_score ? parseFloat(hit.rrf_score.toFixed(4)) : null,
-        cosine_sim: hit.cosine_sim ? parseFloat(hit.cosine_sim.toFixed(4)) : null,
+        cosine_sim: hit.cosine_sim != null ? parseFloat(hit.cosine_sim.toFixed(4)) : null,
         rerank_score: hit.rerank_score !== undefined && hit.rerank_score !== null
           ? parseFloat(Number(hit.rerank_score).toFixed(4))
           : null,

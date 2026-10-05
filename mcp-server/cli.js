@@ -9,11 +9,12 @@ import { handleStorageAction } from "./cli/handlers/storage_actions.js";
 import { handleCloudAction } from "./cli/handlers/cloud_actions.js";
 import { handlePromptAction } from "./cli/handlers/prompt_actions.js";
 import { handleDiagnosticsAction } from "./cli/handlers/diagnostics_actions.js";
+import { handleWebAction } from "./cli/handlers/web_actions.js";
 
 export async function runCli() {
   const cliArgs = process.argv.slice(2);
 
-  if (cliArgs[0] === "snapshots") {
+  if (["snapshots", "web", "dashboard", "knowledge", "notebook", "prompts", "marketplace"].includes(cliArgs[0])) {
     await handleDirectCommands(cliArgs);
     return;
   }
@@ -29,6 +30,8 @@ export async function runCli() {
 
 Usage:
   memory-cli                         Launch the interactive TUI
+  memory-cli web [--port N]          Launch the web interface (0 = automatic)
+  memory-cli web port [N]            Show or save its default port
   memory-cli dashboard [--port N]    Launch the local browser panel
   memory-cli login [--from-env|--api-token|--api-key|--db-url <URL>]
   memory-cli logout [--api-key]
@@ -44,6 +47,9 @@ Usage:
   memory-cli uninstall [--purge] [--purge-cache] [--dry-run] [--yes] [--opencode|--claude|--codex|--gemini|--antigravity]
   memory-cli doctor --codex
   memory-cli snapshots help          Full ZIP checkpoints, arbitrary hour schedule, restore/delete
+  memory-cli knowledge help          Scoped local knowledge, raw text and chunk inspection (JSON)
+  memory-cli notebook help           Scoped Notebook read and reviewed directive transfer (JSON)
+  memory-cli marketplace help        Local plugin build, install, channel switch and status
 
 Options:
   -h, --help                         Show this help text`);
@@ -82,6 +88,12 @@ Options:
         value: "cloud",
         hint: config.mode.toUpperCase(),
         info: "Login, logout, API keys, operational mode, and ZIP checkpoints",
+      },
+      {
+        label: "WEB INTERFACE",
+        value: "web",
+        hint: config.webPort === 0 ? "AUTO PORT" : `PORT ${config.webPort}`,
+        info: "Configure the local browser panel port; start with memory-plugin web",
       },
       {
         label: "GLOBAL PROMPT & INTEGRATION MANAGEMENT",
@@ -142,6 +154,11 @@ async function showCategorySubmenu(category, config, stats, initialIndex = 0) {
   let items = [];
 
   switch (category) {
+    case "web":
+      items = [{ label: "Web Interface Port", value: "web_port",
+        badge: config.webPort === 0 ? "AUTOMATIC" : String(config.webPort),
+        info: "0 chooses a free port; fixed ports apply on next memory-plugin web start. Override once with --port N." }];
+      break;
     case "engine":
       items = [
         {
@@ -345,6 +362,7 @@ async function showCategorySubmenu(category, config, stats, initialIndex = 0) {
   items.push({ label: "< Back to Main Menu", value: "back" });
 
   const titles = {
+    web: "WEB INTERFACE",
     engine: "ENGINE & HYBRID SEARCH SETTINGS",
     storage: "KNOWLEDGE BASE & STORAGE MANAGEMENT",
     cloud: "CLOUD SYNCHRONIZATION & TURSO",
@@ -368,6 +386,7 @@ async function showCategorySubmenu(category, config, stats, initialIndex = 0) {
 }
 
 async function handleSubmenuItem(value, config, stats) {
+  await handleWebAction(value, config);
   await handleEngineAction(value, config);
   await handleStorageAction(value, config, stats);
   await handleCloudAction(value, config);

@@ -1,16 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { extname } from "node:path";
 import { getDatabase, BLOBS_DIR } from "../db/database.js";
 import { saveBlob, deleteBlob } from "../storage/blob_store.js";
-import { normalizeContent, fetchUrlContent } from "./normalizer.js";
 import { buildTripleHierarchy } from "./chunker.js";
 import { embedBatch, vectorToBuffer } from "../ml/model_manager.js";
 import { buildGraphEdges, saveGraphEdges } from "../graph/graph_extractor.js";
 import { getConfig } from "../config/config_manager.js";
-import { assertIngestPathAllowed } from "../security/path_guard.js";
 import { logger } from "../logger.js";
-import { GLOBAL_KEY } from "../memory.js";
+import { normalizeIngestionSource } from './staged.js';
+import { GLOBAL_KEY, MEMORY_DIR } from "../memory.js";
+import { withSnapshotLock } from '../storage/snapshot_lock.js';
+import { hasKnowledgeSchema, rebuildLinkProjections } from '../storage/knowledge_schema.js';
 import { addDocumentScope } from "../rag_scope.js";
 
 export const RAG_NOTE_KINDS = Object.freeze(["decision", "research", "context", "handoff", "note"]);
@@ -29,10 +28,12 @@ export function normalizeNoteTags(tags) {
 export function createNoteVirtualPath() {
   return `memory://note/${randomUUID()}`;
 }
-
-function mergeMetadata(baseMetadata, metadataOverrides) {
-  if (!metadataOverrides || typeof metadataOverrides !== "object" || Array.isArray(metadataOverrides)) return baseMetadata;
-  return { ...baseMetadata, ...metadataOverrides };
+function assertLegacyPublication(sql, current, metadata, title, blobHash, managed) {
+  if(!current||managed)return;
+  let old;try{old=JSON.parse(current.metadata_json||'{}');}catch{old={};}
+  if(old.source_type && old.source_type!==metadata.source_type)throw Object.assign(new Error('Source type cannot change implicitly. Use managed refresh or a new source.'),{code:'INVALID'});
+  const owners=sql.prepare('SELECT COUNT(*) AS n FROM document_scopes WHERE doc_id=?').get(current.id).n;
+  if(owners>1&&(current.checksum!==blobHash||current.title!==title||JSON.stringify(old)!==JSON.stringify(metadata)))throw Object.assign(new Error('Shared source update requires a prepared preview. Use manage_knowledge_content or knowledge content prepare/apply.'),{code:'CONFIRMATION'});
 }
 
 export async function ingestDocument({
@@ -45,61 +46,51 @@ export async function ingestDocument({
   generateEmbeddings = true,
   projectScope = GLOBAL_KEY,
   metadataOverrides = null,
+  prepared = null,
+  beforePublish = null,
+  publicationEffects = null,
+  forceReindex = false,
 }) {
   const db = customDb || await getDatabase();
 
-  let effectiveType = type;
-  let effectivePath = path;
-  let effectiveTitle = title;
-
-  if (type === "url") {
-    const fetched = await fetchUrlContent(String(content));
-    content = fetched.markdown;
-    effectiveType = "text";
-    effectiveTitle = title || fetched.title;
-    effectivePath = path || fetched.finalUrl || content;
-  } else if (type === "file") {
-    const filePath = effectivePath || content;
-    const needsRead = !content || content === filePath;
-    if (needsRead && filePath) {
-      const safePath = assertIngestPathAllowed(filePath);
-      const ext = extname(safePath).toLowerCase();
-      const isBinary = [".pdf", ".docx", ".xlsx", ".xls"].includes(ext);
-      content = await readFile(safePath, isBinary ? null : "utf-8");
-      effectivePath = filePath;
-    }
-  }
-
-  const normalized = await normalizeContent({
-    content,
-    type: effectiveType,
-    path: effectivePath,
-    title: effectiveTitle,
-  });
+  const normalized = prepared || await normalizeIngestionSource({ content, type, path, title, metadataOverrides });
+  const effectivePath = normalized.path;
   const markdown = normalized.markdown;
   const docTitle = normalized.title;
-  if (type === "url") normalized.metadata.source_type = "url";
-  const metadata = mergeMetadata(normalized.metadata, metadataOverrides);
+  const metadata = normalized.metadata;
 
   const blobRes = await saveBlob(markdown, customBlobDir);
   const blobHash = blobRes.hash;
 
-  const generatedDocId = `doc_${randomUUID().replace(/-/g, "").substring(0, 12)}`;
+  const generatedDocId = prepared?.docId || `doc_${randomUUID().replace(/-/g, "").substring(0, 12)}`;
   const docPath = effectivePath || `virtual://${type}/${generatedDocId}`;
   const existingDoc = await db.prepare("SELECT * FROM documents WHERE path = ?").get(docPath);
   const docId = existingDoc?.id || generatedDocId;
   const now = Date.now();
+  if(!prepared && existingDoc?.checksum===blobHash && existingDoc.title===docTitle){
+    let old;try{old=JSON.parse(existingDoc.metadata_json||'{}');}catch{old={};}
+    Object.assign(metadata,{...old,...metadata});
+  }
+  if(!prepared && existingDoc && existingDoc.title!==docTitle)forceReindex=true;
 
-  if (existingDoc && existingDoc.checksum === blobHash) {
+  if (existingDoc && existingDoc.checksum === blobHash && !forceReindex) {
+    return withSnapshotLock(MEMORY_DIR, async () => {
+    const current = await db.prepare('SELECT * FROM documents WHERE path=?').get(docPath);
+    if (JSON.stringify(current) !== JSON.stringify(existingDoc)) throw Object.assign(new Error('Source changed during preparation. Retry ingestion.'), { code: 'CONFLICT' });
+    await saveBlob(markdown, customBlobDir);
     let assignedScope = projectScope || GLOBAL_KEY;
     await db.exec("BEGIN IMMEDIATE;");
     try {
+      assertLegacyPublication(db.localDb,current,metadata,docTitle,blobHash,beforePublish);
+      beforePublish?.(db.localDb);
       await db.prepare("UPDATE documents SET title = ?, metadata_json = ?, updated_at = ? WHERE id = ?;")
         .run(docTitle, JSON.stringify(metadata), now, docId);
       assignedScope = await addDocumentScope(db, docId, projectScope);
+      publicationEffects?.(db.localDb);
       await db.exec("COMMIT;");
     } catch (err) {
       try { await db.exec("ROLLBACK;"); } catch {}
+      if (err.code) throw err;
       throw new Error(`Ingestion scope transaction failed: ${err.message}`);
     }
 
@@ -111,12 +102,17 @@ export async function ingestDocument({
       microChunksCount: chunksRow?.cnt || 0, micro_chunks_count: chunksRow?.cnt || 0,
       deduplicated: true, projectScope: assignedScope,
     };
+    });
   }
 
-  const hierarchy = buildTripleHierarchy(markdown, docId, docTitle);
+  const hierarchy = prepared?.hierarchy || buildTripleHierarchy(markdown, docId, docTitle);
 
-  if (generateEmbeddings && hierarchy.microChunks.length > 0) {
-    const BATCH_SIZE = getConfig().batchSize || 12;
+  if (prepared) {
+    // Vectors belong to this exact prepared text/title and were computed before the lock.
+  } else if (generateEmbeddings && hierarchy.microChunks.length > 0) {
+    const embeddingConfig=getConfig(),model=embeddingConfig.embeddingModel||'Xenova/multilingual-e5-small',dimension=embeddingConfig.vectorDimension||null;
+    const BATCH_SIZE = embeddingConfig.batchSize || 12;
+    let actualDimension=null;
     const indexedItems = hierarchy.microChunks.map((micro, idx) => ({
       index: idx,
       text: micro.breadcrumbs
@@ -126,18 +122,29 @@ export async function ingestDocument({
     indexedItems.sort((a, b) => a.text.length - b.text.length);
     for (let i = 0; i < indexedItems.length; i += BATCH_SIZE) {
       const batch = indexedItems.slice(i, i + BATCH_SIZE);
-      const batchVecs = await embedBatch(batch.map((item) => item.text), false);
+      const batchVecs = await embedBatch(batch.map((item) => item.text), false,model,null,null,{},dimension);
+      if(batchVecs.length!==batch.length||batchVecs.some(vector=>!vector?.length||[...vector].some(value=>!Number.isFinite(value))))throw Object.assign(new Error('Incomplete embedding batch.'),{code:'EMBEDDING_FAILED'});
       for (let j = 0; j < batchVecs.length; j++) {
+        actualDimension??=batchVecs[j].length;
+        if(actualDimension!==batchVecs[j].length)throw Object.assign(new Error('Mixed embedding dimensions.'),{code:'EMBEDDING_FAILED'});
         hierarchy.microChunks[batch[j].index].vector = vectorToBuffer(batchVecs[j]);
       }
     }
+    metadata.index_state='dense';metadata.embedding_provenance={model,dimension:actualDimension,recordedAt:Date.now()};
   } else {
     for (const micro of hierarchy.microChunks) micro.vector = Buffer.alloc(0);
+    metadata.index_state='lexical-only';metadata.embedding_provenance=null;
   }
 
+  return withSnapshotLock(MEMORY_DIR, async () => {
+  const current = await db.prepare('SELECT * FROM documents WHERE path=?').get(docPath);
+  if (JSON.stringify(current || null) !== JSON.stringify(existingDoc || null)) throw Object.assign(new Error('Source changed during preparation. Retry ingestion.'), { code: 'CONFLICT' });
+  await saveBlob(markdown, customBlobDir);
   let assignedScope = projectScope || GLOBAL_KEY;
   await db.exec("BEGIN IMMEDIATE;");
   try {
+    assertLegacyPublication(db.localDb,current,metadata,docTitle,blobHash,beforePublish);
+    beforePublish?.(db.localDb);
     if (existingDoc) {
       const ownedRows = await db.prepare(`
         SELECT id FROM sections WHERE doc_id = ?
@@ -145,7 +152,7 @@ export async function ingestDocument({
         UNION SELECT id FROM micro_chunks WHERE doc_id = ?;
       `).all(docId, docId, docId);
       const ownedIds = [docId, ...ownedRows.map((row) => row.id)];
-      try { await db.prepare("DELETE FROM micro_chunks_fts WHERE id IN (SELECT id FROM micro_chunks WHERE doc_id = ?);").run(docId); } catch {}
+      await db.prepare("DELETE FROM micro_chunks_fts WHERE id IN (SELECT id FROM micro_chunks WHERE doc_id = ?);").run(docId);
       if (ownedIds.length > 0) {
         const placeholders = ownedIds.map(() => "?").join(",");
         await db.prepare(`DELETE FROM graph_edges WHERE source_id IN (${placeholders}) OR target_id IN (${placeholders});`)
@@ -194,15 +201,18 @@ export async function ingestDocument({
       const links = await db.prepare("SELECT * FROM knowledge_links WHERE doc_id = ?").all(docId);
       const insertLinkEdge = db.prepare(`INSERT OR IGNORE INTO graph_edges
         (source_id, target_id, relation_type, metadata_json, created_at) VALUES (?, ?, ?, ?, ?);`);
-      for (const link of links) {
+      for (const link of hasKnowledgeSchema(db) ? [] : links) {
         const targetSpec = link.start_line ? `${docId}:L${link.start_line}-${link.end_line || link.start_line}` : docId;
         await insertLinkEdge.run(`fact:${link.fact_key}:${link.fact_text.substring(0, 30)}`, targetSpec, link.relation_type || "LINKS_TO", JSON.stringify({ linkId: link.id }), link.created_at || now);
       }
     }
 
+    publicationEffects?.(db.localDb);
+    if (hasKnowledgeSchema(db)) rebuildLinkProjections(db.localDb);
     await db.exec("COMMIT;");
   } catch (err) {
     try { await db.exec("ROLLBACK;"); } catch {}
+    if (err.code) throw err;
     throw new Error(`Ingestion transaction failed: ${err.message}`);
   }
 
@@ -219,6 +229,7 @@ export async function ingestDocument({
     microChunksCount: hierarchy.microChunks.length, micro_chunks_count: hierarchy.microChunks.length,
     deduplicated: blobRes.deduplicated, projectScope: assignedScope,
   };
+  });
 }
 
 export async function ingestNote({
@@ -261,40 +272,16 @@ export async function ingestNote({
 }
 
 export async function deleteDocument(docIdOrPath, customDb = null, customBlobDir = BLOBS_DIR) {
+  return withSnapshotLock(MEMORY_DIR, () => deleteDocumentLocked(docIdOrPath, customDb, customBlobDir));
+}
+async function deleteDocumentLocked(docIdOrPath, customDb = null, customBlobDir = BLOBS_DIR) {
   const db = customDb || await getDatabase();
-  const doc = await db.prepare("SELECT * FROM documents WHERE id = ? OR path = ? OR title = ?")
-    .get(docIdOrPath, docIdOrPath, docIdOrPath);
-  if (!doc) return { deleted: false, reason: "Document not found" };
-
-  const ownedIds = [doc.id];
-  for (const table of ["sections", "medium_chunks", "micro_chunks"]) {
-    const rows = await db.prepare(`SELECT id FROM ${table} WHERE doc_id = ?`).all(doc.id);
-    for (const row of rows) ownedIds.push(row.id);
-  }
-
-  await db.exec("BEGIN IMMEDIATE;");
-  try {
-    try { await db.prepare("DELETE FROM micro_chunks_fts WHERE id IN (SELECT id FROM micro_chunks WHERE doc_id = ?);").run(doc.id); } catch {}
-    await db.prepare("DELETE FROM knowledge_links WHERE doc_id = ?").run(doc.id);
-    for (const id of ownedIds) {
-      await db.prepare("DELETE FROM graph_edges WHERE source_id = ? OR target_id = ? OR source_id GLOB ? OR target_id GLOB ?")
-        .run(id, id, `${id}*`, `${id}*`);
-    }
-    await db.prepare("DELETE FROM documents WHERE id = ?;").run(doc.id);
-    await db.exec("COMMIT;");
-  } catch (err) {
-    try { await db.exec("ROLLBACK;"); } catch {}
-    throw err;
-  }
-
-  if (doc.blob_hash) {
-    const refCountRow = await db.prepare("SELECT COUNT(*) as cnt FROM documents WHERE blob_hash = ?").get(doc.blob_hash);
-    if (Number(refCountRow?.cnt || 0) === 0) {
-      await deleteBlob(doc.blob_hash, customBlobDir);
-    }
-  }
-
-  return { deleted: true, docId: doc.id, title: doc.title, linksCleaned: true, syncPending: false };
+  const rows = await db.prepare('SELECT * FROM documents WHERE id=? OR path=? OR title=? LIMIT 2').all(docIdOrPath,docIdOrPath,docIdOrPath);
+  const doc = rows.find(row => row.id === docIdOrPath) || rows.find(row => row.path === docIdOrPath) || (rows.length === 1 ? rows[0] : null);
+  if (!rows.length) return {deleted:false,reason:'Document not found'};
+  if (!doc) throw Object.assign(new Error('Ambiguous document title; use exact docId.'),{code:'INVALID'});
+  const {removalState,publishRemoval} = await import('../storage/knowledge_removal.js');
+  return publishRemoval(db,removalState(db.localDb,doc.id),customBlobDir);
 }
 
 export async function reindexEmbeddings({
@@ -303,6 +290,8 @@ export async function reindexEmbeddings({
   customDb = null,
   embedFn = null,
   progressCallback = null,
+  modelOptions = {},
+  beforePublish = null,
 } = {}) {
   const db = customDb || await getDatabase();
   const config = getConfig();
@@ -326,7 +315,7 @@ export async function reindexEmbeddings({
       : `${row.content}\n\nContext: ${row.doc_title || ""}`,
   }));
 
-  const defaultEmbed = async (texts) => embedBatch(texts, false, targetModel, progressCallback, null, {}, targetDim || null);
+  const defaultEmbed = async (texts) => embedBatch(texts, false, targetModel, progressCallback, null, {}, targetDim || null, modelOptions);
   const embed = embedFn || defaultEmbed;
   const BATCH_SIZE = config.batchSize || 12;
   const vectors = [];
@@ -341,14 +330,28 @@ export async function reindexEmbeddings({
   }
 
   const affectedDocIds = [...new Set(items.map((item) => item.doc_id).filter(Boolean))];
+  const itemDocs=new Map(items.map(item=>[item.id,item.doc_id])),docDimensions=new Map();
+  for(const vector of vectors){const docId=itemDocs.get(vector.id);if(!docDimensions.has(docId))docDimensions.set(docId,new Set());docDimensions.get(docId).add(vector.vector.length/4);}
 
+  return withSnapshotLock(MEMORY_DIR, async () => {
+  const current = await db.prepare(`SELECT m.id, m.doc_id, m.content, s.breadcrumbs, d.title as doc_title
+    FROM micro_chunks m LEFT JOIN sections s ON m.section_id=s.id LEFT JOIN documents d ON m.doc_id=d.id ORDER BY m.doc_id,m.id`).all();
+  if (JSON.stringify(current) !== JSON.stringify(rows)) throw Object.assign(new Error('Index changed during embedding preparation. Retry reindexing.'), { code: 'CONFLICT' });
+  await beforePublish?.();
   await db.exec("BEGIN IMMEDIATE;");
   try {
     const stmt = db.prepare("UPDATE micro_chunks SET vector = ? WHERE id = ?;");
     for (const vector of vectors) await stmt.run(vector.vector, vector.id);
     const touchedAt = Date.now();
-    const touchDoc = db.prepare("UPDATE documents SET updated_at = ? WHERE id = ?;");
-    for (const docId of affectedDocIds) await touchDoc.run(touchedAt, docId);
+    const touchDoc = db.prepare("UPDATE documents SET updated_at = ?,metadata_json = ? WHERE id = ?;");
+    for (const docId of affectedDocIds) {
+      const row = await db.prepare('SELECT metadata_json FROM documents WHERE id=?').get(docId);
+      let metadata; try { metadata = JSON.parse(row.metadata_json || '{}'); } catch { metadata = {}; }
+      const dimensions = [...docDimensions.get(docId)];
+      metadata.index_state = dimensions.length === 1 ? 'dense' : 'UNKNOWN';
+      metadata.embedding_provenance = dimensions.length === 1 ? { model: targetModel, dimension: dimensions[0], recordedAt: touchedAt } : null;
+      await touchDoc.run(touchedAt, JSON.stringify(metadata), docId);
+    }
     await db.exec("COMMIT;");
   } catch (err) {
     try { await db.exec("ROLLBACK;"); } catch {}
@@ -356,4 +359,5 @@ export async function reindexEmbeddings({
   }
 
   return { reindexed: vectors.length, documentsAffected: affectedDocIds.length, model: targetModel, dimension: targetDim };
+  });
 }

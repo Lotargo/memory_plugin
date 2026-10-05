@@ -6,13 +6,20 @@ import { resolveClientPaths } from "./client_paths.js";
 import { cliFailureMessage, runClientCli } from "./client_cli.js";
 import { MEMORY_MCP_ENTRY, isMemoryMcpServerEntry, isMemoryPluginEntry, readJsonConfig } from "./client_registration.js";
 
-async function configureJsonMcpClient({ label, cliName, cliArgs, configPath }) {
+async function configureJsonMcpClient({ label, cliName, cliArgs, configPath, entry = MEMORY_MCP_ENTRY }) {
   let config = await readJsonConfig(configPath);
   const existing = config.mcpServers?.["memory-agent"];
   if (existing && !isMemoryMcpServerEntry(existing)) {
     throw new Error(`Existing mcpServers.memory-agent in ${configPath} is not owned by this plugin`);
   }
-  if (existing) return { method: "existing", configPath };
+  if (existing) {
+    if (entry !== MEMORY_MCP_ENTRY && (existing.command !== entry.command || JSON.stringify(existing.args) !== JSON.stringify(entry.args))) {
+      config.mcpServers['memory-agent'] = { ...existing, ...entry };
+      await writeFile(configPath, JSON.stringify(config, null, 2) + '\n', 'utf8');
+      return { method: 'fallback', configPath, nativeReason: 'normalized owned launcher to this installed runtime' };
+    }
+    return { method: "existing", configPath };
+  }
 
   const native = runClientCli(cliName, cliArgs);
   if (native.ok) {
@@ -32,7 +39,7 @@ async function configureJsonMcpClient({ label, cliName, cliArgs, configPath }) {
   if (!config.mcpServers || typeof config.mcpServers !== "object" || Array.isArray(config.mcpServers)) {
     config.mcpServers = {};
   }
-  config.mcpServers["memory-agent"] = MEMORY_MCP_ENTRY;
+  config.mcpServers["memory-agent"] = entry;
   await mkdir(dirname(configPath), { recursive: true });
   await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
   return {
@@ -42,8 +49,7 @@ async function configureJsonMcpClient({ label, cliName, cliArgs, configPath }) {
   };
 }
 
-export async function runSetup() {
-  const args = process.argv.slice(2);
+export async function runSetup(args = process.argv.slice(2)) {
   const lowerArgs = args.map((arg) => String(arg).toLowerCase());
   const hasSpecificFlag = lowerArgs.some((a) =>
     ["--opencode", "--claude", "--codex", "--antigravity", "--gemini"].includes(a.toLowerCase())
@@ -54,6 +60,9 @@ export async function runSetup() {
   const doAntigravity = !hasSpecificFlag || lowerArgs.includes("--antigravity");
   const doGemini = !hasSpecificFlag || lowerArgs.includes("--gemini");
   const doCodex = !hasSpecificFlag || lowerArgs.includes("--codex");
+
+  const { assertDirectSetupAllowed } = await import('./plugin_integration.js');
+  await assertDirectSetupAllowed([...(doCodex ? ['codex'] : []), ...(doClaude ? ['claude'] : [])]);
 
   // Validate before authentication or writing any client configuration.
   const { STORAGE_MODES: VALID_MODES, assertStorageMode } = await import("./config/config_manager.js");
@@ -157,10 +166,12 @@ export async function runSetup() {
   // 2. Claude Code (native user-scope MCP lifecycle, JSON fallback)
   if (doClaude) {
     try {
+      const bootPath = fileURLToPath(new URL('./boot.js', import.meta.url));
       const result = await configureJsonMcpClient({
         label: "Claude Code",
         cliName: "claude",
-        cliArgs: ["mcp", "add", "--scope", "user", "memory-agent", "--", "npx", "-y", "@lotargo/memory_plugin"],
+        cliArgs: ["mcp", "add", "--scope", "user", "memory-agent", "--", process.execPath, bootPath],
+        entry: { command: process.execPath, args: [bootPath] },
         configPath: clientPaths.claudeConfigPath,
       });
       console.log(`  [OK] Claude Code: configured MCP server via ${result.method === "native" ? "claude mcp add" : result.method === "existing" ? "existing owned registration" : "ownership-checked JSON fallback"}`);
@@ -317,10 +328,10 @@ export async function runSetup() {
       if (doAntigravity) targets.push({ name: "Antigravity", dir: join(home, ".gemini", "config", "skills") });
       if (doGemini) targets.push({ name: "Gemini CLI", dir: clientPaths.geminiSkillsDir });
       if (doCodex) {
-        targets.push({ name: "Codex", dir: join(home, ".codex", "skills") });
+        targets.push({ name: "Codex", dir: join(clientPaths.codexDir, "skills") });
         targets.push({ name: "Codex shared agents", dir: join(home, ".agents", "skills") });
       }
-      if (doClaude) targets.push({ name: "Claude Code", dir: join(home, ".claude", "skills") });
+      if (doClaude) targets.push({ name: "Claude Code", dir: join(clientPaths.claudeDir, "skills") });
       const cwd = clientPaths.cwd;
       if (doAntigravity && existsSync(join(cwd, ".agents"))) {
         targets.push({ name: "Antigravity (local)", dir: join(cwd, ".agents", "skills") });
@@ -347,6 +358,11 @@ export async function runSetup() {
     console.log("  [SKIP] Skill installation skipped:", err.message);
   }
 
+  try {
+    const { autoStartWeb } = await import('./dashboard/runtime.js');
+    const panel = await autoStartWeb();
+    if (!panel.skipped) console.log(`  [OK] Memory panel: ${panel.url}`);
+  } catch (error) { console.log(`  [WARN] Memory panel: ${error.message}. Retry with memory-plugin web.`); }
   console.log(`\nSetup complete. Configured ${configuredCount} environment(s).\n`);
 }
 

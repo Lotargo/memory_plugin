@@ -1,3 +1,4 @@
+import { KNOWLEDGE_REMOVAL_DESCRIPTION, KNOWLEDGE_REMOVAL_FIELDS, knowledgeRemovalTool } from './core/knowledge_removal_core.js';
 import * as z from "zod/v4";
 import { optStr, defBool, defNum, optNum } from "./helpers.js";
 import { MEMORY_DIR } from "../memory.js";
@@ -6,8 +7,25 @@ import { ensureExportsDir } from "../ingest/exporter.js";
 import { resolveRagScopeKey, resolveManageRagScopeKeys, removeDocumentScopes } from "../rag_scope.js";
 import { runSingleRagQuery, runBatchRagQuery } from "./core/rag_query_core.js";
 import { readKnowledgeDocument, listKnowledgeDocuments } from "./core/knowledge_read_core.js";
+import { KNOWLEDGE_INSPECT_DESCRIPTION, KNOWLEDGE_INSPECT_FIELDS, inspectKnowledgeTool } from "./core/knowledge_inspect_core.js";
+import { KNOWLEDGE_LINKS_DESCRIPTION, KNOWLEDGE_LINKS_FIELDS, knowledgeLinksTool } from './core/knowledge_links_core.js';
+import { KNOWLEDGE_CONTENT_DESCRIPTION, KNOWLEDGE_CONTENT_FIELDS, knowledgeContentTool } from './core/knowledge_content_core.js';
 
 export function registerRagTools(server) {
+  const inspectSchema = Object.fromEntries(Object.entries(KNOWLEDGE_INSPECT_FIELDS).map(([key, field]) => {
+    let schema = field.enum ? z.enum(field.enum) : field.type === "number" ? z.union([z.number(), z.string()]).nullish().transform(value => value ?? undefined) : field.type === "boolean" ? z.boolean().nullish().transform(value => value ?? (key === "includeGlobal" ? false : undefined)) : optStr();
+    if (key !== "action" && field.enum) schema = schema.nullish().transform(value => value ?? undefined);
+    return [key, schema.describe(field.description || key)];
+  }));
+  server.registerTool("inspect_knowledge", { description: KNOWLEDGE_INSPECT_DESCRIPTION, inputSchema: inspectSchema }, inspectKnowledgeTool);
+  const linksSchema = Object.fromEntries(Object.entries(KNOWLEDGE_LINKS_FIELDS).map(([key, field]) => [key,
+    (field.enum ? z.enum(field.enum) : z.string()).optional().describe(field.description || key)]));
+  server.registerTool('manage_knowledge_links', { description: KNOWLEDGE_LINKS_DESCRIPTION, inputSchema: linksSchema }, knowledgeLinksTool);
+  const contentSchema = Object.fromEntries(Object.entries(KNOWLEDGE_CONTENT_FIELDS).map(([key, field]) => [key,
+    (field.enum ? z.enum(field.enum) : field.type === 'boolean' ? z.boolean() : z.string()).optional().describe(field.description || key)]));
+  server.registerTool('manage_knowledge_content', { description: KNOWLEDGE_CONTENT_DESCRIPTION, inputSchema: contentSchema }, knowledgeContentTool);
+  const removalSchema = Object.fromEntries(Object.entries(KNOWLEDGE_REMOVAL_FIELDS).map(([key,field])=>[key,(field.enum?z.enum(field.enum):field.type==='boolean'?z.boolean():z.string()).optional()]));
+  server.registerTool('manage_knowledge_removal',{description:KNOWLEDGE_REMOVAL_DESCRIPTION,inputSchema:removalSchema},knowledgeRemovalTool);
   registerSnapshotDir(ensureExportsDir());
   registerSnapshotDir(MEMORY_DIR);
 
@@ -20,7 +38,7 @@ export function registerRagTools(server) {
         "For type='file' the file is read from disk and indexed with a code-block wrapper. " +
         "For type='url' the page is fetched and its content is indexed (not just the URL). " +
         "Processes document through 3-tier hierarchy chunking (Big/Medium/Small), " +
-        "computes dense vectors, and extracts GraphRAG code symbols.",
+        "computes dense vectors, and extracts GraphRAG code symbols. Shared updates require the prepared preview/apply flow in manage_knowledge_content; source types are preserved.",
       inputSchema: z.object({
         content: z.string().describe("Raw text content, file path, or web URL. For type='file' this can be the file path (reads from disk) or the file content directly"),
         type: z.enum(["text", "file", "url"]).nullish().transform((v) => v || "text").describe("Input content type: 'text' (raw content), 'file' (reads from disk, wraps in code block), or 'url' (fetches page content)"),
@@ -214,7 +232,7 @@ export function registerRagTools(server) {
           .prepare(`SELECT d.id FROM documents d WHERE (d.id = ? OR d.path = ? OR d.title = ?) AND ${visibleDocWhere}`)
           .get(docId, docId, docId, ...scopeKeys);
         if (!visible) throw new Error(`Document not found in the selected RAG scope for docId: ${docId}`);
-        const scopeRemoval = await removeDocumentScopes(db, visible.id, scopeKeys, { deferFinalRemoval: true });
+        const scopeRemoval = await removeDocumentScopes(db, visible.id, scopeKeys);
         if (scopeRemoval.remainingScopes > 0) {
           return {
             content: [{
@@ -230,7 +248,7 @@ export function registerRagTools(server) {
           };
         }
         const { deleteDocument } = await import("../ingest/pipeline.js");
-        const result = await deleteDocument(visible.id, db);
+        const result = scopeRemoval;
         return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       }
 

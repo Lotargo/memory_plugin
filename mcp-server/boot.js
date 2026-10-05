@@ -40,7 +40,19 @@ if (major < MIN_MAJOR || (major === MIN_MAJOR && minor < MIN_MINOR)) {
 }
 
 // Version is OK — hand off to the real entry point.
-if (process.argv[2] === "dashboard") {
-  const { runDashboard } = await import("./dashboard/server.js");
-  await runDashboard(process.argv.slice(3));
+if (process.argv[2] === 'prompts') {
+  const { handlePromptCommand } = await import('./cli/prompt_commands.js');
+  await handlePromptCommand(process.argv.slice(3));
+} else if (process.argv[2] === 'notebook') {
+  const { handleNotebookCommand } = await import('./cli/notebook_commands.js');
+  await handleNotebookCommand(process.argv.slice(3));
+} else if (process.argv[2] === 'marketplace') {
+  const { handleMarketplaceCommand } = await import('./marketplace.js');
+  await handleMarketplaceCommand(process.argv.slice(3));
+} else if (process.argv[2] === "knowledge") {
+  const { handleKnowledgeCommand } = await import("./cli/knowledge_commands.js");
+  await handleKnowledgeCommand(process.argv.slice(3));
+} else if (["web", "dashboard"].includes(process.argv[2])) {
+  const { handleWebCommand } = await import("./cli/web_commands.js");
+  await handleWebCommand(process.argv.slice(3));
 } else await import("./index.js");

@@ -1,4 +1,8 @@
+import { KNOWLEDGE_REMOVAL_DESCRIPTION, KNOWLEDGE_REMOVAL_FIELDS, knowledgeRemovalTool } from '../mcp-server/tools/core/knowledge_removal_core.js';
 import BaseMemoryPlugin from "./index.js";
+import { KNOWLEDGE_INSPECT_DESCRIPTION, KNOWLEDGE_INSPECT_FIELDS, inspectKnowledgeTool } from "../mcp-server/tools/core/knowledge_inspect_core.js";
+import { KNOWLEDGE_LINKS_DESCRIPTION, KNOWLEDGE_LINKS_FIELDS, knowledgeLinksTool } from '../mcp-server/tools/core/knowledge_links_core.js';
+import { KNOWLEDGE_CONTENT_DESCRIPTION, KNOWLEDGE_CONTENT_FIELDS, knowledgeContentTool } from '../mcp-server/tools/core/knowledge_content_core.js';
 import { manageSnapshots, startSnapshotScheduler, stopSnapshotScheduler } from "../mcp-server/admin/cloud_snapshots.js";
 import { SNAPSHOT_DESCRIPTION, SNAPSHOT_PROPERTIES } from "../mcp-server/tools/snapshot_tools.js";
 import {
@@ -30,12 +34,12 @@ import {
 import { rememberNote } from "../mcp-server/tools/core/note_core.js";
 import { runSingleRagQuery, runBatchRagQuery } from "../mcp-server/tools/core/rag_query_core.js";
 import { readKnowledgeDocument, listKnowledgeDocuments } from "../mcp-server/tools/core/knowledge_read_core.js";
-import { MEMORY_ROUTING_POLICY } from "../mcp-server/tools/core/memory_routing.js";
 import {
   buildMemoryContext,
   buildSystemMemoryOverlay,
   injectMemoryOverlayIntoSystem,
 } from "./index.js";
+import { buildOpenCodeV2MemoryContext, withMemoryRoutingPolicy } from '../mcp-server/context/opencode_context.js';
 
 const REMEMBER_NOTE_DESCRIPTION =
   "Save high-value long-form or episodic context as a cold RAG Memory Note. " +
@@ -76,14 +80,7 @@ function injectRoutingPolicyIntoMemory(output) {
   );
   if (!memoryPart || memoryPart.text.includes("MEMORY ROUTING DIRECTIVE:")) return;
 
-  if (memoryPart.text.includes("</MEMORY>")) {
-    memoryPart.text = memoryPart.text.replace(
-      "</MEMORY>",
-      `\n\n${MEMORY_ROUTING_POLICY}\n</MEMORY>`
-    );
-  } else {
-    memoryPart.text += `\n\n${MEMORY_ROUTING_POLICY}`;
-  }
+  memoryPart.text = withMemoryRoutingPolicy(memoryPart.text);
 }
 
 function addRoutingGuidance(plugin) {
@@ -225,7 +222,11 @@ function getTextParts(message) {
 
 async function v2Setup(ctx) {
   installExitHook();
+  const { startModelControlLoop } = await import('../mcp-server/ml/model_manager.js');
+  startModelControlLoop();
   startSnapshotScheduler();
+  const { autoStartWeb } = await import('../mcp-server/dashboard/runtime.js');
+  void autoStartWeb().catch(error => console.error(`Memory panel: ${error.message}`));
   const { ensureMemoryDir } = await import("../mcp-server/memory.js").catch(() => ({}));
   try {
     if (typeof ensureMemoryDir === "function") await ensureMemoryDir();
@@ -303,12 +304,7 @@ async function v2Setup(ctx) {
       }
       const firstUser = messages.find((m) => m?.role === "user");
       if (!firstUser || !Array.isArray(firstUser.content)) return;
-      let context = buildMemoryContext(globalFacts, projectFacts, key, null);
-      if (context && !context.includes("MEMORY ROUTING DIRECTIVE:")) {
-        context = context.includes("</MEMORY>")
-          ? context.replace("</MEMORY>", `\n\n${MEMORY_ROUTING_POLICY}\n</MEMORY>`)
-          : `${context}\n\n${MEMORY_ROUTING_POLICY}`;
-      }
+      const context = buildOpenCodeV2MemoryContext(globalFacts, projectFacts, key);
       const anchor = firstUser.content.find((p) => p?.type === "text");
       if (!anchor) return;
       firstUser.content.unshift({ type: "text", text: context });
@@ -317,6 +313,21 @@ async function v2Setup(ctx) {
 
   // --- tools ---
   await ctx.tool.transform((editor) => {
+    editor.add({name:'manage_knowledge_removal',description:KNOWLEDGE_REMOVAL_DESCRIPTION,input:obj(KNOWLEDGE_REMOVAL_FIELDS,['action','scopeKey']),async execute(input){return {content:(await knowledgeRemovalTool(input)).content[0].text};}});
+    editor.add({ name: 'manage_knowledge_content', description: KNOWLEDGE_CONTENT_DESCRIPTION,
+      input: obj(KNOWLEDGE_CONTENT_FIELDS, ['action','scopeKey']),
+      execute: async input => ({ content: (await knowledgeContentTool(input)).content[0].text }),
+    });
+    editor.add({ name: 'manage_knowledge_links', description: KNOWLEDGE_LINKS_DESCRIPTION,
+      input: obj(KNOWLEDGE_LINKS_FIELDS, ['action']),
+      execute: async input => ({ content: (await knowledgeLinksTool(input)).content[0].text }),
+    });
+    editor.add({
+      name: "inspect_knowledge",
+      description: KNOWLEDGE_INSPECT_DESCRIPTION,
+      input: obj(KNOWLEDGE_INSPECT_FIELDS, ["action"]),
+      execute: async input => ({ content: (await inspectKnowledgeTool(input)).content[0].text }),
+    });
     editor.add({
       name: "list-mcp-tools",
       description: "Показать список всех подключённых MCP серверов и их назначение",
@@ -688,14 +699,14 @@ async function v2Setup(ctx) {
             .prepare(`SELECT d.id FROM documents d WHERE (d.id = ? OR d.path = ? OR d.title = ?) AND ${visibleDocWhere}`)
             .get(input.docId, input.docId, input.docId, ...scopeKeys);
           if (!visible) throw new Error(`Document not found in the selected RAG scope for docId: ${input.docId}`);
-          const scopeRemoval = await removeDocumentScopes(db, visible.id, scopeKeys, { deferFinalRemoval: true });
+          const scopeRemoval = await removeDocumentScopes(db, visible.id, scopeKeys);
           if (scopeRemoval.remainingScopes > 0) {
             return {
               content: JSON.stringify({ deleted: false, unlinked: true, docId: visible.id, removedScopes: scopeRemoval.removedScopes, remainingScopes: scopeRemoval.remainingScopes }, null, 2),
             };
           }
           const { deleteDocument } = await import("../mcp-server/ingest/pipeline.js");
-          return { content: JSON.stringify(await deleteDocument(visible.id, db), null, 2) };
+          return { content: JSON.stringify(scopeRemoval, null, 2) };
         }
         if (input.action === "export_snapshot") {
           const { exportSnapshot } = await import("../mcp-server/admin/snapshot.js");
@@ -730,139 +741,22 @@ async function v2Setup(ctx) {
       },
     });
 
-    editor.add({
-      name: "link_project_memory",
-      description: "Link the current directory to a Git-based project identity, register aliases, and optionally migrate legacy/path stores.",
-      input: obj({
-        directory: str("Directory path to link (default: current directory)"),
-        remote: str("Optional explicit remote URL to use as primary identity key"),
-      }),
-      execute: async (input) => {
-        const { getDatabase } = await import("../mcp-server/db/database.js");
-        const { resolveProjectIdentity, upsertIdentity, registerAlias, normalizeRemoteUrl } = await import("../mcp-server/identity.js");
-        const { factBody } = await import("../mcp-server/fact_format.js");
-        const db = await getDatabase();
-        const dir = effectiveDir(input);
-        const identity = await resolveProjectIdentity(dir);
-        if (!identity && !input.remote) throw new Error("No Git repository detected and no remote URL specified.");
-        const key = identity ? identity.key : `git:${normalizeRemoteUrl(input.remote)}`;
-        const name = identity ? identity.name : basename(dir) || "unbound";
-        const primaryRemote = input.remote ? normalizeRemoteUrl(input.remote) : identity ? identity.primaryRemote : null;
-        await upsertIdentity(db, { key, name, primaryRemote });
-        const aliases = [];
-        if (primaryRemote) aliases.push({ alias: `remote:${primaryRemote}`, kind: "remote" });
-        aliases.push({ alias: `path:${canonicalPath(dir)}`, kind: "path" });
-        aliases.push({ alias: `basename:${name}`, kind: "basename" });
-        for (const a of aliases) await registerAlias(db, { alias: a.alias, identityKey: key, kind: a.kind });
-        let migrated = false;
-        const legacyPathKey = canonicalPath(dir);
-        const legacyEntries = await readMemory(legacyPathKey);
-        if (legacyEntries && legacyEntries.length > 0) {
-          const gitEntries = await readMemory(key);
-          const seen = new Set(gitEntries.map((e) => factBody(e).toLowerCase().trim()));
-          let mergedCount = 0;
-          for (const entry of legacyEntries) {
-            const body = factBody(entry).toLowerCase().trim();
-            if (!seen.has(body)) {
-              seen.add(body);
-              gitEntries.push(entry);
-              mergedCount++;
-            }
-          }
-          if (mergedCount > 0) {
-            await writeMemory(key, gitEntries);
-            migrated = true;
-          }
-          try {
-            const { existsSync } = await import("node:fs");
-            if (existsSync(storeFilePath(legacyPathKey))) {
-              const { unlink } = await import("node:fs/promises");
-              await unlink(storeFilePath(legacyPathKey));
-            }
-          } catch {}
-        }
-        const { moveKnowledgeScope } = await import("../mcp-server/graph/knowledge_linker.js");
-        const migratedKnowledge = await moveKnowledgeScope(db, legacyPathKey, key);
-        if (migratedKnowledge.movedLinks > 0 || migratedKnowledge.movedDocuments > 0) migrated = true;
-        return { content: JSON.stringify({ status: "success", key, name, primaryRemote, aliases: aliases.map((a) => a.alias), migrated }, null, 2) };
-      },
-    });
-
-    editor.add({
-      name: "unlink_project_memory",
-      description: "Remove the path alias link for the specified project directory.",
-      input: obj({
-        directory: str("Directory path to unlink (default: current directory)"),
-        purge: bool("If true, completely purge the project identity from the SQLite store"),
-      }),
-      execute: async (input) => {
-        const { getDatabase } = await import("../mcp-server/db/database.js");
-        const { unregisterAlias, removeIdentity, resolveProjectIdentity } = await import("../mcp-server/identity.js");
-        const db = await getDatabase();
-        const dir = effectiveDir(input);
-        const alias = `path:${canonicalPath(dir)}`;
-        await unregisterAlias(db, alias);
-        let key = null;
-        if (input.purge) {
-          const identity = await resolveProjectIdentity(dir);
-          if (identity) {
-            key = identity.key;
-            await removeIdentity(db, key);
-          }
-        }
-        return { content: JSON.stringify({ status: "success", alias, purgedIdentityKey: key }, null, 2) };
-      },
-    });
-
-    editor.add({
-      name: "relink_project_memory",
-      description: "Move or merge project memories from the current identity to a new target identity.",
-      input: obj(
-        {
-          directory: str("Directory path to relink (default: current directory)"),
-          remote: str("New target remote URL / identity key to move memories to"),
+    for (const operation of ['link','unlink','relink']) {
+      editor.add({
+        name: `${operation}_project_memory`, description: `${operation} project memory through shared Git identity administration with backup and conflict checks.`,
+        input: obj({ directory: str('Workspace directory'), remote: str('Repository remote'), ...(operation === 'unlink' ? {purge:bool('Explicitly remove registry identity/aliases; memory remains')} : {}) }),
+        execute: async input => {
+          const { executeProjectOperation } = await import('../mcp-server/services/project_service.js');
+          return { content:JSON.stringify(await executeProjectOperation(operation, {...input,directory:effectiveDir(input)}),null,2) };
         },
-        ["remote"]
-      ),
-      execute: async (input) => {
-        const { getDatabase } = await import("../mcp-server/db/database.js");
-        const { resolveProjectIdentity, upsertIdentity, removeIdentity, normalizeRemoteUrl } = await import("../mcp-server/identity.js");
-        const { factBody } = await import("../mcp-server/fact_format.js");
-        const db = await getDatabase();
-        const dir = effectiveDir(input);
-        const sourceIdentity = await resolveProjectIdentity(dir);
-        if (!sourceIdentity) throw new Error("Source project identity not detected.");
-        const targetKey = `git:${normalizeRemoteUrl(input.remote)}`;
-        const sourceKey = sourceIdentity.key;
-        if (sourceKey === targetKey) return { content: "Source and target identities are already identical." };
-        const sourceFacts = await readMemory(sourceKey);
-        const targetFacts = await readMemory(targetKey);
-        const seen = new Set(targetFacts.map((e) => factBody(e).toLowerCase().trim()));
-        let mergedCount = 0;
-        for (const f of sourceFacts) {
-          const body = factBody(f).toLowerCase().trim();
-          if (!seen.has(body)) {
-            seen.add(body);
-            targetFacts.push(f);
-            mergedCount++;
-          }
-        }
-        await writeMemory(targetKey, targetFacts);
-        await upsertIdentity(db, { key: targetKey, name: sourceIdentity.name, primaryRemote: normalizeRemoteUrl(input.remote) });
-        await db.prepare("UPDATE project_aliases SET identity_key = ? WHERE identity_key = ?;").run(targetKey, sourceKey);
-        const { moveKnowledgeScope } = await import("../mcp-server/graph/knowledge_linker.js");
-        const movedKnowledge = await moveKnowledgeScope(db, sourceKey, targetKey);
-        await removeIdentity(db, sourceKey);
-        try {
-          const { existsSync } = await import("node:fs");
-          if (existsSync(storeFilePath(sourceKey))) {
-            const { unlink } = await import("node:fs/promises");
-            await unlink(storeFilePath(sourceKey));
-          }
-        } catch {}
-        return {
-          content: JSON.stringify({ status: "success", sourceKey, targetKey, mergedFacts: mergedCount, movedKnowledgeLinks: movedKnowledge.movedLinks, movedRagDocuments: movedKnowledge.movedDocuments }, null, 2),
-        };
+      });
+    }
+    editor.add({
+      name:'manage_project_memory', description:'List, inspect, preview and confirm scoped project administration.',
+      input:obj({action:str('list, inspect, preview or apply'),operation:str('link, unlink, relink or migrate'),directory:str('Absolute directory'),sourceKey:str('Source key'),targetKey:str('Target key'),remote:str('Repository remote'),previewToken:str('Fresh preview token'),confirm:bool('Confirm reviewed operation')},['action']),
+      execute:async input => {
+        const { projectRequest } = await import('../mcp-server/services/project_service.js');
+        return {content:JSON.stringify(await projectRequest(input),null,2)};
       },
     });
 
@@ -904,4 +798,4 @@ export default {
 };
 
 // Re-export pure helpers so unit tests keep importing them from the entrypoint.
-export { buildMemoryContext, buildSystemMemoryOverlay, injectMemoryOverlayIntoSystem };
+export { buildMemoryContext, buildSystemMemoryOverlay, injectMemoryOverlayIntoSystem, buildOpenCodeV2MemoryContext };

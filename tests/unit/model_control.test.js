@@ -54,7 +54,7 @@ export async function runModelControlTests() {
     assert.strictEqual(isProcessAlive(null), false, "null pid is not alive");
 
     // 4. Device resolution honours platform mapping and persists config.
-    const { resolveTargetDevice, getModelRuntimeStatus } = await import("../../mcp-server/ml/model_manager.js");
+    const { resolveTargetDevice, getModelRuntimeStatus, touchModelActivity } = await import("../../mcp-server/ml/model_manager.js");
     assert.strictEqual(resolveTargetDevice("cpu"), "cpu");
     assert.strictEqual(resolveTargetDevice("nonsense"), "cpu");
     const gpuResolved = resolveTargetDevice("webgpu");
@@ -64,7 +64,14 @@ export async function runModelControlTests() {
 
     updateConfig({ modelUnloadTimeoutMinutes: 10 });
     assert.strictEqual(getConfig().modelUnloadTimeoutMinutes, 10, "timer persists to config");
+    touchModelActivity();
+    assert.strictEqual(getModelRuntimeStatus().autoUnloadArmed, true);
+    const activity = getModelRuntimeStatus().lastActivity;
+    touchModelActivity(true);
+    assert.strictEqual(getModelRuntimeStatus().lastActivity, activity, 'timer rescheduling does not invent model use');
     updateConfig({ modelUnloadTimeoutMinutes: 0 });
+    touchModelActivity();
+    assert.strictEqual(getModelRuntimeStatus().autoUnloadArmed, false, 'using a model after timer=off cancels the earlier timer');
 
     // 5. Runtime status shape used by `memory-cli models status`.
     const status = getModelRuntimeStatus();

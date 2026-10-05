@@ -3,6 +3,8 @@ import { writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { MEMORY_DIR } from "../memory.js";
 import { toVectorBytes } from "../retrieval/retriever.js";
+import { hasKnowledgeSchema } from '../storage/knowledge_schema.js';
+import { withSnapshotLock } from '../storage/snapshot_lock.js';
 
 export const EXPORTS_DIR = join(MEMORY_DIR, "exports");
 
@@ -14,6 +16,9 @@ export function ensureExportsDir() {
 }
 
 export async function exportDocumentData(docIdOrPath, customDb = null) {
+  return withSnapshotLock(MEMORY_DIR, () => exportDocumentDataLocked(docIdOrPath, customDb));
+}
+async function exportDocumentDataLocked(docIdOrPath, customDb = null) {
   const db = customDb || await getDatabase();
   const doc = await db.prepare("SELECT * FROM documents WHERE id = ? OR path = ?").get(docIdOrPath, docIdOrPath);
   if (!doc) {
@@ -70,6 +75,7 @@ export async function exportDocumentData(docIdOrPath, customDb = null) {
   const documentScopes = await db.prepare("SELECT scope_key, created_at FROM document_scopes WHERE doc_id = ?").all(doc.id);
 
   return {
+    format_version: hasKnowledgeSchema(db) ? 2 : 1,
     document: {
       id: doc.id,
       path: doc.path,
@@ -82,6 +88,7 @@ export async function exportDocumentData(docIdOrPath, customDb = null) {
       metadata,
       created_at: doc.created_at,
       updated_at: doc.updated_at,
+      ...(hasKnowledgeSchema(db) ? { revision: doc.revision, content_revision: doc.content_revision, index_revision: doc.index_revision } : {}),
     },
     counts: {
       sections: sections.length,

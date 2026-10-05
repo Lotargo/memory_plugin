@@ -96,12 +96,14 @@ export async function syncDevelopmentSkills({
   targets = null,
 } = {}) {
   if (!existsSync(skillsSource)) return [];
-  const { home, opencodeDir } = resolveClientPaths();
+  const { home, opencodeDir, codexDir, claudeDir } = resolveClientPaths();
+  const { integrationStatus } = await import('./plugin_integration.js');
+  const codexPlugin = (await integrationStatus('codex')).pluginEnabled;
+  const claudePlugin = (await integrationStatus('claude')).pluginEnabled;
   const destinations = targets || [
     join(opencodeDir, "skills"),
-    join(home, ".codex", "skills"),
-    join(home, ".agents", "skills"),
-    join(home, ".claude", "skills"),
+    ...(!codexPlugin ? [join(codexDir, 'skills'), join(home, '.agents', 'skills')] : []),
+    ...(!claudePlugin ? [join(claudeDir, 'skills')] : []),
     join(home, ".gemini", "config", "skills"),
   ];
   const entries = await readdir(skillsSource, { withFileTypes: true });

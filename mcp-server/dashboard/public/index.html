@@ -5,15 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>Memory — Notebook</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+  <link rel="shortcut icon" href="/favicon.ico">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
   <script src="/theme.js"></script>
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/vendor/katex/katex.min.css">
   <script type="module" src="/app.js"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Перейти к записям</a>
   <div class="app-shell" id="shell">
     <aside class="sidebar" id="sidebar" aria-label="Навигация и область памяти">
-      <div class="brand"><span class="brand-mark" aria-hidden="true">m</span><span>memory<span class="brand-period">.</span></span></div>
+      <div class="brand"><img class="brand-mark" src="/favicon.svg" alt="" width="32" height="32"><span>memory<span class="brand-period">.</span></span></div>
       <div class="scope-control">
         <label for="target">Область памяти</label>
         <select id="target" name="target" aria-describedby="scopeHint"><option value="global">Глобальная память</option></select>
@@ -23,25 +29,37 @@
         <button type="button" data-view="notebook" aria-current="page"><span>Notebook</span><span id="notebookCount" class="nav-count">—</span></button>
         <button type="button" data-view="persona"><span>Инструкции</span><span id="directiveCount" class="nav-count">—</span></button>
         <button type="button" data-view="archive"><span>История</span><span id="archiveCount" class="nav-count">—</span></button>
+        <button type="button" data-view="knowledge"><span>Знания</span></button>
       </nav>
-      <section class="project-section" aria-labelledby="projectsHeading"><div class="project-heading"><h2 id="projectsHeading">Проекты</h2><span id="projectCount" class="nav-count"></span></div><label class="visually-hidden" for="projectSearch">Поиск проектов</label><input id="projectSearch" name="projectSearch" type="search" placeholder="Найти проект…" autocomplete="off" aria-controls="projects"><div id="projects" class="project-list"></div></section>
+      <section class="project-section" aria-labelledby="projectsHeading"><div class="project-heading"><h2 id="projectsHeading">Проекты</h2><span id="projectCount" class="nav-count"></span></div><button id="manageProjects" type="button" class="button ghost" aria-haspopup="dialog">Управление проектами</button><label class="visually-hidden" for="projectSearch">Поиск проектов</label><input id="projectSearch" name="projectSearch" type="search" placeholder="Найти проект…" autocomplete="off" aria-controls="projects"><div id="projects" class="project-list"></div></section>
       <div class="sidebar-bottom">
         <div class="appearance-control"><label for="theme">Тема</label><select id="theme" name="theme"><option value="system">Системная</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></div>
         <span class="local-label"><span class="status-dot" aria-hidden="true"></span>На этом компьютере</span>
+        <button type="button" id="openSettings" aria-haspopup="dialog">Настройки</button>
+        <button type="button" id="openModels" aria-haspopup="dialog">Модели</button>
         <button type="button" id="system" aria-label="Состояние хранилища">Хранилище <span id="version" class="caption"></span></button>
       </div>
     </aside>
     <main class="main-area" id="main" tabindex="-1">
       <header class="topbar">
         <div class="location"><button type="button" id="navigation" class="mobile-navigation" aria-haspopup="dialog">Область</button><h1 id="viewTitle">Notebook</h1><span class="location-divider" aria-hidden="true">/</span><span id="scopeName" class="scope-name">Глобальная память</span></div>
-        <div class="top-actions"><button type="button" id="personaPreview" class="button ghost" aria-label="Предпросмотр" hidden><span class="preview-long">Предпросмотр</span><span class="preview-short" aria-hidden="true">Правила</span></button><button type="button" id="refresh" class="button secondary">Обновить</button><button type="button" id="create" class="button primary" disabled>+ Новая запись</button></div>
+        <div class="top-actions"><button type="button" id="promptFiles" class="button ghost" hidden>Файлы клиентов</button><button type="button" id="personaPreview" class="button ghost" aria-label="Предпросмотр" hidden><span class="preview-long">Предпросмотр</span><span class="preview-short" aria-hidden="true">Правила</span></button><button type="button" id="refresh" class="button secondary">Обновить</button><button type="button" id="create" class="button primary" disabled>+ Новая запись</button></div>
       </header>
       <div id="message" class="notice" role="status" aria-live="polite" hidden></div>
-      <div class="work-area">
+      <div class="work-area" id="notebookArea">
         <section class="list-pane" aria-label="Список записей">
           <div class="list-controls">
             <label class="visually-hidden" for="search">Поиск записей</label><div class="search-wrap"><input id="search" name="search" type="search" placeholder="Найти в памяти…" autocomplete="off"><kbd aria-hidden="true">/</kbd></div>
-            <div class="list-filter-row"><label class="visually-hidden" for="statusFilter">Состояние записей</label><select id="statusFilter" name="statusFilter"><option value="active">Текущие записи</option><option value="all">Все состояния</option><option value="protected">Защищённые</option><option value="disabled">Выключенные</option></select><span id="resultCount" class="caption" aria-live="polite">—</span></div>
+            <div class="list-filter-row"><label class="visually-hidden" for="statusFilter">Состояние записей</label><select id="statusFilter" name="statusFilter"><option value="active">Текущие записи</option><option value="all">Все состояния</option><option value="protected">Защищённые</option><option value="disabled">Выключенные</option><option value="expired">Срок истёк</option><option value="superseded">Заменённые</option></select><span id="resultCount" class="caption" aria-live="polite">—</span></div>
+            <label class="check-option"><input id="allStores" type="checkbox" aria-describedby="collectionHint">Все хранилища</label>
+            <p id="collectionHint" class="caption" hidden>Для правки откройте хранилище выбранной записи.</p>
+            <details id="notebookFilters" class="notebook-filters"><summary>Дополнительные фильтры</summary>
+              <button id="clearNotebookFilters" type="button" class="button ghost">Сбросить фильтры</button>
+              <div class="field"><label for="kindFilter">Тип записи</label><select id="kindFilter"><option value="all">Факты и инструкции</option><option value="fact">Факты</option><option value="directive">Инструкции</option></select></div>
+              <div class="field"><label for="tagsFilter">Теги</label><input id="tagsFilter" type="text" placeholder="Через запятую" aria-describedby="tagsFilterHint"><p id="tagsFilterHint" class="caption">Любой из указанных тегов, полное совпадение.</p></div>
+              <div class="notebook-date-filters"><div class="field"><label for="sinceFilter">Создана с</label><input id="sinceFilter" type="date" aria-describedby="dateFilterError"></div><div class="field"><label for="untilFilter">По дату</label><input id="untilFilter" type="date" aria-describedby="dateFilterError"></div></div>
+              <p id="dateFilterError" class="field-error" role="alert" hidden></p>
+            </details><p id="collectionStatus" class="caption" role="status" hidden></p>
           </div>
           <div id="listState" class="list-state" role="status">Загружаем память…</div><ul id="records" class="record-list" role="list" aria-busy="true"></ul>
           <footer class="list-footer"><span id="updatedAt">Подключение…</span><span id="modeLabel"></span></footer>
@@ -51,10 +69,10 @@
           <div id="reader" class="reader" hidden>
             <div class="detail-toolbar"><button type="button" id="backToList" class="button ghost back-button">К списку</button><span id="recordType" class="record-type"></span><div class="reader-actions"><button type="button" id="edit" class="button secondary">Редактировать</button></div></div>
             <article class="record-content">
-              <div id="recordStatuses" class="record-statuses"></div><h2 id="recordTitle"></h2><p id="recordBody" class="record-body"></p><div id="recordTags" class="record-tags"></div>
+              <div id="recordStatuses" class="record-statuses"></div><h2 id="recordTitle" tabindex="-1"></h2><button id="recordTextToggle" type="button" class="button ghost content-toggle" aria-pressed="false" aria-controls="recordBody recordRaw">Показать исходный текст</button><div id="recordBody" class="record-body"></div><pre id="recordRaw" class="knowledge-text" hidden></pre><div id="recordTags" class="record-tags"></div>
               <section class="properties"><h3>Свойства записи</h3><dl id="recordProperties"></dl></section>
-              <section id="sourcesSection" class="sources" hidden><h3>Связанные источники</h3><ul id="recordSources" role="list"></ul><p class="caption">Чтение источников появится в разделе RAG.</p></section>
-              <div class="record-bottom"><button type="button" id="delete" class="button ghost danger">Удалить запись</button></div>
+              <section id="sourcesSection" class="sources" hidden><h3>Связанные источники</h3><ul id="recordSources" role="list"></ul><p class="caption">Legacy-связи требуют проверки актуальности после обновления источника.</p></section>
+              <div class="record-bottom"><button type="button" id="openRecordStore" class="button secondary" hidden>Открыть хранилище записи</button><button type="button" id="transferDirective" class="button secondary" hidden>Перенести инструкцию</button><button type="button" id="supersede" class="button secondary">Заменить новой записью</button><button type="button" id="recordAddLink" class="button secondary">Добавить связь с источником</button><button type="button" id="delete" class="button ghost danger">Удалить запись</button></div>
             </article>
           </div>
           <form id="editForm" class="record-editor" hidden>
@@ -72,13 +90,179 @@
           </form>
         </section>
       </div>
+      <section id="knowledgeArea" class="knowledge-area" aria-label="Сохранённые знания" hidden>
+        <section class="knowledge-list" aria-label="Notes и источники">
+          <div class="knowledge-actions"><button id="knowledgeCreateNote" type="button" class="button secondary">Новая Note</button><button id="knowledgeAddSource" type="button" class="button secondary">Добавить источник</button><button id="knowledgeTrial" type="button" class="button secondary">Пробный поиск</button><button id="knowledgeGraphAll" type="button" class="button secondary">Граф области</button></div>
+          <form id="knowledgeSearchForm" class="knowledge-controls"><label for="knowledgeSearch">Найти источник или Note</label><input id="knowledgeSearch" type="search" maxlength="500" autocomplete="off"><button type="submit" class="button secondary">Найти</button><label for="knowledgeType">Тип</label><select id="knowledgeType"><option value="all">Все знания</option><option value="note">Memory Notes</option><option value="source">Внешние источники</option></select><label class="check-option"><input id="knowledgeGlobal" type="checkbox">Включить глобальные источники</label></form>
+          <p id="knowledgeListState" class="caption" role="status"></p><ul id="knowledgeDocuments" class="record-list"></ul><div class="knowledge-pages"><button id="knowledgePrev" type="button" class="button secondary" disabled>Назад</button><button id="knowledgeNext" type="button" class="button secondary" disabled>Далее</button></div>
+        </section>
+        <section class="knowledge-detail" aria-label="Инспектор источника">
+          <div id="knowledgeEmpty" class="detail-empty"><h2>Выберите источник</h2><p>Сохранённый текст, разделы, чанки и связанные факты появятся здесь.</p></div>
+          <article id="knowledgeReader" hidden><h2 id="knowledgeTitle" tabindex="-1"></h2><div class="knowledge-actions"><button id="knowledgeEditNote" type="button" class="button secondary">Редактировать Note</button><button id="knowledgeRefresh" type="button" class="button secondary">Обновить источник</button><button id="knowledgeMetadata" type="button" class="button ghost">Метаданные</button><button id="knowledgeGraphDoc" type="button" class="button ghost">Граф источника</button><button id="knowledgeUnlink" type="button" class="button ghost">Убрать из области</button><button id="knowledgeDelete" type="button" class="button ghost destructive">Удалить полностью</button></div><p id="knowledgeOwnershipHint" class="caption"></p><dl id="knowledgeProperties" class="system-properties"></dl>
+            <section><h3>Сохранённый текст</h3><p id="knowledgePositionHint" class="caption"></p><p id="knowledgeRawState" class="caption" role="status"></p><button id="knowledgeTextToggle" type="button" class="button ghost content-toggle" aria-pressed="false" aria-controls="knowledgeRendered knowledgeRaw">Показать исходный текст</button><div id="knowledgeRendered"></div><pre id="knowledgeRaw" class="knowledge-text" hidden></pre><button id="knowledgeRawNext" type="button" class="button secondary" hidden>Читать дальше</button></section>
+            <section><h3>Разделы и чанки</h3><label for="knowledgeLevel">Уровень иерархии</label><select id="knowledgeLevel"><option value="section">Sections</option><option value="medium">Medium-чанки</option><option value="micro">Micro-чанки</option></select><p id="knowledgeHierarchyState" class="caption" role="status"></p><ul id="knowledgeHierarchy" class="knowledge-items"></ul><div class="knowledge-pages"><button id="hierarchyPrev" type="button" class="button secondary" disabled>Предыдущие чанки</button><button id="hierarchyNext" type="button" class="button secondary" disabled>Следующие чанки</button></div></section>
+            <section id="knowledgeChunk" hidden><h3 id="knowledgeChunkTitle" tabindex="-1"></h3><pre id="knowledgeChunkInfo" class="knowledge-text caption"></pre><button id="knowledgeChunkToggle" type="button" class="button ghost content-toggle" aria-pressed="false" aria-controls="knowledgeChunkRendered knowledgeChunkText">Показать исходный текст</button><div id="knowledgeChunkRendered"></div><pre id="knowledgeChunkText" class="knowledge-text" hidden></pre><button id="knowledgeChunkNext" type="button" class="button secondary" hidden>Продолжить чанк</button></section>
+            <section><h3>Связанные факты</h3><button id="documentAddLink" type="button" class="button secondary">Связать с фактом</button><ul id="knowledgeLinks" class="knowledge-items"></ul><button id="knowledgeLinksNext" type="button" class="button secondary" hidden>Ещё связи</button></section>
+          </article>
+        </section>
+      </section>
     </main>
   </div>
   <dialog id="reviewDialog" class="dialog review-dialog" aria-labelledby="reviewHeading"><div class="dialog-heading"><div><p class="caption" id="reviewScope"></p><h2 id="reviewHeading">Проверка изменений</h2></div><button type="button" data-close="reviewDialog" class="button ghost">Закрыть</button></div><div id="changeList" class="change-list"></div><p id="reviewError" class="inline-error" role="alert" hidden></p><div class="dialog-actions"><button type="button" data-close="reviewDialog" class="button secondary">Вернуться к правке</button><button type="button" id="refreshConflict" class="button secondary" hidden>Обновить и сравнить</button><button type="button" id="confirmSave" class="button primary">Сохранить запись</button></div></dialog>
   <dialog id="deleteDialog" class="dialog compact-dialog" aria-labelledby="deleteHeading"><p class="dialog-kicker">Удаление из памяти</p><h2 id="deleteHeading">Удалить эту запись?</h2><p id="deleteSummary"></p><p class="caption">Запись будет удалена из выбранной области. Эта операция не имеет отмены.</p><label id="protectedLabel" class="check-option" for="protectedConfirm"><input id="protectedConfirm" name="protectedConfirm" type="checkbox"><span>Подтверждаю удаление защищённой записи</span></label><p id="deleteError" class="inline-error" role="alert" hidden></p><div class="dialog-actions"><button type="button" data-close="deleteDialog" class="button secondary">Отмена</button><button type="button" id="confirmDelete" class="button primary destructive">Удалить запись</button></div></dialog>
   <dialog id="discardDialog" class="dialog compact-dialog" aria-labelledby="discardHeading"><h2 id="discardHeading">Несохранённые изменения</h2><p>В редакторе есть несохранённый текст. Если перейти дальше, изменения будут потеряны.</p><div class="dialog-actions"><button type="button" id="discardChanges" class="button secondary">Не сохранять</button><button type="button" id="keepEditing" class="button primary">Продолжить правку</button></div></dialog>
-  <dialog id="personaDialog" class="dialog persona-dialog" aria-labelledby="personaHeading"><div class="dialog-heading"><div><p id="personaScope" class="caption"></p><h2 id="personaHeading">Действующие инструкции</h2></div><button type="button" data-close="personaDialog" class="button ghost">Закрыть</button></div><p class="dialog-description">Предпросмотр правил, доступных выбранной области. Выключенные, истёкшие и заменённые инструкции исключены.</p><div id="personaContent"></div><p class="caption">Глобальный блок использует построитель managed prompt. Проектный блок — предпросмотр; передачу проектных правил поддерживает OpenCode. Это не история использования агентом.</p></dialog>
-  <dialog id="systemDialog" class="dialog system-dialog" aria-labelledby="systemHeading"><div class="dialog-heading"><h2 id="systemHeading">Состояние хранилища</h2><button type="button" data-close="systemDialog" class="button ghost">Закрыть</button></div><dl id="systemProperties" class="system-properties"></dl><section><h3>Доступные возможности</h3><p>Notebook, выбор проектов, редактирование метаданных и управление инструкциями.</p><p class="caption">RAG, облако, модели и управление клиентами ещё не подключены к панели. Режим хранилища управляется существующим CLI.</p></section></dialog>
+  <dialog id="projectDialog" class="dialog project-dialog" aria-labelledby="projectHeading">
+    <div class="dialog-heading"><h2 id="projectHeading">Управление проектами</h2><button type="button" data-close="projectDialog" class="button ghost">Закрыть</button></div>
+    <form id="projectForm">
+      <div class="field"><label for="projectOperation">Действие</label><select id="projectOperation"><option value="link">Привязать Git-каталог</option><option value="unlink">Отвязать каталог</option><option value="relink">Перенести память</option><option value="migrate">Перенести legacy-память</option></select><p id="projectHint" class="caption"></p></div>
+      <div id="projectDirectoryField" class="field"><label for="projectDirectory">Полный путь Git-каталога</label><input id="projectDirectory" type="text" maxlength="4096" aria-describedby="projectHint projectError" autocomplete="off"></div>
+      <div id="projectSourceField" class="field"><label for="projectSource">Исходный проект или хранилище</label><select id="projectSource" aria-describedby="projectError"></select></div>
+      <section id="projectInfo"><dl id="projectDetails" class="system-properties"></dl><h3>Зарегистрированные ассоциации</h3><ul id="projectAliases"></ul></section>
+      <div id="projectAliasField" class="field" hidden><label for="projectPathAlias">Отвязать этот каталог</label><select id="projectPathAlias" aria-describedby="projectHint projectError"></select></div>
+      <div id="projectTargetField" class="field" hidden><label for="projectTarget">Целевой Git-проект</label><select id="projectTarget" aria-describedby="projectHint projectError"></select></div>
+      <p id="projectError" class="inline-error" role="alert" hidden></p>
+      <section id="projectPreview" class="link-preview" hidden><h3>Последствия изменения</h3><pre id="projectSummary" class="knowledge-text"></pre><ul id="projectEffects"></ul><p id="projectConflictState" role="status"></p><ul id="projectConflicts"></ul></section>
+      <div class="dialog-actions"><button id="projectReview" type="submit" class="button secondary">Предпросмотр</button><button id="projectApply" type="button" class="button primary" hidden>Подтвердить изменение</button></div>
+    </form>
+  </dialog>
+  <dialog id="transferDialog" class="dialog transfer-dialog" aria-labelledby="transferHeading" aria-describedby="transferHint" aria-busy="false">
+    <div class="dialog-heading"><h2 id="transferHeading">Перенос инструкции</h2><button id="transferClose" type="button" class="button ghost">Закрыть</button></div>
+    <p id="transferSource" class="caption"></p>
+    <div class="field"><label for="transferTarget">Целевое хранилище</label><select id="transferTarget" required aria-describedby="transferHint transferError"></select></div>
+    <label class="check-option"><input id="transferShare" type="checkbox">Разрешить открыть связанные источники целевой области, сохранив прежние области</label>
+    <p id="transferHint" class="caption" role="status"></p>
+    <p id="transferLoading" class="caption" role="status" hidden>Проверяем обе области и связи…</p>
+    <p id="transferError" class="inline-error" role="alert" hidden></p>
+    <div id="transferResults"></div>
+    <label id="transferShareConfirmation" class="check-option" hidden><input id="transferShareConfirm" type="checkbox">Подтверждаю открытие перечисленных источников целевой области</label>
+    <div class="dialog-actions"><button id="transferPreview" type="button" class="button secondary">Обновить предпросмотр</button><button id="transferConfirm" type="button" class="button primary" disabled>Подтвердить перенос</button></div>
+  </dialog>
+  <dialog id="promptsDialog" class="dialog persona-dialog" aria-labelledby="promptsHeading">
+    <div class="dialog-heading"><div><h2 id="promptsHeading">Клиентские файлы инструкций</h2></div><button type="button" id="promptsClose" class="button ghost">Закрыть</button></div>
+    <p class="dialog-description">Глобальные prompt/persona-файлы клиентов. Просмотр не записывает файлы. Выберите клиента и действие, затем проверьте изменения.</p>
+    <div class="persona-controls">
+      <div class="field"><label for="promptsClient">Клиент файла</label><select id="promptsClient"><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="gemini">Gemini CLI</option><option value="antigravity">Antigravity</option></select></div>
+      <div class="field"><label for="promptsOperation">Действие с файлом</label><select id="promptsOperation"><option value="enable">Включить prompt и persona</option><option value="sync">Синхронизировать persona</option><option value="disable">Удалить prompt и persona</option></select></div>
+      <button type="button" id="promptsRefresh" class="button secondary">Обновить статус файлов</button>
+    </div>
+    <div id="promptsStatus"></div>
+    <p id="promptsLoading" role="status" class="caption" hidden>Читаем состояние клиентских файлов…</p>
+    <p id="promptsError" role="alert" class="inline-error" hidden></p>
+    <p id="promptsResult" role="status" class="prompt-path"></p>
+    <div id="promptsPreviewContent"></div>
+    <div class="dialog-actions"><button type="button" id="promptsReview" class="button secondary">Проверить изменения</button><button type="button" id="promptsApply" class="button primary" disabled>Подтвердить запись файлов</button></div>
+  </dialog>
+  <dialog id="personaDialog" class="dialog persona-dialog" aria-labelledby="personaHeading">
+    <div class="dialog-heading"><div><p id="personaScope" class="caption"></p><h2 id="personaHeading">Предпросмотр инструкций</h2></div><button type="button" data-close="personaDialog" class="button ghost">Закрыть</button></div>
+    <div class="persona-controls">
+      <div class="field"><label for="personaClient">Клиент</label><select id="personaClient"><option value="opencode">OpenCode</option><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="gemini">Gemini CLI</option><option value="antigravity">Antigravity</option></select></div>
+      <div class="field"><label for="personaFilter">Показать</label><select id="personaFilter"><option value="scope">Этот контекст</option><option value="other">Другие проекты</option><option value="all">Все инструкции</option></select></div>
+      <button type="button" id="personaRefresh" class="button secondary">Обновить предпросмотр</button>
+    </div>
+    <p id="personaLoading" role="status" class="caption" hidden>Строим предпросмотр по текущей памяти…</p>
+    <p id="personaError" role="alert" class="inline-error" hidden></p>
+    <div id="personaResults" aria-busy="false"><p id="personaCoverage" class="dialog-description"></p><p id="personaObserved" class="caption"></p><p id="personaUnavailable" class="inline-error" role="status" hidden></p><p id="personaSummary" role="status" class="persona-summary"></p><div id="personaContent"></div><div id="personaBlocks"></div></div>
+  </dialog>
+  <dialog id="systemDialog" class="dialog system-dialog" aria-labelledby="systemHeading"><div class="dialog-heading"><h2 id="systemHeading">Состояние хранилища</h2><button type="button" data-close="systemDialog" class="button ghost">Закрыть</button></div><dl id="systemProperties" class="system-properties"></dl><section><h3>Доступные возможности</h3><p>Notebook, проекты, инструкции, сохранённые источники и Notes, разделы, чанки, редактор Notes/источников, управление связями, сохранённый граф, пробный поиск и удаление знаний.</p><p class="caption">Режим хранения, снимки, облачное подключение и параметры поиска доступны в «Настройках». Управление кэшем, загрузкой моделей и переиндексацией — в разделе «Модели». Настройка клиентов доступна через CLI.</p></section></dialog>
+  <dialog id="settingsDialog" class="dialog settings-dialog" aria-labelledby="settingsHeading">
+    <div class="dialog-heading"><h2 id="settingsHeading" tabindex="-1">Настройки</h2><button id="settingsClose" type="button" class="button ghost">Закрыть</button></div>
+    <p class="caption">Общие для всех проектов и клиентов на этом компьютере.</p>
+    <p id="settingsMessage" role="status" aria-live="polite" class="notice" hidden></p>
+    <p id="settingsLoadState" role="status" class="caption"></p>
+    <div id="settingsContent" hidden>
+      <section class="settings-section" aria-labelledby="storageSettingsHeading"><h3 id="storageSettingsHeading">Хранение и облачные снимки</h3>
+        <p class="caption">Рабочая память хранится локально. Облако содержит полные ZIP-снимки; чтение и редактирование памяти не требуют сети.</p>
+        <p id="settingsMigration" class="notice" hidden></p>
+        <form id="settingsStorageForm"><div class="field"><label for="settingsMode">Режим хранения</label><select id="settingsMode"><option value="only-local">Только локально</option><option value="cloud-snapshots">Локально + облачные снимки</option></select><p class="caption">Включение снимков сохраняет резервную копию. Для прежних облачных режимов выполняется проверка и резервирование обеих копий.</p></div><button type="submit" class="button secondary">Применить режим</button></form>
+        <form id="settingsScheduleForm"><fieldset id="settingsScheduleFields"><legend class="visually-hidden">Расписание снимков</legend><div class="settings-grid"><div class="field"><label for="settingsSyncMode">Отправка в облако</label><select id="settingsSyncMode"><option value="manual">Вручную</option><option value="scheduled">По расписанию</option><option value="off">Отключена</option></select></div><div class="field"><label for="settingsInterval">Интервал, часов</label><input id="settingsInterval" type="number" min="0.000001" step="any" required aria-describedby="settingsIntervalHint"><p id="settingsIntervalHint" class="caption">Положительное число: 0.5, 24, 168. Расписание выполняется, пока работает панель или клиент памяти.</p></div></div><button type="submit" class="button secondary">Сохранить расписание</button></fieldset></form>
+        <p id="settingsScheduleHint" class="caption"></p><dl id="settingsSnapshotStatus" class="system-properties"></dl>
+      </section>
+      <section class="settings-section" aria-labelledby="cloudSettingsHeading"><h3 id="cloudSettingsHeading">Подключение к облаку</h3><p id="settingsCloudStatus" class="caption"></p>
+        <form id="settingsCloudForm"><div class="settings-grid"><div class="field"><label for="settingsCloudUrl">URL базы Turso</label><input id="settingsCloudUrl" type="text" required placeholder="libsql://database-org.turso.io" autocomplete="off"></div><div class="field"><label for="settingsCloudToken">Токен базы</label><input id="settingsCloudToken" type="password" required autocomplete="new-password" aria-describedby="settingsCloudTokenHint"><p id="settingsCloudTokenHint" class="caption">Сохраняется в существующем зашифрованном хранилище. Проверка подключения запускается отдельно.</p></div></div><button type="submit" class="button secondary">Сохранить подключение</button></form>
+        <div class="settings-actions"><button id="settingsCloudCheck" type="button" class="button secondary">Проверить подключение</button><button id="settingsCloudLogout" type="button" class="button ghost danger">Выйти из облака</button></div>
+      </section>
+      <form id="settingsEngineForm"><div id="settingsGroups"></div><div class="settings-actions"><button type="submit" id="settingsSave" class="button primary">Проверить и сохранить настройки</button><button id="settingsReload" type="button" class="button secondary">Отменить правки и обновить</button></div><p id="settingsDraftState" class="caption" role="status"></p></form>
+      <section class="settings-section" aria-labelledby="snapshotSettingsHeading"><h3 id="snapshotSettingsHeading">Снимки и восстановление</h3>
+        <div class="settings-actions"><button id="settingsSnapshotCreate" type="button" class="button secondary">Создать локальный снимок</button><button id="settingsSnapshotUpload" type="button" class="button secondary">Отправить текущую память</button></div>
+        <form id="settingsSnapshotListForm" class="settings-actions"><label for="settingsSnapshotLocation">Список снимков</label><select id="settingsSnapshotLocation"><option value="local">На компьютере</option><option value="cloud">В облаке</option></select><button type="submit" class="button secondary">Загрузить список</button></form>
+        <p id="settingsSnapshotListStatus" class="caption" role="status"></p><ul id="settingsSnapshotList" class="settings-snapshots"></ul>
+        <form id="settingsSnapshotDeleteForm"><h4>Удалить старые снимки</h4><div class="settings-grid"><div class="field"><label for="settingsDeleteFrom">С даты, включительно</label><input id="settingsDeleteFrom" type="date" required></div><div class="field"><label for="settingsDeleteTo">До даты, не включительно</label><input id="settingsDeleteTo" type="date" required></div><div class="field"><label for="settingsDeleteLocation">Расположение</label><select id="settingsDeleteLocation"><option value="local">На компьютере</option><option value="cloud">В облаке</option><option value="both">В обоих местах</option></select></div></div><p class="caption">Границы периода — 00:00 UTC. Последние, ожидающие и закреплённые снимки защищены.</p><button type="submit" class="button secondary">Предпросмотр удаления</button></form>
+      </section>
+    </div>
+  </dialog>
+  <dialog id="settingsReviewDialog" class="dialog" aria-labelledby="settingsReviewHeading"><h2 id="settingsReviewHeading">Проверить изменения</h2><p id="settingsReviewHint"></p><dl id="settingsReviewChanges" class="system-properties"></dl><p id="settingsReviewError" role="alert" class="field-error" hidden></p><div class="dialog-actions"><button type="button" data-close="settingsReviewDialog" class="button secondary">Отмена</button><button id="settingsReviewApply" type="button" class="button primary">Применить</button></div></dialog>
+  <dialog id="settingsDiscardDialog" class="dialog compact-dialog" aria-labelledby="settingsDiscardHeading"><h2 id="settingsDiscardHeading">Несохранённые настройки</h2><p>Правки останутся в форме, если продолжить редактирование.</p><div class="dialog-actions"><button id="settingsDiscard" type="button" class="button secondary">Отменить правки</button><button type="button" data-close="settingsDiscardDialog" class="button primary">Продолжить редактирование</button></div></dialog>
+  <dialog id="modelsDialog" class="dialog settings-dialog models-dialog" aria-labelledby="modelsHeading">
+    <div class="dialog-heading"><h2 id="modelsHeading" tabindex="-1">Модели</h2><button type="button" data-close="modelsDialog" class="button ghost">Закрыть</button></div>
+    <p class="caption">Embedding и reranker для поиска и индексации. Выбор модели, размерности, таймера выгрузки и параметров вычислений — в «Настройках».</p>
+    <p id="modelsMessage" role="status" aria-live="polite" class="notice" hidden></p>
+    <div class="settings-actions"><button id="modelsRefresh" type="button" class="button secondary">Обновить состояние моделей</button><button id="modelsSettings" type="button" class="button ghost">Параметры моделей</button></div>
+    <div id="modelsContent" hidden>
+      <section class="settings-section" aria-labelledby="resourcesHeading">
+        <h3 id="resourcesHeading">RAM и память GPU</h3><p id="resourcesPlatform" class="caption"></p>
+        <p id="resourcesState" class="caption" role="status"></p>
+        <dl id="resourcesRam" class="system-properties resource-properties"></dl><p id="resourcesRamHint" class="caption"></p>
+        <div id="resourcesGpu"></div>
+        <h4>RAM процессов плагина</h4><dl id="resourcesProcesses" class="system-properties resource-properties"></dl>
+        <p class="caption">Память всего процесса (RSS), включая модели и служебные данные. Учтены панель и зарегистрированные клиенты; общие страницы могут пересекаться, поэтому значения не суммируются.</p>
+        <p id="resourcesObserved" class="caption"></p>
+      </section>
+      <section class="settings-section"><h3>Выбранные модели</h3><dl id="modelsConfig" class="system-properties"></dl></section>
+      <section class="settings-section"><h3>Загрузка в память клиента</h3><p class="caption">Показаны зарегистрированные процессы. Состояние остальных процессов неизвестно. CPU использует RAM; GPU на Windows — DirectML. Команды требуют подтверждения выбранного клиента.</p><p id="modelsOwnerHint" class="caption"></p>
+        <div class="settings-grid"><div class="field"><label for="modelsOwner">Процесс клиента</label><select id="modelsOwner"></select></div><div class="field"><label for="modelsDevice">Устройство загрузки</label><select id="modelsDevice"><option value="cpu">CPU / RAM</option><option value="webgpu">GPU / VRAM</option></select></div></div>
+        <dl id="modelsRuntime" class="system-properties"></dl><div class="settings-actions"><button id="modelsLoad" type="button" class="button secondary">Загрузить в память</button><button id="modelsUnload" type="button" class="button secondary">Выгрузить из памяти</button><button id="modelsApplyDevice" type="button" class="button secondary">Применить устройство</button></div>
+      </section>
+      <section class="settings-section"><h3>Кэш на диске</h3><p class="caption">Скачивание проверяет выбранную модель на CPU и затем освобождает память процесса загрузки. Оно не меняет выбор модели для поиска.</p>
+        <form id="modelsDownloadForm"><div class="settings-grid"><div class="field"><label for="modelsType">Тип модели</label><select id="modelsType"><option value="embedding">Embedding</option><option value="reranker">Reranker</option></select></div><div class="field"><label for="modelsDownloadName">ID модели Hugging Face</label><input id="modelsDownloadName" list="modelsPresets" required maxlength="200" placeholder="organization/model"><datalist id="modelsPresets"></datalist></div></div><button type="submit" class="button secondary">Скачать и проверить модель</button></form>
+        <p class="caption">«Файлы на месте» означает наличие config, tokenizer и весов; исправность подтверждает только загрузка модели. Для очистки кэша закройте клиенты памяти.</p><ul id="modelsCache" class="settings-snapshots"></ul>
+      </section>
+      <section class="settings-section"><h3>Переиндексация знаний</h3><p>Перестроить векторы всех локальных источников и Notes выбранной embedding-моделью. Новые векторы публикуются вместе после подготовки; Notebook остаётся доступен.</p><button id="modelsReindex" type="button" class="button secondary">Предпросмотр переиндексации</button></section>
+    </div>
+    <section id="modelsJobSection" class="settings-section" hidden aria-labelledby="modelsJobHeading"><h3 id="modelsJobHeading">Последняя операция</h3><p id="modelsJobState" role="status"></p><progress id="modelsProgress" aria-label="Прогресс операции моделей"></progress><p id="modelsProgressText" class="caption"></p><p id="modelsJobDetail" class="caption"></p></section>
+  </dialog>
+  <dialog id="modelsReviewDialog" class="dialog" aria-labelledby="modelsReviewHeading"><h2 id="modelsReviewHeading">Проверить операцию с моделями</h2><p id="modelsReviewHint"></p><dl id="modelsReviewChanges" class="system-properties"></dl><p id="modelsReviewError" role="alert" class="field-error" hidden></p><div class="dialog-actions"><button type="button" data-close="modelsReviewDialog" class="button secondary">Отмена</button><button id="modelsReviewApply" type="button" class="button primary">Выполнить</button></div></dialog>
+  <dialog id="searchDialog" class="dialog graph-dialog" aria-labelledby="trialHeading"><div class="dialog-heading"><h2 id="trialHeading">Пробный поиск знаний</h2><button id="trialClose" type="button" class="button ghost">Закрыть поиск</button></div><p class="caption">Контекст — выбранная область; глобальные источники добавляются переключателем в списке знаний. Результат поиска не доказывает передачу или фактическое использование памяти агентом.</p><form id="trialForm"><div class="field"><label for="trialQuery">Запрос</label><input id="trialQuery" required maxlength="1000"></div><div class="graph-filters"><div><label for="trialMode">Способ поиска</label><select id="trialMode" aria-describedby="trialModel"><option value="lexical">Текстовый индекс (без моделей)</option><option id="trialDense" value="dense" disabled>Dense (локальная модель)</option></select></div><div><label for="trialResultMode">Результат</label><select id="trialResultMode"><option value="snippet">Фрагменты</option><option value="index">Индекс источников</option></select></div><label class="check-option"><input id="trialExpansion" type="checkbox" checked>Разворачивать таблицы и код во фрагментах</label></div><p id="trialModel" class="caption"></p><button id="trialRun" type="submit" class="button primary">Выполнить пробный поиск</button></form><p id="trialError" class="inline-error" role="alert" hidden></p><p id="trialState" class="caption" role="status"></p><ul id="trialResults" class="knowledge-items"></ul></dialog>
+  <dialog id="graphDialog" class="dialog graph-dialog" aria-labelledby="graphHeading"><div class="dialog-heading"><h2 id="graphHeading">Сохранённый граф знаний</h2><button id="graphClose" type="button" class="button ghost">Закрыть граф</button></div><p id="graphContext" class="caption"></p><form id="graphForm" class="graph-filters"><div><label for="graphDocument">Документ (до 100 в списке)</label><select id="graphDocument"></select></div><div><label for="graphNodeType">Вид узла</label><select id="graphNodeType"><option value="all">Все узлы</option><option value="document">Документы</option><option value="section">Разделы</option><option value="medium">Medium-чанки</option><option value="micro">Micro-чанки</option><option value="fact">Notebook-факты</option><option value="symbol">Символы</option><option value="lines">Строки</option></select></div><div><label for="graphRelation">Точное отношение</label><input id="graphRelation" maxlength="100" placeholder="Например, CONTAINS"></div><button type="submit" class="button secondary">Применить фильтры</button></form><p id="graphError" class="inline-error" role="alert" hidden></p><div id="graphResults"><p id="graphState" class="caption" role="status"></p><div id="graphVisual" class="graph-visual"></div><p id="graphVisualHint" class="caption"></p><p class="caption">Символы адресуются только по имени и могут иметь разные определения. Неопределённые и недоступные концы рёбер не показаны. Структурные рёбра перестраиваются из источника; ручные связи изменяются отдельно.</p><ul id="graphEdges" class="knowledge-items"></ul><div class="knowledge-pages"><button id="graphPrev" type="button" class="button secondary" disabled>Предыдущие рёбра</button><button id="graphNext" type="button" class="button secondary" disabled>Следующие рёбра</button></div></div></dialog>
+  <dialog id="removalDialog" class="dialog" aria-labelledby="removalHeading"><h2 id="removalHeading">Удаление знаний</h2><pre id="removalSummary" class="knowledge-text"></pre><ul id="removalEffects" class="knowledge-items"></ul><p class="caption">Прежние снимки сохраняют историю. Удалённые данные могут вернуться только при явном восстановлении снимка.</p><label class="check-option"><input id="removalConfirm" type="checkbox">Подтверждаю действие и проверенные последствия</label><label id="removalSharedOption" class="check-option" hidden><input id="removalShared" type="checkbox">Подтверждаю удаление во всех областях документа</label><p id="removalError" class="inline-error" role="alert" hidden></p><div class="dialog-actions"><button id="removalClose" type="button" class="button secondary">Отмена</button><button id="removalApply" type="button" class="button primary destructive" disabled>Применить удаление</button></div></dialog>
+  <dialog id="contentDialog" class="dialog content-dialog" aria-labelledby="contentHeading">
+    <div class="dialog-heading"><h2 id="contentHeading">Редактор знаний</h2><button id="contentClose" type="button" class="button ghost">Закрыть</button></div><p id="contentContext" class="caption"></p>
+    <button id="contentMigration" type="button" class="button secondary" hidden>Подготовить хранилище</button>
+    <form id="contentForm"><fieldset id="contentFields"><legend class="sr-only">Содержимое и параметры индекса</legend>
+      <div class="field"><label for="contentTitle">Заголовок</label><input id="contentTitle" required maxlength="2000"></div>
+      <div id="contentSourceFields"><div class="field"><label for="contentSourceType">Тип источника</label><select id="contentSourceType"><option value="text">Текст</option><option value="file">Локальный файл</option><option value="url">URL</option></select></div><div id="contentPathField" class="field"><label for="contentPath">Путь файла или URL</label><input id="contentPath" maxlength="4000" aria-describedby="contentPathHint"><p id="contentPathHint" class="caption">Файлы читаются только из разрешённых каталогов; URL проверяется перед загрузкой.</p></div></div>
+      <p id="contentRefreshHint" class="caption" hidden></p><div id="contentBodyField" class="field"><label for="contentBody">Текст Markdown</label><textarea id="contentBody" rows="12" required aria-describedby="contentBodyHint"></textarea><p id="contentBodyHint" class="caption">Редактор принимает до 2 MiB текста. Для файла или URL текст готовится при явном обновлении.</p></div>
+      <div class="form-columns"><div id="contentKindField" class="field"><label for="contentKind">Вид Note</label><select id="contentKind"><option value="note">Note</option><option value="decision">Решение</option><option value="research">Исследование</option><option value="context">Контекст</option><option value="handoff">Передача работы</option></select></div><div class="field"><label for="contentTags">Теги через запятую</label><input id="contentTags" maxlength="20000"></div></div>
+      <div class="field"><label for="contentIndex">Индекс при перестроении</label><select id="contentIndex" aria-describedby="contentIndexHint"><option value="lexical">Текстовый поиск без векторов</option><option value="dense">Текстовый поиск и embeddings</option></select><p id="contentIndexHint" class="caption">Embeddings запускают модель. При ошибке сохранённая ревизия остаётся прежней; текстовый вариант удаляет старые векторы. Только изменение тегов или вида Note сохраняет индекс.</p></div>
+    </fieldset><div class="knowledge-actions"><button id="contentPrepare" type="submit" class="button primary">Подготовить и проверить</button><button id="contentReload" type="button" class="button secondary" hidden>Обновить версию</button><button id="contentDiscard" type="button" class="button ghost" hidden>Отбросить подготовку</button></div></form>
+    <p id="contentProgress" role="status" class="caption"></p><p id="contentError" class="inline-error" role="alert" hidden></p>
+    <details id="contentComparison" hidden><summary>Текущий сохранённый текст для сравнения с черновиком</summary><p id="contentSavedMetadata" class="caption"></p><pre id="contentSavedText" class="knowledge-text"></pre></details>
+    <section id="contentPreview" class="link-preview" hidden><h3>Предпросмотр публикации</h3><pre id="contentPreviewText" class="knowledge-text"></pre><ul id="contentLinkEffects" class="knowledge-items"></ul><div id="contentRenderedPreview"></div><p id="contentPreviewLimit" class="caption"></p><label id="contentSharedOption" class="check-option" hidden><input id="contentShared" type="checkbox">Подтверждаю обновление документа во всех его областях</label></section>
+    <button id="contentApply" type="button" class="button primary" hidden>Опубликовать ревизию</button>
+  </dialog>
+  <dialog id="contentMigrationDialog" class="dialog" aria-labelledby="contentMigrationHeading"><h2 id="contentMigrationHeading">Подготовить хранилище знаний</h2><p>Операция создаст и проверит полный локальный ZIP всех проектов, назначит недостающие ID фактам и сохранит отчёт о неоднозначных связях. Облако не используется.</p><p id="contentMigrationError" class="inline-error" role="alert" hidden>Подготовка не завершена. Проверьте локальное хранилище и резервную копию.</p><div class="knowledge-actions"><button id="contentMigrationCancel" type="button" class="button secondary">Отмена</button><button id="contentMigrationApply" type="button" class="button primary">Создать копию и подготовить</button></div></dialog>
+  <dialog id="linkDialog" class="dialog link-dialog" aria-labelledby="linkHeading">
+    <h2 id="linkHeading">Новая связь</h2><p id="linkContext" class="caption"></p>
+    <button id="prepareLinks" type="button" class="button secondary">Подготовить связи</button>
+    <form id="linkForm">
+      <div id="linkFields">
+        <div class="field"><label for="linkFact">Факт Notebook</label><select id="linkFact" required></select></div>
+        <div class="field"><label for="linkSearch">Поиск источников</label><div class="link-search"><input id="linkSearch" type="search"><button id="linkFind" type="button" class="button secondary">Найти источники</button></div></div>
+        <div class="field"><label for="linkDocument">Источник или Note</label><select id="linkDocument" required></select><p id="linkSearchState" class="caption"></p></div>
+        <div class="field"><label for="linkRelation">Отношение</label><input id="linkRelation" value="LINKS_TO" maxlength="64" list="linkRelations"><datalist id="linkRelations"><option value="LINKS_TO"><option value="SUPPORTS"><option value="CONTRADICTS"><option value="RELATED_TO"></datalist></div>
+        <div class="field"><label for="linkSection">ID раздела (необязательно)</label><input id="linkSection"></div>
+        <div class="form-columns"><div class="field"><label for="linkStart">Начальная строка</label><input id="linkStart" type="number" min="1" step="1"></div><div class="field"><label for="linkEnd">Конечная строка</label><input id="linkEnd" type="number" min="1" step="1"></div></div>
+        <p class="caption">Строки относятся к сохранённому нормализованному тексту. Перед подтверждением проверьте выбранный фрагмент.</p>
+      </div>
+      <div id="linkPreview" class="link-preview" hidden><h3>Проверка действия</h3><pre id="linkPreviewText" class="knowledge-text"></pre></div>
+      <p id="linkError" class="inline-error" role="alert" hidden></p>
+      <div class="dialog-actions"><button id="linkCancel" type="button" class="button secondary">Отмена</button><button id="linkReview" type="submit" class="button primary">Предпросмотр связи</button><button id="linkApply" type="button" class="button primary" hidden>Сохранить эту связь</button></div>
+    </form>
+  </dialog>
+  <dialog id="linkMigrationDialog" class="dialog compact-dialog" aria-labelledby="linkMigrationHeading">
+    <h2 id="linkMigrationHeading">Подготовить устойчивые связи?</h2><p>Будет сохранён полный локальный ZIP-снимок. Факты без ID получат идентификаторы; однозначные связи сохранят принадлежность. Неоднозначные связи останутся в состоянии needs_review.</p>
+    <p class="caption">Подготовка касается всей локальной памяти. Старые координаты не становятся подтверждёнными автоматически.</p><p id="linkMigrationError" class="inline-error" role="alert"></p>
+    <div class="dialog-actions"><button type="button" data-close="linkMigrationDialog" class="button secondary">Отмена</button><button id="linkMigrationApply" type="button" class="button primary">Сохранить снимок и подготовить</button></div>
+  </dialog>
   <dialog id="navigationDialog" class="dialog navigation-dialog" aria-label="Область и разделы"><div class="navigation-close"><button type="button" data-close="navigationDialog" class="button secondary">Закрыть</button></div><div id="mobileNavHost"></div></dialog>
 </body>
 </html>

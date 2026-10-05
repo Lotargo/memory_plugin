@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from 'node:path';
 import { isMemoryPluginSpec } from "./dev_link.js";
 
 export const MEMORY_MCP_ENTRY = Object.freeze({
@@ -23,7 +24,12 @@ export function isMemoryMcpServerEntry(entry) {
     ? entry.args.map((value) => String(value).replace(/\\/g, "/").toLowerCase())
     : [];
   return args.some((arg) => /^@lotargo\/memory_plugin(?:@[^/]+)?$/i.test(arg) || /^opencode-memory-plugin(?:@[^/]+)?$/i.test(arg))
-    || args.some((arg) => arg.endsWith("/mcp-server/boot.js") && arg.includes("memory"))
+    || (Array.isArray(entry.args) && entry.args.some(arg => {
+      const path = String(arg);
+      if (!path.replace(/\\/g, '/').toLowerCase().endsWith('/mcp-server/boot.js')) return false;
+      try { return JSON.parse(readFileSync(join(dirname(dirname(path)), 'package.json'), 'utf8')).name === '@lotargo/memory_plugin'; }
+      catch { return path.toLowerCase().includes('memory'); }
+    }))
     || /(?:^|\/)(?:memory_plugin|memory-agent)(?:\.(?:cmd|exe|ps1|bat))?$/i.test(command);
 }
 

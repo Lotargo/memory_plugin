@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { MEMORY_DIR, ensureDirSync } from "../memory.js";
+import { atomicWrite } from '../storage/snapshot_lock.js';
 
 // File-based control channel between short-lived CLI processes and the
 // long-lived MCP server process. The CLI drops a command file; the server
@@ -22,9 +23,7 @@ function ensureControlDir() {
 }
 
 function atomicWriteJson(filePath, data) {
-  const tmp = `${filePath}.tmp_${process.pid}`;
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
-  fs.renameSync(tmp, filePath);
+  atomicWrite(filePath,JSON.stringify(data,null,2),{renameRetries:30});
 }
 
 function readJson(filePath) {
@@ -36,35 +35,42 @@ function readJson(filePath) {
   }
 }
 
-export function sendModelCommand(cmd, payload = {}) {
+export function sendModelCommand(cmd, payload = {}, { targetPid, expiresAt } = {}) {
   ensureControlDir();
   const id = crypto.randomUUID();
-  atomicWriteJson(COMMAND_FILE, { id, cmd, payload, sentAt: new Date().toISOString() });
-  return { id, file: COMMAND_FILE };
+  const file = targetPid ? path.join(CONTROL_DIR, `command_${targetPid}.json`) : COMMAND_FILE;
+  atomicWriteJson(file, { id, cmd, payload, targetPid, expiresAt, sentAt: new Date().toISOString() });
+  return { id, file };
 }
 
 export function pollModelCommand(lastHandledId = null) {
-  const parsed = readJson(COMMAND_FILE);
-  if (!parsed || !parsed.id || !parsed.cmd) return null;
-  if (parsed.id === lastHandledId) return null;
-  return parsed;
+  for (const file of [path.join(CONTROL_DIR, `command_${process.pid}.json`), COMMAND_FILE]) {
+    const parsed = readJson(file);
+    if (!parsed || !parsed.id || !parsed.cmd) continue;
+    if (lastHandledId instanceof Set ? lastHandledId.has(parsed.id) : parsed.id === lastHandledId) continue;
+    if (parsed.targetPid && parsed.targetPid !== process.pid || parsed.expiresAt && parsed.expiresAt < Date.now()) continue;
+    return parsed;
+  }
+  return null;
 }
 
 export function writeCommandAck(id, result) {
   try {
     ensureControlDir();
-    atomicWriteJson(ACK_FILE, { id, result, handledAt: new Date().toISOString() });
+    const ack = { id, result, serverPid: process.pid, handledAt: new Date().toISOString() };
+    atomicWriteJson(path.join(CONTROL_DIR, `ack_${id}.json`), ack);
+    atomicWriteJson(ACK_FILE, ack);
   } catch {}
 }
 
-export function readCommandAck() {
-  return readJson(ACK_FILE);
+export function readCommandAck(id = null) {
+  return id ? readJson(path.join(CONTROL_DIR, `ack_${id}.json`)) || readJson(ACK_FILE) : readJson(ACK_FILE);
 }
 
 export async function waitForCommandAck(id, timeoutMs = 15000, pollMs = 200) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const ack = readCommandAck();
+    const ack = readCommandAck(id);
     if (ack && ack.id === id) return ack;
     await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
@@ -74,12 +80,28 @@ export async function waitForCommandAck(id, timeoutMs = 15000, pollMs = 200) {
 export function writeRuntimeState(state) {
   try {
     ensureControlDir();
-    atomicWriteJson(STATE_FILE, { ...state, updatedAt: new Date().toISOString() });
+    const snapshot = { ...state, updatedAt: new Date().toISOString() };
+    if (state.controlProtocol === 2) atomicWriteJson(path.join(CONTROL_DIR, `runtime_${state.serverPid}.json`), snapshot);
+    atomicWriteJson(STATE_FILE, snapshot);
   } catch {}
 }
 
 export function readRuntimeState() {
   return readJson(STATE_FILE);
+}
+
+// Includes the legacy single-owner receipt without claiming that it covers
+// every process that might have loaded an ONNX session.
+export function readRuntimeStates() {
+  const states = new Map();
+  for (const name of fs.existsSync(CONTROL_DIR) ? fs.readdirSync(CONTROL_DIR) : []) {
+    if (!/^runtime_\d+\.json$/.test(name)) continue;
+    const state = readJson(path.join(CONTROL_DIR, name));
+    if (state && isProcessAlive(state.serverPid)) states.set(state.serverPid, state);
+  }
+  const legacy = readRuntimeState();
+  if (legacy && isProcessAlive(legacy.serverPid) && !states.has(legacy.serverPid)) states.set(legacy.serverPid, legacy);
+  return [...states.values()];
 }
 
 export function isProcessAlive(pid) {

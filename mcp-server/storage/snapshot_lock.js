@@ -9,7 +9,12 @@ const ownedLocks = new AsyncLocalStorage();
 // than elapsed time, prevents a slow upload from losing its lock.
 export async function withSnapshotLock(directory, work) {
   const lockKey = path.resolve(directory);
-  if (ownedLocks.getStore()?.get(lockKey)?.active) return work();
+  if (ownedLocks.getStore()?.get(lockKey)?.active) {
+    if (fs.existsSync(path.join(directory, '.knowledge-journal.json'))) {
+      const { recoverKnowledge } = await import('./knowledge_recovery.js'); await recoverKnowledge(directory);
+    }
+    return work();
+  }
   fs.mkdirSync(directory, { recursive: true });
   const file = path.join(directory, ".snapshot.lock");
   const token = randomUUID();
@@ -28,8 +33,11 @@ export async function withSnapshotLock(directory, work) {
         catch (probe) { if (probe.code === "ESRCH") fs.unlinkSync(file); }
       } catch (readError) {
         // A just-created file can still be empty. Never steal a live lock.
-        if (readError.code !== "ENOENT" && Date.now() - fs.statSync(file).mtimeMs > 60_000) {
-          throw new Error("Invalid snapshot lock; inspect it before retrying");
+        if (readError.code !== "ENOENT") {
+          let modified;
+          try { modified = fs.statSync(file).mtimeMs; }
+          catch (statError) { if (statError.code === 'ENOENT') continue; throw statError; }
+          if (Date.now() - modified > 60_000) throw new Error("Invalid snapshot lock; inspect it before retrying");
         }
       }
       if (Date.now() - started > 30_000) throw new Error("Memory snapshot operation is busy; retry later");
@@ -39,16 +47,34 @@ export async function withSnapshotLock(directory, work) {
   const ownership = { active: true };
   const inherited = new Map(ownedLocks.getStore() || []);
   inherited.set(lockKey, ownership);
-  try { return await ownedLocks.run(inherited, work); }
+  try { return await ownedLocks.run(inherited, async () => {
+    if (fs.existsSync(path.join(directory, '.knowledge-journal.json'))) {
+      const { recoverKnowledge } = await import('./knowledge_recovery.js');
+      await recoverKnowledge(directory);
+    }
+    return work();
+  }); }
   finally {
     ownership.active = false;
     if (JSON.parse(fs.readFileSync(file, "utf8")).token === token) fs.unlinkSync(file);
   }
 }
 
-export function atomicWrite(file, data) {
+export function atomicWrite(file, data, { renameRetries = 0 } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const temp = `${file}.${randomUUID()}.tmp`;
-  try { fs.writeFileSync(temp, data); fs.renameSync(temp, file); }
+  try {
+    const fd = fs.openSync(temp, 'wx');
+    try { fs.writeFileSync(fd, data); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+    for (let attempt=0;;attempt++) {
+      try {fs.renameSync(temp, file);break;}
+      catch(error) {
+        if(process.platform!=='win32' || !['EPERM','EACCES','EBUSY'].includes(error.code) || attempt>=renameRetries)throw error;
+        // A short native read/antivirus handle can deny Windows replacement.
+        // Keep the same durable staged file; never remove the destination.
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10);
+      }
+    }
+  }
   finally { if (fs.existsSync(temp)) fs.unlinkSync(temp); }
 }

@@ -6,6 +6,7 @@
   "main": "opencode-plugin/main.js",
   "scripts": {
     "preinstall": "node mcp-server/preinstall.js || true",
+    "postinstall": "node mcp-server/postinstall.js",
     "dev:link": "node mcp-server/cli_boot.js dev-link",
     "persona:sync": "node mcp-server/cli_boot.js sync-persona",
     "persona:migrate": "node mcp-server/cli_boot.js migrate-persona",
@@ -16,6 +17,7 @@
     "benchmark:table-code": "node mcp-server/benchmarks/table_code_retrieval.js"
   },
   "bin": {
+    "memory-plugin": "mcp-server/boot.js",
     "memory_plugin": "mcp-server/boot.js",
     "memory-agent": "mcp-server/boot.js",
     "memory-cli": "mcp-server/cli_boot.js"
@@ -23,6 +25,7 @@
   "files": [
     "CHANGELOG.md",
     "README.md",
+    "MARKETPLACE.md",
     "LICENSE",
     "opencode-plugin",
     "mcp-server",
@@ -87,8 +90,12 @@
     "@huggingface/transformers": "^3.3.3",
     "@libsql/client": "^0.17.4",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "dompurify": "3.4.16",
     "jszip": "^3.10.2",
+    "katex": "0.19.0",
     "mammoth": "^1.12.0",
+    "marked": "18.0.14",
+    "mermaid": "12.1.0",
     "pdf-parse": "^2.4.5",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "^4.1.0"

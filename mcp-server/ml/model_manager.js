@@ -18,6 +18,8 @@ let lastModelActivity = null;
 let unloadTimer = null;
 let controlLoopTimer = null;
 let lastHandledCommandId = null;
+const handledCommandIds = new Set();
+let handlingControlCommand = false;
 
 import { getConfig } from "../config/config_manager.js";
 import { GpuMonitor, ExecutionTracer, getGpuMemoryInfoAsync } from "./gpu_monitor.js";
@@ -27,6 +29,10 @@ import {
   writeRuntimeState,
 } from "./model_control.js";
 export { GpuMonitor, ExecutionTracer };
+
+export function isValidModelId(value) {
+  return typeof value === 'string' && value.length <= 200 && /^[\w.-]+\/[\w.-]+$/.test(value) && !value.includes('..') && value.split('/').every(part => part !== '.' && !part.endsWith('.'));
+}
 
 // Resolve the configured execution device to a concrete ONNX backend.
 export function resolveTargetDevice(rawDeviceValue = null) {
@@ -71,16 +77,18 @@ export function ensureValidModelDirectory() {
   }
 }
 
-export async function getExtractor(modelName = null, progressCallback = null) {
+export async function getExtractor(modelName = null, progressCallback = null, {localOnly=false, strict=false, device=null} = {}) {
   const targetModel = modelName || getConfig().embeddingModel || "Xenova/multilingual-e5-small";
 
   // Resolve target device BEFORE cache check so comparison works correctly
-  const targetDevice = resolveTargetDevice();
+  const targetDevice = resolveTargetDevice(device);
 
   if (extractorInstance && loadedModelName === targetModel && loadedDevice === targetDevice) {
     touchModelActivity();
     return extractorInstance;
   }
+  if(localOnly && getModelStorageInfo(targetModel).status !== 'downloaded') throw Object.assign(new Error('Embedding model is not available in the local cache.'),{code:'UNSUPPORTED'});
+  if (extractorInstance) { await disposeInstance(extractorInstance); resetExtractor(); }
 
   // Ensure valid writable storage directory
   const cacheDir = ensureValidModelDirectory();
@@ -115,6 +123,7 @@ export async function getExtractor(modelName = null, progressCallback = null) {
   }
 
   const pipelineOpts = {
+    local_files_only: localOnly,
     quantized: true,
     dtype: "q8",
     device: targetDevice,
@@ -129,12 +138,18 @@ export async function getExtractor(modelName = null, progressCallback = null) {
     loadedModelName = targetModel;
     loadedDevice = targetDevice;
 
-    if (targetDevice !== "cpu") {
+    if (targetDevice !== "cpu" || strict) {
       try {
-        await extractorInstance("GPU VRAM Warmup Init", { pooling: "mean", normalize: true });
-      } catch {}
+        const output = await extractorInstance("Memory model validation", { pooling: "mean", normalize: true });
+        if (strict && (!output.data?.length || !Array.from(output.data).every(Number.isFinite))) throw new Error('Model validation returned an invalid vector.');
+        output.dispose?.();
+      } catch(error) { if(strict)throw error; }
     }
   } catch (err) {
+    if (strict) { await disposeInstance(extractorInstance); resetExtractor(); throw err; } // Never substitute or purge the requested model.
+    // Read-only search must neither download/substitute a model nor purge the
+    // user's cache when an apparently complete local model fails to initialize.
+    if(localOnly) throw Object.assign(new Error('Cached embedding model could not be loaded locally. Repair it through the model CLI.'),{code:'UNSUPPORTED'});
     const isNetworkError = err.message && (
       err.message.includes("fetch") ||
       err.message.includes("network") ||
@@ -216,6 +231,8 @@ async function disposeInstance(instance) {
 }
 
 export async function unloadModels(reason = "manual") {
+  if (unloadTimer) clearTimeout(unloadTimer);
+  unloadTimer = null;
   const unloaded = [];
   let unloadedDevice = null;
 
@@ -256,6 +273,9 @@ export function getModelRuntimeStatus() {
   const config = getConfig();
   const unloadTimeoutMinutes = Number(config.modelUnloadTimeoutMinutes) || 0;
   return {
+    controlProtocol: 2,
+    lastCommandId: lastHandledCommandId,
+    controlBusy: handlingControlCommand,
     configuredDevice: config.executionDevice || "cpu",
     resolvedDevice: resolveTargetDevice(),
     embedding: {
@@ -280,23 +300,26 @@ export function getModelRuntimeStatus() {
   };
 }
 
-export function touchModelActivity() {
-  lastModelActivity = Date.now();
+export function touchModelActivity(preserveActivity = false) {
+  if (!preserveActivity) lastModelActivity = Date.now();
   const timeoutMinutes = Number(getConfig().modelUnloadTimeoutMinutes) || 0;
-  if (timeoutMinutes <= 0) return;
   if (unloadTimer) clearTimeout(unloadTimer);
+  unloadTimer = null;
+  if (timeoutMinutes <= 0) return;
   unloadTimer = setTimeout(async () => {
     unloadTimer = null;
     if (!extractorInstance && !rerankerInstance) return;
+    const currentTimeout = Number(getConfig().modelUnloadTimeoutMinutes) || 0;
+    if (currentTimeout <= 0) return;
     const idleMs = Date.now() - (lastModelActivity || 0);
-    if (idleMs < timeoutMinutes * 60 * 1000) {
-      touchModelActivity();
+    if (idleMs < currentTimeout * 60 * 1000) {
+      touchModelActivity(true);
       return;
     }
-    console.error(`[Model Manager] Models idle for ${timeoutMinutes} min — auto-unloading from memory...`);
+    console.error(`[Model Manager] Models idle for ${currentTimeout} min — auto-unloading from memory...`);
     await unloadModels("idle-timeout");
     publishRuntimeState();
-  }, timeoutMinutes * 60 * 1000);
+  }, Math.max(1,Math.min(2147483647,timeoutMinutes * 60 * 1000 - (Date.now() - (lastModelActivity || Date.now())))));
   if (typeof unloadTimer.unref === "function") unloadTimer.unref();
 }
 
@@ -309,23 +332,25 @@ async function handleModelControlCommand(parsed) {
   let result = { ok: false, error: `Unknown model command: ${cmd}` };
 
   try {
+    if (payload.expectedConfig && Object.entries(payload.expectedConfig).some(([key,value]) => JSON.stringify(getConfig()[key]) !== JSON.stringify(value))) throw Object.assign(new Error('Model configuration changed before command execution.'), {code:'CONFLICT'});
     if (cmd === "unload") {
       result = { ok: true, ...(await unloadModels(payload.reason || "cli-request")) };
     } else if (cmd === "load") {
       const { updateConfig } = await import("../config/config_manager.js");
       if (payload.device) updateConfig({ executionDevice: payload.device });
       await unloadModels("device-switch");
-      const embedding = await getExtractor(null, null);
+      const embedding = await getExtractor(null, null, { strict: Boolean(payload.strict), localOnly: Boolean(payload.localOnly) });
       let rerankerLoaded = false;
       const cfg = getConfig();
       if (cfg.rerankerEnabled && cfg.rerankerModel && cfg.rerankerModel !== "none") {
-        rerankerLoaded = Boolean(await getReranker(cfg.rerankerModel));
+        rerankerLoaded = Boolean(await getReranker(cfg.rerankerModel, null, { strict: Boolean(payload.strict), localOnly: Boolean(payload.localOnly) }));
       }
       result = {
         ok: Boolean(embedding),
-        device: resolveTargetDevice(),
+        device: loadedDevice,
         embeddingLoaded: Boolean(extractorInstance),
         rerankerLoaded,
+        status: getModelRuntimeStatus(),
       };
     } else if (cmd === "apply-device") {
       const { updateConfig } = await import("../config/config_manager.js");
@@ -339,7 +364,7 @@ async function handleModelControlCommand(parsed) {
       result = { ok: true, status: getModelRuntimeStatus() };
     }
   } catch (err) {
-    result = { ok: false, error: err.message };
+    result = { ok: false, error: err.message, status: getModelRuntimeStatus() };
   }
 
   writeCommandAck(id, result);
@@ -352,16 +377,22 @@ async function handleModelControlCommand(parsed) {
 export function startModelControlLoop(intervalMs = 2500) {
   if (controlLoopTimer) return;
   publishRuntimeState();
+  const startedAt = Date.now();
   controlLoopTimer = setInterval(async () => {
+    if (handlingControlCommand) return;
     try {
-      const parsed = pollModelCommand(lastHandledCommandId);
+      const parsed = pollModelCommand(handledCommandIds);
       if (parsed) {
         lastHandledCommandId = parsed.id;
+        handledCommandIds.add(parsed.id);
+        if (handledCommandIds.size > 128) handledCommandIds.delete(handledCommandIds.values().next().value);
+        if (Date.parse(parsed.sentAt) < startedAt) { publishRuntimeState(); return; }
+        handlingControlCommand = true;
         await handleModelControlCommand(parsed);
       } else {
         publishRuntimeState();
       }
-    } catch {}
+    } catch {} finally { handlingControlCommand = false; }
   }, intervalMs);
   if (typeof controlLoopTimer.unref === "function") controlLoopTimer.unref();
 }
@@ -448,9 +479,9 @@ export function formatInputText(text, isQuery = false, modelName = null, instruc
   return cleanText;
 }
 
-export async function embedText(text, isQuery = false, modelName = null, progressCallback = null, instruction = null, vectorDimension = null) {
+export async function embedText(text, isQuery = false, modelName = null, progressCallback = null, instruction = null, vectorDimension = null, options = {}) {
   const targetModel = modelName || getConfig().embeddingModel || "Xenova/multilingual-e5-small";
-  const extractor = await getExtractor(targetModel, progressCallback);
+  const extractor = await getExtractor(targetModel, progressCallback, options);
   const formattedText = formatInputText(text, isQuery, targetModel, instruction);
 
   const isBgeM3 = targetModel.toLowerCase().includes("bge-m3");
@@ -470,7 +501,7 @@ export async function embedText(text, isQuery = false, modelName = null, progres
   return result;
 }
 
-export async function embedBatch(texts, isQuery = false, modelName = null, progressCallback = null, instruction = null, traceOptions = {}, vectorDimension = null) {
+export async function embedBatch(texts, isQuery = false, modelName = null, progressCallback = null, instruction = null, traceOptions = {}, vectorDimension = null, modelOptions = {}) {
   if (!texts || texts.length === 0) return [];
   const targetModel = modelName || getConfig().embeddingModel || "Xenova/multilingual-e5-small";
   
@@ -483,7 +514,7 @@ export async function embedBatch(texts, isQuery = false, modelName = null, progr
 
   try {
     if (tracer) tracer.startStage("Model Initialization & Session", "CPU");
-    const extractor = await getExtractor(targetModel, progressCallback);
+    const extractor = await getExtractor(targetModel, progressCallback, modelOptions);
 
     if (tracer) tracer.startStage("Text Formatting & Tokenization Preprocessing", "CPU");
     const formattedTexts = texts.map((text) => formatInputText(text, isQuery, targetModel, instruction));
@@ -578,8 +609,9 @@ export async function embedBatch(texts, isQuery = false, modelName = null, progr
 
 export const DEFAULT_RERANKER_MODEL = "SugoLabs/mmarco-mMiniLMv2-L12-H384-v1";
 
-export async function getReranker(modelName = DEFAULT_RERANKER_MODEL, progressCallback = null) {
-  const targetDevice = resolveTargetDevice();
+export async function getReranker(modelName = DEFAULT_RERANKER_MODEL, progressCallback = null, { strict=false, localOnly=false, device=null } = {}) {
+  const targetDevice = resolveTargetDevice(device);
+  if (localOnly && getModelStorageInfo(modelName).status !== 'downloaded') throw Object.assign(new Error('Reranker model is not available in the local cache.'), { code: 'UNSUPPORTED' });
 
   if (rerankerInstance && loadedRerankerName === modelName && loadedRerankerDevice === targetDevice) {
     touchModelActivity();
@@ -619,6 +651,7 @@ export async function getReranker(modelName = DEFAULT_RERANKER_MODEL, progressCa
   }
 
   const modelOpts = {
+    local_files_only: localOnly,
     quantized: true,
     dtype: "q8",
     device: targetDevice,
@@ -633,12 +666,19 @@ export async function getReranker(modelName = DEFAULT_RERANKER_MODEL, progressCa
     // applies softmax + top_k=1, which saturates single-logit cross-encoders
     // to score 1.0 for every candidate and makes reranking a no-op.
     // Raw sequence-classification logits are the actual ranking signal.
-    const tokenizer = await AutoTokenizer.from_pretrained(modelName, progressCallback ? { progress_callback: progressCallback } : {});
+    const tokenizer = await AutoTokenizer.from_pretrained(modelName, { local_files_only: localOnly, ...(progressCallback ? { progress_callback: progressCallback } : {}) });
     const model = await AutoModelForSequenceClassification.from_pretrained(modelName, modelOpts);
     rerankerInstance = { tokenizer, model };
     loadedRerankerName = modelName;
     loadedRerankerDevice = targetDevice;
+    if (strict) {
+      const inputs = await tokenizer('Memory validation', { text_pair:'Memory validation', padding:true, truncation:true, max_length:32 });
+      const outputs = await model(inputs);
+      if (!outputs.logits?.data?.length || !Array.from(outputs.logits.data).every(Number.isFinite)) throw new Error('Reranker validation returned invalid logits.');
+      for (const output of Object.values(outputs)) output.dispose?.();
+    }
   } catch (err) {
+    if (strict) { await disposeInstance(rerankerInstance);rerankerInstance=null;loadedRerankerName=null;loadedRerankerDevice=null;throw err; }
     console.warn(`Failed to load reranker model ${modelName}: ${err.message}. Purging corrupt files...`);
     deleteModelCache(modelName);
     return null;
@@ -737,6 +777,7 @@ export function cosineSimilarity(vecA, vecB) {
 
 export function getModelStorageInfo(modelName) {
   if (!modelName || modelName === "none") return { status: "not_downloaded", sizeMB: "0.00", bytes: 0 };
+  if (!isValidModelId(modelName)) return { status:'not_downloaded',sizeMB:'0.00',bytes:0,invalid:true };
   const parts = modelName.split("/");
   const modelDir = path.join(MODELS_DIR, ...parts);
 
@@ -761,8 +802,9 @@ export function getModelStorageInfo(modelName) {
           totalBytes += stat.size;
           if (entry.name === "config.json") hasConfig = true;
           if (entry.name.includes("tokenizer")) hasTokenizer = true;
-          // ONNX weights must be substantial (>5MB) or external data (.onnx_data)
-          if ((entry.name.endsWith(".onnx") || entry.name.endsWith(".onnx_data")) && stat.size > 5 * 1024 * 1024) {
+          // Presence is a cache hint, not integrity validation. Small valid
+          // quantized models must not be rejected by an arbitrary size floor.
+          if ((entry.name.endsWith(".onnx") || entry.name.endsWith(".onnx_data")) && stat.size > 0) {
             hasOnnxWeights = true;
           }
         }
@@ -778,8 +820,8 @@ export function getModelStorageInfo(modelName) {
     return { status: "not_downloaded", sizeMB: "0.00", bytes: 0, dir: modelDir };
   }
 
-  // Model is ready only if it has config, tokenizer, ONNX weights >5MB, and total folder size >10MB
-  if (hasConfig && hasTokenizer && hasOnnxWeights && totalBytes > 10 * 1024 * 1024) {
+  // Strict administration validates inference separately, without fallback.
+  if (hasConfig && hasTokenizer && hasOnnxWeights) {
     return { status: "downloaded", sizeMB, bytes: totalBytes, dir: modelDir };
   }
 

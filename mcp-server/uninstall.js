@@ -208,8 +208,7 @@ async function removeJsonMcpClient({ label, configPath, cliName, cliArgs, dry })
   };
 }
 
-export async function runUninstall() {
-  const rawArgs = process.argv.slice(2);
+export async function runUninstall(rawArgs = process.argv.slice(2)) {
   // strip leading "uninstall" / "setup" / "--uninstall" tokens so parsing is uniform
   // e.g. ["uninstall","--purge"] or ["setup","--uninstall","--purge"] or ["--uninstall"]
   const filtered = rawArgs.filter((a, idx) => {
@@ -273,6 +272,23 @@ export async function runUninstall() {
   let removedCount = 0;
   let skippedCount = 0;
   let failureCount = 0;
+
+  // Client-scoped removal must not stop a panel shared by other clients.
+  const { integrationStatus } = await import('./plugin_integration.js');
+  const marketplaceActive = (await Promise.all(['codex', 'claude'].map(c => integrationStatus(c)))).some(s => s.pluginEnabled);
+  if ((!opts.hasSpecificFlag && !marketplaceActive) || opts.purge) {
+    try {
+      const { removeWebRuntime } = await import('./dashboard/runtime.js');
+      const result = await removeWebRuntime({ dryRun: dry });
+      if (!result.skipped) {
+        console.log(`  ${tag} Memory panel: ${dry ? 'would stop and remove' : 'stopped and removed'} owned login startup; connection/data files retained`);
+        removedCount++;
+      }
+    } catch (error) {
+      console.log(`  [FAIL] Memory panel: ${error.message}`); failureCount++;
+      if (opts.purge && !dry) { process.exitCode = 1; return { ok: false, removedCount, skippedCount, failureCount }; }
+    }
+  }
 
   // 1. OpenCode
   if (opts.doOpenCode) {
@@ -523,7 +539,13 @@ export async function runUninstall() {
       if (dry) {
         const status = await getGlobalPromptStatus(promptTargets);
         for (const s of status) {
-          if (s.enabled) {
+          if (s.unavailable) {
+            console.log(`  [FAIL] ${s.name}: prompt status unavailable (${s.code})`);
+            failureCount++;
+          } else if (s.integration?.pluginManaged) {
+            console.log(`  [SKIP] ${s.name}: marketplace owns the client channel`);
+            skippedCount++;
+          } else if (s.enabled) {
             console.log(`  ${tag} ${s.name}: would remove prompt block from ${s.filePath}`);
             removedCount++;
           } else {
@@ -537,8 +559,8 @@ export async function runUninstall() {
           if (r.status === "disabled" || r.status === "removed_file") {
             console.log(`  [OK] ${r.name}: removed prompt block from ${r.filePath}`);
             removedCount++;
-          } else if (r.status === "skipped") {
-            console.log(`  [SKIP] ${r.name}: prompt block not found`);
+          } else if (r.status === "skipped" || r.status === 'plugin_managed') {
+            console.log(`  [SKIP] ${r.name}: ${r.status === 'plugin_managed' ? 'marketplace owns the client channel' : 'prompt block not found'}`);
             skippedCount++;
           } else if (r.status === "failed") {
             console.log(`  [FAIL] ${r.name}: ${r.error}`);
@@ -561,9 +583,9 @@ export async function runUninstall() {
       opts.doOpenCode ? { name: "OpenCode", dir: join(clientPaths.opencodeDir, "skills", "using-memory") } : null,
       opts.doAntigravity ? { name: "Antigravity", dir: join(clientPaths.antigravityConfigDir, "skills", "using-memory") } : null,
       opts.doGemini ? { name: "Gemini CLI", dir: join(clientPaths.geminiSkillsDir, "using-memory") } : null,
-      opts.doCodex ? { name: "Codex", dir: join(home, ".codex", "skills", "using-memory") } : null,
+      opts.doCodex ? { name: "Codex", dir: join(clientPaths.codexDir, "skills", "using-memory") } : null,
       opts.doCodex ? { name: "Codex shared agents", dir: join(home, ".agents", "skills", "using-memory") } : null,
-      opts.doClaude ? { name: "Claude Code", dir: join(home, ".claude", "skills", "using-memory") } : null,
+      opts.doClaude ? { name: "Claude Code", dir: join(clientPaths.claudeDir, "skills", "using-memory") } : null,
     ].filter(Boolean);
 
     // local Antigravity .agents/skills

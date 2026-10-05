@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import http from "node:http";
@@ -15,8 +15,18 @@ const core = await import("../../mcp-server/tools/core/memory_core.js");
 const { getDatabase, closeDatabase } = await import("../../mcp-server/db/database.js");
 const { partitionMemoryEntries, formatInjectedFacts } = await import("../../opencode-plugin/index.js");
 const { buildPersonaOverlayBlock } = await import("../../mcp-server/prompt_manager.js");
-const { updateConfig } = await import("../../mcp-server/config/config_manager.js");
+const { updateConfig, getConfig } = await import("../../mcp-server/config/config_manager.js");
 const { startDashboard } = await import("../../mcp-server/dashboard/server.js");
+const { CloudSnapshots } = await import("../../mcp-server/admin/cloud_snapshots.js");
+const cloudCalls = [];
+// Remote writes are spied here; real libSQL persistence is covered separately
+// in cloud_snapshots.test.js. No credentials or network are used in UI tests.
+const cloudSpy = { execute: async request => {
+  const sql = typeof request === "string" ? request : request.sql;
+  cloudCalls.push(sql);
+  assert.ok(sql.startsWith("CREATE ") || sql.startsWith("INSERT INTO memory_snapshots"));
+  return { rowsAffected: sql.startsWith("INSERT") ? 1 : 0, rows: [] };
+} };
 let app;
 try {
   const key = "git:example.test/team/a", other = "git:example.test/team/b";
@@ -104,9 +114,66 @@ try {
   assert.equal(snapshotNotebook.readOnly, false);
   assert.equal((await getDatabase()).cloudClient, null, "snapshot panel stays local");
   await service.mutateNotebook({ key, expectedVersion: snapshotNotebook.version, action: "create", fields: { title: "Snapshot mode", body: "local edit" } });
+  const snapshots = new CloudSnapshots({ client: cloudSpy });
+  // Earlier link checks deliberately used an unavailable source. Supply a real
+  // blob before testing full checkpoints, which correctly reject missing blobs.
+  const { saveBlob } = await import("../../mcp-server/storage/blob_store.js");
+  const source = await saveBlob("source for preserved link");
+  await (await getDatabase()).prepare("UPDATE documents SET blob_hash = ?, checksum = ? WHERE id = ?").run(source.hash, source.hash, "doc-1");
+  const firstUpload = await snapshots.upload();
+  assert.equal(firstUpload.status, "uploaded");
+  cloudCalls.length = 0;
+  const beforeEdit = await service.readNotebook({ key });
+  const uiEdit = await service.mutateNotebook({ key, expectedVersion: beforeEdit.version, action: "create", fields: { title: "Checkpoint contract", body: "web edit must reach snapshots", kind: "fact" } });
+  await service.notebookOverview();
+  await service.previewNotebookPersona({ key });
+  assert.match(await core.recallFacts({ scope: "project", project: key }), /web edit must reach snapshots/);
+  assert.equal(cloudCalls.length, 0, "UI read/write and MCP readback perform zero cloud calls");
+  const payload = await snapshots.capture();
+  assert.ok(payload.notebooks.some(store => store.content.includes("web edit must reach snapshots")));
+  assert.ok(payload.tables.knowledge_links.some(link => link.id === "link-1"), "UI does not break snapshot links");
+  const uploaded = await snapshots.upload();
+  assert.equal(uploaded.status, "uploaded");
+  assert.equal(cloudCalls.filter(sql => sql.startsWith("INSERT INTO memory_snapshots")).length, 1);
+  cloudCalls.length = 0;
+  await snapshots.upload();
+  assert.equal(cloudCalls.length, 0, "unchanged UI state causes no cloud calls");
+  const preview = await snapshots.restore({ id: firstUpload.snapshot.id, location: "local" });
+  await snapshots.restore({ id: firstUpload.snapshot.id, location: "local", confirmToken: preview.confirmToken });
+  const restored = await service.readNotebook({ key });
+  assert.ok(!restored.records.some(record => record.body === "web edit must reach snapshots"));
+  assert.equal(restored.records[0].links.length, 1);
+  const restoreConflict = await fetch(app.origin + "/api/notebook", { method: "POST", headers: requestHeaders,
+    body: JSON.stringify({ key, expectedVersion: uiEdit.notebook.version, action: "create", fields: { title: "Stale after restore", body: "must not overwrite" } }) });
+  assert.equal(restoreConflict.status, 409, "snapshot restore invalidates open UI drafts");
+  assert.equal(cloudCalls.length, 0, "local restoration and UI refresh do not query cloud");
+
+  // Simulate a former only-cloud installation: reading must not change config,
+  // expose its incomplete cache as editable, or fetch/merge remote memory.
+  const configPath = join(memory.MEMORY_DIR, "config.json");
+  const legacyConfig = JSON.stringify({ ...getConfig(), mode: "only-cloud" });
+  writeFileSync(configPath, legacyConfig);
+  const beforeBlocked = readFileSync(memory.storeFilePath(key), "utf8");
+  const blocked = await (await fetch(app.origin + "/api/overview", { headers })).json();
+  assert.equal(blocked.code, "MIGRATION_REQUIRED");
+  assert.equal(blocked.readOnly, true);
+  assert.deepEqual(blocked.targets, []);
+  for (const path of ["/api/notebook", "/api/persona"]) {
+    const response = await fetch(app.origin + path + "?key=" + encodeURIComponent(key), { headers });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, "MIGRATION_REQUIRED");
+  }
+  const blockedWrite = await fetch(app.origin + "/api/notebook", { method: "POST", headers: requestHeaders,
+    body: JSON.stringify({ key, expectedVersion: restored.version, action: "create", fields: { title: "Blocked", body: "must not write" } }) });
+  assert.equal(blockedWrite.status, 409);
+  assert.equal((await blockedWrite.json()).code, "MIGRATION_REQUIRED");
+  assert.equal(readFileSync(memory.storeFilePath(key), "utf8"), beforeBlocked);
+  assert.equal(readFileSync(configPath, "utf8"), legacyConfig);
+  assert.equal(cloudCalls.length, 0);
+  updateConfig({ legacyCloudBackupRequired: false, legacyCloudRestoreRequired: false });
   assert.throws(() => updateConfig({ mode: "only-cloud" }), /has been removed/);
   updateConfig({ mode: "only-local" });
-  console.log("PASS dashboard: explicit scopes, offline identities, legacy IDs, protected deletion, version conflicts, linked records, disabled directive contexts, MCP readback, HTTP access, editable snapshot mode and retired-mode rejection.");
+  console.log("PASS dashboard: explicit scopes, protected deletion, version conflicts, links, directives, MCP/HTTP, zero cloud calls on UI edits, snapshot capture/upload/restore, stale drafts and migration status.");
 } finally {
   if (app) await app.close();
   closeDatabase();

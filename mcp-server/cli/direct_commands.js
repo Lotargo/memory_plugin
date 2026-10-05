@@ -1,20 +1,33 @@
-import { basename } from "node:path";
 import {
   readMemory,
-  writeMemory,
-  storeFilePath,
-  canonicalPath,
   listProjectStores,
   migrateStoreTitles,
   GLOBAL_KEY,
   projectKey,
 } from "../memory.js";
-import { factBody } from "../fact_format.js";
 
 export async function handleDirectCommands(cliArgs) {
-  if (cliArgs[0] === "dashboard") {
-    const { runDashboard } = await import("../dashboard/server.js");
-    await runDashboard(cliArgs.slice(1));
+  if (cliArgs[0] === 'prompts') {
+    const { handlePromptCommand } = await import('./prompt_commands.js');
+    await handlePromptCommand(cliArgs.slice(1)); return true;
+  }
+  if (cliArgs[0] === 'notebook') {
+    const { handleNotebookCommand } = await import('./notebook_commands.js');
+    await handleNotebookCommand(cliArgs.slice(1)); return true;
+  }
+  if (cliArgs[0] === 'marketplace') {
+    const { handleMarketplaceCommand } = await import('../marketplace.js');
+    await handleMarketplaceCommand(cliArgs.slice(1));
+    return true;
+  }
+  if (cliArgs[0] === "knowledge") {
+    const { handleKnowledgeCommand } = await import("./knowledge_commands.js");
+    await handleKnowledgeCommand(cliArgs.slice(1));
+    return true;
+  }
+  if (["web", "dashboard"].includes(cliArgs[0])) {
+    const { handleWebCommand } = await import("./web_commands.js");
+    await handleWebCommand(cliArgs.slice(1));
     return true;
   }
   if (cliArgs[0] === "snapshots") {
@@ -74,142 +87,20 @@ export async function handleDirectCommands(cliArgs) {
     return true;
   }
 
-  if (cliArgs[0] === "link") {
-    const dirIdx = cliArgs.indexOf("--dir");
-    const dir = dirIdx >= 0 && cliArgs[dirIdx + 1] ? cliArgs[dirIdx + 1] : process.cwd();
-    const remIdx = cliArgs.indexOf("--remote");
-    const remote = remIdx >= 0 && cliArgs[remIdx + 1] ? cliArgs[remIdx + 1] : null;
-
-    try {
-      const { getDatabase } = await import("../db/database.js");
-      const { resolveProjectIdentity, upsertIdentity, registerAlias, normalizeRemoteUrl } = await import("../identity.js");
-      const db = await getDatabase();
-
-      const identity = await resolveProjectIdentity(dir);
-      if (!identity && !remote) {
-        console.error("Error: No Git repository detected and no remote URL specified.");
-        process.exit(1);
-      }
-
-      let key = identity ? identity.key : `git:${normalizeRemoteUrl(remote)}`;
-      let name = identity ? identity.name : basename(dir) || "unbound";
-      let primaryRemote = remote ? normalizeRemoteUrl(remote) : (identity ? identity.primaryRemote : null);
-
-      await upsertIdentity(db, { key, name, primaryRemote });
-
-      const aliases = [];
-      if (primaryRemote) {
-        aliases.push({ alias: `remote:${primaryRemote}`, kind: "remote" });
-      }
-      aliases.push({ alias: `path:${canonicalPath(dir)}`, kind: "path" });
-      aliases.push({ alias: `basename:${name}`, kind: "basename" });
-
-      for (const a of aliases) {
-        await registerAlias(db, { alias: a.alias, identityKey: key, kind: a.kind });
-      }
-
-      console.log(`\n  [OK] Linked directory "${dir}" successfully to identity key: ${key}\n`);
-    } catch (err) {
-      console.error(`Error: ${err.message}`);
-      process.exit(1);
-    }
-    return true;
+  if (cliArgs[0] === 'projects') {
+    const { handleProjectCommand } = await import('./project_commands.js');
+    await handleProjectCommand(cliArgs.slice(1)); return true;
   }
-
-  if (cliArgs[0] === "unlink") {
-    const dirIdx = cliArgs.indexOf("--dir");
-    const dir = dirIdx >= 0 && cliArgs[dirIdx + 1] ? cliArgs[dirIdx + 1] : process.cwd();
-    const purge = cliArgs.includes("--purge");
-
-    try {
-      const { getDatabase } = await import("../db/database.js");
-      const { unregisterAlias, removeIdentity, resolveProjectIdentity } = await import("../identity.js");
-      const db = await getDatabase();
-
-      const alias = `path:${canonicalPath(dir)}`;
-      await unregisterAlias(db, alias);
-
-      if (purge) {
-        const identity = await resolveProjectIdentity(dir);
-        if (identity) {
-          await removeIdentity(db, identity.key);
-        }
-      }
-
-      console.log(`\n  [OK] Unlinked directory "${dir}" successfully.\n`);
-    } catch (err) {
-      console.error(`Error: ${err.message}`);
-      process.exit(1);
+  if (['link','unlink','relink'].includes(cliArgs[0])) {
+    const { executeProjectOperation } = await import('../services/project_service.js');
+    const values = { directory:process.cwd() };
+    for(let i=1;i<cliArgs.length;i++) {
+      const flag=cliArgs[i];
+      if(flag==='--purge') values.purge=true;
+      else if(['--dir','--remote'].includes(flag) && cliArgs[i+1] && !cliArgs[i+1].startsWith('--')) values[flag==='--dir'?'directory':'remote']=cliArgs[++i];
+      else throw new Error('Usage: memory-cli link|unlink|relink [--dir <absolute path>] [--remote <url>]');
     }
-    return true;
-  }
-
-  if (cliArgs[0] === "relink") {
-    const dirIdx = cliArgs.indexOf("--dir");
-    const dir = dirIdx >= 0 && cliArgs[dirIdx + 1] ? cliArgs[dirIdx + 1] : process.cwd();
-    const remIdx = cliArgs.indexOf("--remote");
-    const remote = remIdx >= 0 && cliArgs[remIdx + 1] ? cliArgs[remIdx + 1] : null;
-
-    if (!remote) {
-      console.error("Error: --remote parameter is required for relink.");
-      process.exit(1);
-    }
-
-    try {
-      const { getDatabase } = await import("../db/database.js");
-      const { resolveProjectIdentity, upsertIdentity, removeIdentity, normalizeRemoteUrl } = await import("../identity.js");
-      const db = await getDatabase();
-
-      const sourceIdentity = await resolveProjectIdentity(dir);
-      if (!sourceIdentity) {
-        console.error("Error: Source project identity not detected.");
-        process.exit(1);
-      }
-
-      const targetKey = `git:${normalizeRemoteUrl(remote)}`;
-      const sourceKey = sourceIdentity.key;
-
-      if (sourceKey === targetKey) {
-        console.log("Source and target identities are already identical.");
-        return true;
-      }
-
-      const sourceFacts = await readMemory(sourceKey);
-      const targetFacts = await readMemory(targetKey);
-      const seen = new Set(targetFacts.map((e) => factBody(e).toLowerCase().trim()));
-
-      let mergedCount = 0;
-      for (const f of sourceFacts) {
-        const body = factBody(f).toLowerCase().trim();
-        if (!seen.has(body)) {
-          seen.add(body);
-          targetFacts.push(f);
-          mergedCount++;
-        }
-      }
-
-      await writeMemory(targetKey, targetFacts);
-      await upsertIdentity(db, { key: targetKey, name: sourceIdentity.name, primaryRemote: normalizeRemoteUrl(remote) });
-      await db.prepare("UPDATE project_aliases SET identity_key = ? WHERE identity_key = ?;").run(targetKey, sourceKey);
-      const { moveKnowledgeScope } = await import("../graph/knowledge_linker.js");
-      await moveKnowledgeScope(db, sourceKey, targetKey);
-      await removeIdentity(db, sourceKey);
-
-      try {
-        const sourceFp = storeFilePath(sourceKey);
-        const { existsSync } = await import("node:fs");
-        if (existsSync(sourceFp)) {
-          const { unlink } = await import("fs/promises");
-          await unlink(sourceFp);
-        }
-      } catch (e) {}
-
-      console.log(`\n  [OK] Relinked and merged ${mergedCount} facts successfully!\n`);
-    } catch (err) {
-      console.error(`Error: ${err.message}`);
-      process.exit(1);
-    }
-    return true;
+    console.log(JSON.stringify(await executeProjectOperation(cliArgs[0],values),null,2)); return true;
   }
 
   if (cliArgs[0] === "identity") {
@@ -274,8 +165,9 @@ export async function handleDirectCommands(cliArgs) {
   if (cliArgs.includes("--enable-prompt") || cliArgs.includes("enable-prompt")) {
     const { enableGlobalPrompt } = await import("../prompt_manager.js");
     const results = await enableGlobalPrompt();
-    console.log("\n  [OK] Global prompt enabled across client configurations:\n");
-    results.forEach((r) => console.log(`  - ${r.name}: ${r.filePath} (${r.status})`));
+    console.log("\n  Global prompt enable results (active sessions not observed):\n");
+    results.forEach((r) => console.log(`  - ${r.name}: ${r.filePath} (${r.status})${r.error ? `: ${r.error}` : ''}`));
+    if (results.some(r => r.status === 'failed')) process.exitCode = 1;
     console.log("");
     return true;
   }
@@ -283,8 +175,9 @@ export async function handleDirectCommands(cliArgs) {
   if (cliArgs.includes("--disable-prompt") || cliArgs.includes("disable-prompt")) {
     const { disableGlobalPrompt } = await import("../prompt_manager.js");
     const results = await disableGlobalPrompt();
-    console.log("\n  [OK] Global prompt disabled across client configurations:\n");
-    results.forEach((r) => console.log(`  - ${r.name}: ${r.filePath} (${r.status})`));
+    console.log("\n  Global prompt disable results (MCP/plugin activation unchanged):\n");
+    results.forEach((r) => console.log(`  - ${r.name}: ${r.filePath} (${r.status})${r.error ? `: ${r.error}` : ''}`));
+    if (results.some(r => r.status === 'failed')) process.exitCode = 1;
     console.log("");
     return true;
   }

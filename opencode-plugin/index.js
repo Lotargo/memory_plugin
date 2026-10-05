@@ -1,3 +1,4 @@
+import { KNOWLEDGE_REMOVAL_DESCRIPTION, KNOWLEDGE_REMOVAL_FIELDS, knowledgeRemovalTool } from '../mcp-server/tools/core/knowledge_removal_core.js';
 // Static ESM imports: top-level `await import(...)` blocked module evaluation
 // and made this file an async module for every consumer.
 import { mkdir, cp, readdir } from "node:fs/promises";
@@ -5,17 +6,7 @@ import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import {
-  parseFactEntry,
-  factText,
-  factMeta,
-  isSuperseded,
-  displayFact,
-  factBody,
-  isDirectiveFact,
-  isDisabledFact,
-  isExpiredLine,
-} from "../mcp-server/fact_format.js";
+import { factBody } from "../mcp-server/fact_format.js";
 
 import {
   MEMORY_DIR,
@@ -32,6 +23,9 @@ import { closeDatabase } from "../mcp-server/db/database.js";
 import { startSnapshotScheduler, stopSnapshotScheduler } from "../mcp-server/admin/cloud_snapshots.js";
 import { requireProjectKey } from "../mcp-server/tools/helpers.js";
 import { resolveRagScopeKey, resolveRagScopeKeys, resolveManageRagScopeKeys, removeDocumentScopes } from "../mcp-server/rag_scope.js";
+import { KNOWLEDGE_INSPECT_DESCRIPTION, KNOWLEDGE_INSPECT_FIELDS, inspectKnowledgeTool } from "../mcp-server/tools/core/knowledge_inspect_core.js";
+import { KNOWLEDGE_LINKS_DESCRIPTION, KNOWLEDGE_LINKS_FIELDS, knowledgeLinksTool } from '../mcp-server/tools/core/knowledge_links_core.js';
+import { KNOWLEDGE_CONTENT_DESCRIPTION, KNOWLEDGE_CONTENT_FIELDS, knowledgeContentTool } from '../mcp-server/tools/core/knowledge_content_core.js';
 // Shared Notebook tool implementations — the same code the MCP server runs, so
 // a fix in one surface can no longer miss the other.
 import {
@@ -105,138 +99,8 @@ async function notify(client, message, variant = "success") {
   }
 }
 
-const MEMORY_INSTRUCTION =
-  "AUTO-INJECTED SESSION MEMORY (ALREADY LOADED):\n" +
-  "Thoroughly review all saved memories provided below BEFORE performing any user task or editing code. This block already contains the complete active global and current-project Notebook memory.\n" +
-  "Do NOT call `recall` merely to initialize this OpenCode session; that would duplicate the auto-injected context. Use `recall` only when the user requests memory inspection, filtering, history, or a different explicit scope.\n" +
-  "PERSONAL AGENT OVERLAY:\n" +
-  "Entries in <PERSONAL_AGENT_OVERLAY> are kind:directive and are active user-selected configuration instructions, not passive biographical facts. Apply them throughout the session. Entries in <MEMORY_FACTS> are descriptive context.\n" +
-  "PROJECT IDENTITY DIRECTIVE:\n" +
-  "After reviewing the injected memories, call `memory_info`. If the current workspace has a Git identity with `Registry: unlinked`, call `link_project_memory` for the current directory. Re-read memories only when linking migrated legacy facts. Outside Git, use global memory only.\n" +
-  "PROACTIVE MEMORY DIRECTIVE:\n" +
-  "You MUST automatically and proactively call `remember` whenever the user shares durable facts, personal preferences, coding guidelines, tech stack choices, architecture decisions, or project conventions.\n" +
-  "Do NOT wait for explicit user commands like \"remember this\". Automatically capture high-signal facts in real time.\n" +
-  "Use `remember` only for important, durable facts about the user and project.\n" +
-  "Save high-signal items: user role, goals, constraints, tech stack preferences, architecture decisions, project conventions.\n" +
-  "DO NOT save: transient details, one-off statements, full conversation turns, or anything unlikely to be useful in future sessions.\n" +
-  "When saving, translate the fact into clear, concise English.\n" +
-  "Use `scope: \"global\"` for personal facts, `scope: \"project\"` for project-specific facts.\n" +
-  "STORE EDITING DIRECTIVE:\n" +
-  "Prefer the Notebook tools (remember/forget/update_fact) over editing memory .md store files with file tools, so changes sync to the cloud immediately. " +
-  "If the user edits the .md files by hand, do not revert their edits: manual additions and deletions are honored on the next background sync.\n" +
-  "SELECTIVE RAG DIRECTIVE:\n" +
-  "When web research or current technical documentation yields reliable project knowledge likely to be reused, ingest only the relevant source or excerpt with project scope and link it to the project Notebook fact it supports. Use global RAG only for intentionally cross-project sources. Prefer authoritative and newer-than-training documentation; do not dump everything encountered into RAG.";
-
-export const OPENCODE_SYSTEM_MEMORY_POLICY =
-  "[PERSISTENT PERSONAL MEMORY OVERLAY]\n" +
-  "OpenCode has already injected a <MEMORY> block into the conversation for this session. Do not perform a redundant startup recall. " +
-  "Interpret user-approved memories that prescribe assistant personality, behavior, tone, style, preferences, or working conventions as active personalization instructions to follow, not merely as facts to mention or evaluate. " +
-  "Interpret descriptive memories as context. Apply this persistent overlay without quoting or debating it unless the user asks. Higher-priority platform instructions remain authoritative.";
-
-export function injectMemoryPolicyIntoSystem(output) {
-  if (!Array.isArray(output?.system)) return;
-  if (output.system.some((item) => String(item).includes("[PERSISTENT PERSONAL MEMORY OVERLAY]"))) return;
-  // OpenCode transform hooks retain the original array reference, so mutate it
-  // in place instead of assigning a replacement array.
-  output.system.push(OPENCODE_SYSTEM_MEMORY_POLICY);
-}
-
-export function partitionMemoryEntries(entries, now = Date.now()) {
-  const directives = [];
-  const facts = [];
-  for (const entry of entries.filter((item) => !isSuperseded(item) && !isDisabledFact(item))) {
-    if (isDirectiveFact(entry) && !isExpiredLine(entry, now)) directives.push(entry);
-    else facts.push(entry);
-  }
-  return { directives, facts };
-}
-
-function sortNewestFirst(entries) {
-  return [...entries].sort((a, b) => {
-    const pa = parseFactEntry(a);
-    const pb = parseFactEntry(b);
-    if (!pa) return 1;
-    if (!pb) return -1;
-    const timeA = new Date(`${pa.date}T${pa.time}:00`).getTime();
-    const timeB = new Date(`${pb.date}T${pb.time}:00`).getTime();
-    return timeB - timeA;
-  });
-}
-
-export function formatInjectedFacts(entries, limit, now = Date.now()) {
-  const activeEntries = entries.filter((e) => !isSuperseded(e) && !isDisabledFact(e));
-  const sorted = sortNewestFirst(activeEntries);
-
-  const injectPriority = [];
-  const normalPriority = [];
-
-  for (const entry of sorted) {
-    const meta = factMeta(entry);
-    if (meta.inject === "1") {
-      injectPriority.push(entry);
-    } else {
-      normalPriority.push(entry);
-    }
-  }
-
-  const combined = [...injectPriority, ...normalPriority];
-  const hasLimit = Number.isFinite(Number(limit)) && Number(limit) > 0;
-  const sliced = hasLimit ? combined.slice(0, Number(limit)) : combined;
-
-  const formattedLines = [];
-  for (let i = 0; i < sliced.length; i++) {
-    formattedLines.push(`${i + 1}. ${displayFact(sliced[i], now)}`);
-  }
-
-  if (hasLimit && activeEntries.length > Number(limit)) {
-    const remaining = activeEntries.length - Number(limit);
-    formattedLines.push(`... and ${remaining} more of ${activeEntries.length} memories (use recall tool to fetch all)`);
-  }
-
-  return formattedLines.join("\n");
-}
-
-export function buildMemoryContext(globalFacts, projectFacts, projectKey, injectLimit, now = Date.now()) {
-  const parts = [MEMORY_INSTRUCTION];
-  const global = partitionMemoryEntries(globalFacts, now);
-  const project = partitionMemoryEntries(projectFacts, now);
-  const directiveParts = [];
-  const factParts = [];
-
-  const globalDirectives = formatInjectedFacts(global.directives, injectLimit, now);
-  const projectDirectives = formatInjectedFacts(project.directives, injectLimit, now);
-  if (globalDirectives) directiveParts.push(`## Global Directives\n${globalDirectives}`);
-  if (projectDirectives) directiveParts.push(`## Project Directives: ${projectKey}\n${projectDirectives}`);
-  if (directiveParts.length) {
-    parts.push(`<PERSONAL_AGENT_OVERLAY>\n${directiveParts.join("\n\n")}\n</PERSONAL_AGENT_OVERLAY>`);
-  }
-
-  const globalContext = formatInjectedFacts(global.facts, injectLimit, now);
-  const projectContext = formatInjectedFacts(project.facts, injectLimit, now);
-  if (globalContext) factParts.push(`## Global\n${globalContext}`);
-  if (projectContext) factParts.push(`## Project: ${projectKey}\n${projectContext}`);
-  if (factParts.length) parts.push(`<MEMORY_FACTS>\n${factParts.join("\n\n")}\n</MEMORY_FACTS>`);
-  return `<MEMORY>\n${parts.join("\n\n")}\n</MEMORY>`;
-}
-
-export function buildSystemMemoryOverlay(globalFacts, projectFacts, projectKey, now = Date.now()) {
-  const global = partitionMemoryEntries(globalFacts, now).directives;
-  const project = partitionMemoryEntries(projectFacts, now).directives;
-  const parts = [OPENCODE_SYSTEM_MEMORY_POLICY];
-  const globalText = formatInjectedFacts(global, null, now);
-  const projectText = formatInjectedFacts(project, null, now);
-  if (globalText) parts.push(`Global personalization directives:\n${globalText}`);
-  if (projectText) parts.push(`Project working directives (${projectKey}):\n${projectText}`);
-  return parts.join("\n\n");
-}
-
-export function injectMemoryOverlayIntoSystem(output, globalFacts, projectFacts, projectKey, now = Date.now()) {
-  if (!Array.isArray(output?.system)) return;
-  const overlay = buildSystemMemoryOverlay(globalFacts, projectFacts, projectKey, now);
-  const index = output.system.findIndex((item) => String(item).includes("[PERSISTENT PERSONAL MEMORY OVERLAY]"));
-  if (index >= 0) output.system.splice(index, 1, overlay);
-  else output.system.push(overlay);
-}
+import { OPENCODE_SYSTEM_MEMORY_POLICY, injectMemoryPolicyIntoSystem, partitionMemoryEntries, formatInjectedFacts, buildMemoryContext, buildSystemMemoryOverlay, injectMemoryOverlayIntoSystem } from "../mcp-server/context/opencode_context.js";
+export { OPENCODE_SYSTEM_MEMORY_POLICY, injectMemoryPolicyIntoSystem, partitionMemoryEntries, formatInjectedFacts, buildMemoryContext, buildSystemMemoryOverlay, injectMemoryOverlayIntoSystem };
 
 const MCP_SERVERS = [
   { id: "context7", desc: "Документация библиотек и фреймворков (Context7)" },
@@ -253,7 +117,11 @@ const MCP_SERVERS = [
 
 export const MemoryPlugin = async ({ directory, worktree, client }) => {
   installExitHook();
+  const { startModelControlLoop } = await import('../mcp-server/ml/model_manager.js');
+  startModelControlLoop();
   startSnapshotScheduler();
+  const { autoStartWeb } = await import('../mcp-server/dashboard/runtime.js');
+  void autoStartWeb().catch(error => console.error(`Memory panel: ${error.message}`));
   await ensureDir();
   let activeProjectKey = await scopeKey("project", worktree, directory);
   let identityResolveAt = 0;
@@ -675,6 +543,20 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
           return `[Active Model: ${activeConfig.embeddingModel} | Fusion: ${activeConfig.fusionAlgorithm.toUpperCase()} | ${queries.length} queries]\n\n${formatted}`;
         },
       },
+      "manage_knowledge_removal": {description:KNOWLEDGE_REMOVAL_DESCRIPTION,args:KNOWLEDGE_REMOVAL_FIELDS,async execute(input){return (await knowledgeRemovalTool(input)).content[0].text;}},
+      "manage_knowledge_content": {
+        description: KNOWLEDGE_CONTENT_DESCRIPTION, args: KNOWLEDGE_CONTENT_FIELDS,
+        async execute(input) { return (await knowledgeContentTool(input)).content[0].text; },
+      },
+      "inspect_knowledge": {
+        description: KNOWLEDGE_INSPECT_DESCRIPTION,
+        args: KNOWLEDGE_INSPECT_FIELDS,
+        async execute(input) { return (await inspectKnowledgeTool(input)).content[0].text; },
+      },
+      "manage_knowledge_links": {
+        description: KNOWLEDGE_LINKS_DESCRIPTION, args: KNOWLEDGE_LINKS_FIELDS,
+        async execute(input) { return (await knowledgeLinksTool(input)).content[0].text; },
+      },
       "manage_knowledge_base": {
         description:
           "Manage the project-isolated RAG knowledge base: inspect stats, list documents, read full raw document, unlink/delete documents, or export/import complete snapshots.",
@@ -771,7 +653,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
               .prepare(`SELECT d.id FROM documents d WHERE (d.id = ? OR d.path = ? OR d.title = ?) AND ${visibleDocWhere}`)
               .get(docId, docId, docId, ...scopeKeys);
             if (!visible) throw new Error(`Document not found in the selected RAG scope for docId: ${docId}`);
-            const scopeRemoval = await removeDocumentScopes(db, visible.id, scopeKeys, { deferFinalRemoval: true });
+            const scopeRemoval = await removeDocumentScopes(db, visible.id, scopeKeys);
             if (scopeRemoval.remainingScopes > 0) {
               return JSON.stringify({
                 deleted: false,
@@ -782,7 +664,7 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
               }, null, 2);
             }
             const { deleteDocument } = await import("../mcp-server/ingest/pipeline.js");
-            const result = await deleteDocument(visible.id, db);
+            const result = scopeRemoval;
             return JSON.stringify(result, null, 2);
           }
 
@@ -833,181 +715,35 @@ export const MemoryPlugin = async ({ directory, worktree, client }) => {
         },
       },
       "link_project_memory": {
-        description: "Link the current directory to a Git-based project identity, register aliases, and optionally migrate legacy/path stores.",
-        args: {
-          directory: { type: "string", description: "Directory path to link (default: current directory)" },
-          remote: { type: "string", description: "Optional explicit remote URL to use as primary identity key" },
-        },
-        async execute({ directory, remote }, { worktree, directory: contextDir }) {
-          const { getDatabase } = await import("../mcp-server/db/database.js");
-          const { resolveProjectIdentity, upsertIdentity, registerAlias, normalizeRemoteUrl } = await import("../mcp-server/identity.js");
-          const db = await getDatabase();
-
-          const dir = directory || contextDir || process.cwd();
-          const identity = await resolveProjectIdentity(dir);
-          if (!identity && !remote) {
-            throw new Error("No Git repository detected and no remote URL specified.");
-          }
-
-          let key = identity ? identity.key : `git:${normalizeRemoteUrl(remote)}`;
-          let name = identity ? identity.name : basename(dir) || "unbound";
-          let primaryRemote = remote ? normalizeRemoteUrl(remote) : (identity ? identity.primaryRemote : null);
-
-          await upsertIdentity(db, { key, name, primaryRemote });
-
-          const aliases = [];
-          if (primaryRemote) {
-            aliases.push({ alias: `remote:${primaryRemote}`, kind: "remote" });
-          }
-          aliases.push({ alias: `path:${canonicalPath(dir)}`, kind: "path" });
-          aliases.push({ alias: `basename:${name}`, kind: "basename" });
-
-          for (const a of aliases) {
-            await registerAlias(db, { alias: a.alias, identityKey: key, kind: a.kind });
-          }
-
-          let migrated = false;
-          const legacyPathKey = canonicalPath(dir);
-          const legacyEntries = await readMemory(legacyPathKey);
-          if (legacyEntries && legacyEntries.length > 0) {
-            const gitEntries = await readMemory(key);
-            const seen = new Set(gitEntries.map((e) => factBody(e).toLowerCase().trim()));
-            let mergedCount = 0;
-            for (const entry of legacyEntries) {
-              const body = factBody(entry).toLowerCase().trim();
-              if (!seen.has(body)) {
-                seen.add(body);
-                gitEntries.push(entry);
-                mergedCount++;
-              }
-            }
-            if (mergedCount > 0) {
-              await writeMemory(key, gitEntries);
-              migrated = true;
-            }
-            try {
-              const legacyFp = storeFilePath(legacyPathKey);
-              const { existsSync } = await import("node:fs");
-              if (existsSync(legacyFp)) {
-                const { unlink } = await import("fs/promises");
-                await unlink(legacyFp);
-              }
-            } catch (e) {}
-          }
-          const { moveKnowledgeScope } = await import("../mcp-server/graph/knowledge_linker.js");
-          const migratedKnowledge = await moveKnowledgeScope(db, legacyPathKey, key);
-          if (migratedKnowledge.movedLinks > 0 || migratedKnowledge.movedDocuments > 0) migrated = true;
-
-          const res = {
-            status: "success",
-            key,
-            name,
-            primaryRemote,
-            aliases: aliases.map((a) => a.alias),
-            migrated
-          };
-          await notify(client, "Project memory linked successfully");
-          return JSON.stringify(res, null, 2);
+        description: "link project memory through shared Git identity administration with conflict checks and a verified local backup.",
+        args: { directory: { type:'string', description:'Workspace directory' }, remote: { type:'string', description:'Repository remote' },  },
+        async execute(input, context) {
+          const { executeProjectOperation } = await import('../mcp-server/services/project_service.js');
+          return JSON.stringify(await executeProjectOperation('link', { ...input, directory: input.directory || context.directory || context.worktree || process.cwd() }), null, 2);
         },
       },
       "unlink_project_memory": {
-        description: "Remove the path alias link for the specified project directory.",
-        args: {
-          directory: { type: "string", description: "Directory path to unlink (default: current directory)" },
-          purge: { type: "boolean", description: "If true, completely purge the project identity from the SQLite store" },
-        },
-        async execute({ directory, purge }, { worktree, directory: contextDir }) {
-          const { getDatabase } = await import("../mcp-server/db/database.js");
-          const { unregisterAlias, removeIdentity, resolveProjectIdentity } = await import("../mcp-server/identity.js");
-          const db = await getDatabase();
-
-          const dir = directory || contextDir || process.cwd();
-          const alias = `path:${canonicalPath(dir)}`;
-          await unregisterAlias(db, alias);
-
-          let key = null;
-          if (purge) {
-            const identity = await resolveProjectIdentity(dir);
-            if (identity) {
-              key = identity.key;
-              await removeIdentity(db, key);
-            }
-          }
-
-          const res = {
-            status: "success",
-            alias,
-            purgedIdentityKey: key
-          };
-          await notify(client, "Project memory unlinked");
-          return JSON.stringify(res, null, 2);
+        description: "unlink project memory through shared Git identity administration with conflict checks and a verified local backup.",
+        args: { directory: { type:'string', description:'Workspace directory' }, remote: { type:'string', description:'Repository remote' }, purge: { type:'boolean', description:'Explicitly remove registry identity/aliases; memory remains' } },
+        async execute(input, context) {
+          const { executeProjectOperation } = await import('../mcp-server/services/project_service.js');
+          return JSON.stringify(await executeProjectOperation('unlink', { ...input, directory: input.directory || context.directory || context.worktree || process.cwd() }), null, 2);
         },
       },
       "relink_project_memory": {
-        description: "Move or merge project memories from the current identity to a new target identity.",
-        args: {
-          directory: { type: "string", description: "Directory path to relink (default: current directory)" },
-          remote: { type: "string", description: "New target remote URL / identity key to move memories to" },
+        description: "relink project memory through shared Git identity administration with conflict checks and a verified local backup.",
+        args: { directory: { type:'string', description:'Workspace directory' }, remote: { type:'string', description:'Repository remote' },  },
+        async execute(input, context) {
+          const { executeProjectOperation } = await import('../mcp-server/services/project_service.js');
+          return JSON.stringify(await executeProjectOperation('relink', { ...input, directory: input.directory || context.directory || context.worktree || process.cwd() }), null, 2);
         },
-        async execute({ directory, remote }, { worktree, directory: contextDir }) {
-          const { getDatabase } = await import("../mcp-server/db/database.js");
-          const { resolveProjectIdentity, upsertIdentity, removeIdentity, normalizeRemoteUrl } = await import("../mcp-server/identity.js");
-          const db = await getDatabase();
-
-          const dir = directory || contextDir || process.cwd();
-          const sourceIdentity = await resolveProjectIdentity(dir);
-          if (!sourceIdentity) {
-            throw new Error("Source project identity not detected.");
-          }
-
-          const targetKey = `git:${normalizeRemoteUrl(remote)}`;
-          const sourceKey = sourceIdentity.key;
-
-          if (sourceKey === targetKey) {
-            return "Source and target identities are already identical.";
-          }
-
-          const sourceFacts = await readMemory(sourceKey);
-          const targetFacts = await readMemory(targetKey);
-          const seen = new Set(targetFacts.map((e) => factBody(e).toLowerCase().trim()));
-
-          let mergedCount = 0;
-          for (const f of sourceFacts) {
-            const body = factBody(f).toLowerCase().trim();
-            if (!seen.has(body)) {
-              seen.add(body);
-              targetFacts.push(f);
-              mergedCount++;
-            }
-          }
-
-          await writeMemory(targetKey, targetFacts);
-
-          await upsertIdentity(db, { key: targetKey, name: sourceIdentity.name, primaryRemote: normalizeRemoteUrl(remote) });
-          await db.prepare("UPDATE project_aliases SET identity_key = ? WHERE identity_key = ?;").run(targetKey, sourceKey);
-          const { moveKnowledgeScope } = await import("../mcp-server/graph/knowledge_linker.js");
-          const movedKnowledge = await moveKnowledgeScope(db, sourceKey, targetKey);
-          await removeIdentity(db, sourceKey);
-
-          try {
-            const sourceFp = storeFilePath(sourceKey);
-            const { existsSync } = await import("node:fs");
-            if (existsSync(sourceFp)) {
-              const { unlink } = await import("fs/promises");
-              await unlink(sourceFp);
-            }
-          } catch (e) {}
-
-          const res = {
-            status: "success",
-            sourceKey,
-            targetKey,
-            mergedFacts: mergedCount,
-            movedKnowledgeLinks: movedKnowledge.movedLinks,
-            movedRagDocuments: movedKnowledge.movedDocuments
-          };
-          await notify(client, "Project memory relinked");
-          return JSON.stringify(res, null, 2);
+      },
+      "manage_project_memory": {
+        description: 'List, inspect, preview and confirm scoped project administration.',
+        args: { action:{type:'string'}, operation:{type:'string'}, directory:{type:'string'}, sourceKey:{type:'string'}, targetKey:{type:'string'}, remote:{type:'string'}, previewToken:{type:'string'}, confirm:{type:'boolean'} },
+        async execute(input) {
+          const { projectRequest } = await import('../mcp-server/services/project_service.js');
+          return JSON.stringify(await projectRequest(input), null, 2);
         },
       },
     },

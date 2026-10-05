@@ -205,7 +205,14 @@ export async function fetchUrlContent(url) {
   if (!res.ok) {
     throw new Error(`Failed to fetch URL '${url}': HTTP ${res.status} ${res.statusText}`);
   }
-  const raw = await res.text();
+  const maxResponseBytes = 32 * 1024 * 1024;
+  let raw;
+  if(res.body?.getReader){
+    const reader=res.body.getReader(),parts=[];let bytes=0;
+    try{while(true){const item=await reader.read();if(item.done)break;bytes+=item.value.length;if(bytes>maxResponseBytes)throw new Error('URL response exceeds the 32 MiB limit');parts.push(Buffer.from(item.value));}raw=Buffer.concat(parts).toString('utf8');}
+    catch(error){await reader.cancel().catch(()=>{});throw error;}
+    finally{reader.releaseLock();}
+  }else{raw=await res.text();if(Buffer.byteLength(raw)>maxResponseBytes)throw new Error('URL response exceeds the 32 MiB limit');}
   const contentType = (res.headers.get("content-type") || "").toLowerCase();
   const looksLikeHtml = /<html|<body|<div|<article|<main|<!doctype/i.test(raw.slice(0, 4096));
   let markdown;

@@ -13,6 +13,7 @@
     preference = value;
     root.dataset.theme = value === 'system' ? (system.matches ? 'dark' : 'light') : value;
     root.dataset.themePreference = value;
+    document.dispatchEvent(new Event('memory-theme-change'));
     if (persist) try {
       // Host-scoped so a new loopback port does not reset the selected theme.
       document.cookie = `memory_panel_theme=${value}; Path=/; Max-Age=31536000; SameSite=Strict`;

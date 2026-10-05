@@ -268,7 +268,7 @@ export async function runAuditUnitTests() {
 
   // End-to-end: a real query must actually retrieve the chunk by vector.
   const probeVec = new Float32Array(16).fill(0.02);
-  const vecHits = await vectorSearch(reindexDb, probeVec, 5, 0.1);
+  const vecHits = await vectorSearch(reindexDb, probeVec, 5, 0.1, null, 'Fake/model');
   assert.ok(vecHits.length > 0, "vectorSearch returns hits for a matching vector (regression)");
   console.log("   [PASS] vector BLOB round-trip + vectorSearch OK");
 

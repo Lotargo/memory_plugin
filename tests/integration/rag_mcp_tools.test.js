@@ -268,7 +268,7 @@ export async function runRagMcpToolsTests() {
       })
     );
     // Extract id from the recall output using the [id:XXXX] badge pattern
-    const idMatch = recRes.match(/id:([a-z0-9]+)/i);
+    const idMatch = recRes.match(/\[id:([a-z0-9_-]+)\]/i);
     assert.ok(idMatch, "recall output contains fact id");
     const factId = idMatch[1];
 

@@ -367,8 +367,8 @@ let service;
 export const getCloudSnapshots = () => service ||= new CloudSnapshots();
 let timer;
 let schedulerRunning = false;
-export function startSnapshotScheduler() {
-  if (schedulerRunning || process.env.MEMORY_DISABLE_BACKGROUND_SYNC === "1") return;
+export function startSnapshotScheduler({ panel = false } = {}) {
+  if (schedulerRunning || process.env.MEMORY_DISABLE_BACKGROUND_SYNC === "1" && !panel) return;
   schedulerRunning = true;
   const run = async () => {
     try { await getCloudSnapshots().recover(); await getCloudSnapshots().tick(); }

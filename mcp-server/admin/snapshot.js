@@ -7,6 +7,10 @@ import { ensureExportsDir } from "../ingest/exporter.js";
 import { realResolve, isWithin } from "../security/path_guard.js";
 import { toVectorBytes } from "../retrieval/retriever.js";
 import { safeGunzip } from "../storage/blob_store.js";
+import { MEMORY_DIR } from '../memory.js';
+import { withSnapshotLock } from '../storage/snapshot_lock.js';
+import { hasKnowledgeSchema, createKnowledgeSchema, restoreKnowledgeRevisions, rebuildLinkProjections } from '../storage/knowledge_schema.js';
+import { randomUUID } from 'node:crypto';
 
 const ALLOWED_SNAPSHOT_DIRS = new Set();
 
@@ -67,6 +71,9 @@ export function listAvailableSnapshots() {
 }
 
 export async function exportSnapshot({ customDb = null, customBlobDir = BLOBS_DIR, outputPath = null } = {}) {
+  return withSnapshotLock(MEMORY_DIR, () => exportSnapshotLocked({ customDb, customBlobDir, outputPath }));
+}
+async function exportSnapshotLocked({ customDb = null, customBlobDir = BLOBS_DIR, outputPath = null } = {}) {
   const db = customDb || await getDatabase();
 
   const documents = await db.prepare("SELECT * FROM documents").all();
@@ -101,7 +108,7 @@ export async function exportSnapshot({ customDb = null, customBlobDir = BLOBS_DI
   }
 
   const snapshot = {
-    version: 3,
+    version: hasKnowledgeSchema(db) ? 4 : 3,
     created_at: new Date().toISOString(),
     documents,
     sections,
@@ -112,6 +119,10 @@ export async function exportSnapshot({ customDb = null, customBlobDir = BLOBS_DI
     document_scopes: documentScopes,
     blobs,
   };
+  if (snapshot.version === 4) {
+    snapshot.knowledge_scope_revisions = db.localDb.prepare('SELECT * FROM knowledge_scope_revisions').all();
+    // RAG-only imports never replay Notebook journal operations.
+  }
 
   const jsonStr = JSON.stringify(snapshot, null, 2);
   const targetPath = outputPath ? validateSnapshotPath(outputPath, true) : join(ensureExportsDir(), `rag_snapshot_${Date.now()}.json.gz`);
@@ -127,6 +138,9 @@ export async function exportSnapshot({ customDb = null, customBlobDir = BLOBS_DI
 }
 
 export async function importSnapshot({ customDb = null, customBlobDir = BLOBS_DIR, snapshotPathOrData } = {}) {
+  return withSnapshotLock(MEMORY_DIR, () => importSnapshotLocked({ customDb, customBlobDir, snapshotPathOrData }));
+}
+async function importSnapshotLocked({ customDb = null, customBlobDir = BLOBS_DIR, snapshotPathOrData } = {}) {
   const db = customDb || await getDatabase();
   let snapshot;
 
@@ -143,8 +157,13 @@ export async function importSnapshot({ customDb = null, customBlobDir = BLOBS_DI
     snapshot = snapshotPathOrData;
   }
 
-  if (!snapshot || !snapshot.version) {
+  if (!snapshot || ![1, 2, 3, 4].includes(snapshot.version)) {
     throw new Error("Invalid snapshot format");
+  }
+  if (snapshot.version === 4) {
+    if (!Array.isArray(snapshot.documents) || !Array.isArray(snapshot.knowledge_links)) throw new Error('Incomplete K2 snapshot');
+    for (const doc of snapshot.documents) if (['revision', 'content_revision', 'index_revision'].some(key => !Number.isSafeInteger(doc[key]) || doc[key] < 1)) throw new Error('Invalid document revision');
+    for (const link of snapshot.knowledge_links) if (!['valid', 'needs_review', 'orphaned'].includes(link.status) || !Number.isSafeInteger(link.revision) || link.revision < 1 || (link.source_revision !== null && (!Number.isSafeInteger(link.source_revision) || link.source_revision < 1)) || (link.fact_id !== null && typeof link.fact_id !== 'string')) throw new Error('Invalid link state');
   }
 
   // 1. Restore Blobs
@@ -239,6 +258,7 @@ export async function importSnapshot({ customDb = null, customBlobDir = BLOBS_DI
 
   await db.exec("BEGIN IMMEDIATE;");
   try {
+    if (snapshot.version === 4) createKnowledgeSchema(db.localDb);
     if (Array.isArray(snapshot.documents)) {
       for (const d of snapshot.documents) {
         await insertDoc.run(
@@ -325,6 +345,15 @@ export async function importSnapshot({ customDb = null, customBlobDir = BLOBS_DI
         );
       }
     }
+    restoreKnowledgeRevisions(db.localDb, snapshot.documents || [], snapshot.knowledge_links || [], snapshot.version === 4);
+    if (hasKnowledgeSchema(db)) {
+      for (const item of snapshot.knowledge_scope_revisions || []) {
+        if (typeof item.scope_key !== 'string' || !Number.isSafeInteger(item.generation) || item.generation < 1) throw new Error('Invalid scope generation');
+        db.localDb.prepare('INSERT INTO knowledge_scope_revisions VALUES (?,?) ON CONFLICT(scope_key) DO UPDATE SET generation=max(generation,excluded.generation)').run(item.scope_key, item.generation);
+      }
+      rebuildLinkProjections(db.localDb);
+      db.localDb.prepare("INSERT INTO sync_state(key,value,updated_at) VALUES ('knowledge_import_epoch',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at").run(randomUUID(), Date.now());
+    }
     await db.exec("COMMIT;");
   } catch (err) {
     await db.exec("ROLLBACK;");
@@ -344,6 +373,9 @@ export async function importSnapshot({ customDb = null, customBlobDir = BLOBS_DI
 }
 
 export async function hardResetDatabase({ customDb = null, customBlobDir = BLOBS_DIR } = {}) {
+  return withSnapshotLock(MEMORY_DIR, () => hardResetLocked({ customDb, customBlobDir }));
+}
+async function hardResetLocked({ customDb = null, customBlobDir = BLOBS_DIR } = {}) {
   const db = customDb || await getDatabase();
 
   let docCount = 0;

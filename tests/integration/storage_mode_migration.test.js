@@ -9,6 +9,8 @@ const root = fs.mkdtempSync(path.join(tmpdir(), "memory-mode-migration-"));
 const memoryDir = path.join(root, "memory");
 process.env.MEMORY_DIR = memoryDir;
 process.env.OPENCODE_CONFIG_DIR = path.join(root, "opencode");
+// Setup's marketplace guard must inspect this fixture, not the user's plugin.
+process.env.CODEX_HOME = path.join(root, 'codex');
 process.env.MEMORY_DISABLE_BACKGROUND_SYNC = "1";
 process.env.MEMORY_DISABLE_PERSONA_SYNC = "1";
 fs.mkdirSync(memoryDir);

@@ -12,4 +12,5 @@ memory/
 .env.*
 dev_docs*
 exports/
+.local-marketplace/
 doc_export_*.json

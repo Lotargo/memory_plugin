@@ -1,0 +1,94 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {execFileSync} from 'node:child_process';
+const root=fs.mkdtempSync(join(tmpdir(),'knowledge-removal-'));
+process.env.MEMORY_DIR=join(root,'memory');process.env.OPENCODE_CONFIG_DIR=join(root,'opencode');
+process.env.MEMORY_DISABLE_PERSONA_SYNC='1';process.env.MEMORY_DISABLE_BACKGROUND_SYNC='1';
+const {createKnowledgeFixture}=await import('../fixtures/knowledge_fixture.js');
+const {closeDatabase,BLOBS_DIR,getDatabase}=await import('../../mcp-server/db/database.js');
+const {migrateKnowledge}=await import('../../mcp-server/services/knowledge_links_service.js');
+const {manageKnowledgeRemoval:remove}=await import('../../mcp-server/services/knowledge_removal_service.js');
+const {ingestDocument}=await import('../../mcp-server/ingest/pipeline.js');
+const {addDocumentScope,removeDocumentScopes}=await import('../../mcp-server/rag_scope.js');
+const {blobExists}=await import('../../mcp-server/storage/blob_store.js');
+const nativeFetch=globalThis.fetch;let calls=0,app;
+globalThis.fetch=async()=>{calls++;throw new Error('Offline tests forbid network');};
+try {
+  const f=await createKnowledgeFixture(),sql=f.db.localDb;
+  await assert.rejects(remove({action:'preview',operation:'unlink-scope',scopeKey:f.a,docId:f.shared}),e=>e.code==='MIGRATION_REQUIRED');
+  await migrateKnowledge();
+  const request=(operation,docId,scopeKey=f.a)=>({operation,docId,scopeKey});
+  const preview=input=>remove({action:'preview',...input});
+  const apply=(input,p,extra={})=>remove({action:'apply',...input,previewToken:p.previewToken,confirm:true,...extra});
+  const shared=request('unlink-scope',f.shared),p=await preview(shared);
+  assert.equal(p.remainingScopeCount,1);assert.equal(p.purge,false);assert.equal(p.linksRemoved.length,2);assert.equal(p.privateLinksRemoved,0);
+  assert.ok(!JSON.stringify(p).includes('link-b'));assert.ok(!JSON.stringify(p).includes(f.b));
+  await assert.rejects(remove({action:'apply',...shared,previewToken:p.previewToken}),e=>e.code==='CONFIRMATION');
+  sql.prepare('UPDATE documents SET title=? WHERE id=?').run('Changed before delete',f.shared);
+  await assert.rejects(apply(shared,p),e=>e.code==='CONFLICT');
+  const fresh=await preview(shared),removed=await apply(shared,fresh);assert.equal(removed.unlinked,true);
+  assert.equal(sql.prepare('SELECT count(*) n FROM knowledge_links WHERE doc_id=?').get(f.shared).n,1);
+  assert.ok(sql.prepare('SELECT 1 FROM document_scopes WHERE doc_id=? AND scope_key=?').get(f.shared,f.b));
+  assert.equal(sql.prepare('SELECT 1 FROM document_scopes WHERE doc_id=? AND scope_key=?').get(f.shared,f.a),undefined);
+  const {bm25Search}=await import('../../mcp-server/retrieval/retriever.js');
+  assert.ok((await bm25Search(f.db,'Private links',20,[f.b])).length);
+  assert.equal((await bm25Search(f.db,'Private links',20,[f.a])).length,0);
+  // Global visibility preserves A's link after removing A's own membership.
+  await addDocumentScope(f.db,f.shared,f.a);await addDocumentScope(f.db,f.shared,'global');
+  sql.prepare("INSERT INTO knowledge_links(id,fact_key,fact_id,fact_text,doc_id,relation_type,created_at) VALUES('global-visible',?,'same','Same private fact text',?,'SUPPORTS',?)").run(f.a,f.shared,Date.now());
+  const g=await preview(shared);assert.equal(g.totalLinksRemoved,0);await apply(shared,g);
+  assert.ok(sql.prepare("SELECT 1 FROM knowledge_links WHERE id='global-visible'").get());
+  const gRemoval=request('unlink-scope',f.shared,'global'),gp=await preview(gRemoval);assert.equal(gp.privateLinksRemoved,1);await apply(gRemoval,gp);
+  assert.equal(sql.prepare("SELECT 1 FROM knowledge_links WHERE id='global-visible'").get(),undefined);
+  // Shared full removal needs separate all-scope confirmation.
+  await addDocumentScope(f.db,f.shared,f.a);
+  const full=request('delete',f.shared),fullp=await preview(full);
+  await assert.rejects(apply(full,fullp),e=>e.code==='CONFIRMATION');
+  // Same blob survives until its last document; similar IDs/line endpoints remain.
+  const text='# Identical\n\nDeduplicatedterm';
+  const one=await ingestDocument({path:'one.md',content:text,projectScope:f.a,generateEmbeddings:false});
+  const two=await ingestDocument({path:'two.md',content:text,projectScope:f.b,generateEmbeddings:false});
+  assert.equal(one.blobHash,two.blobHash);
+  sql.prepare('INSERT INTO graph_edges(source_id,target_id,relation_type) VALUES(?,?,?)').run(`${one.docId}-similar`,f.privateB,'MANUAL');
+  sql.prepare('INSERT INTO graph_edges(source_id,target_id,relation_type) VALUES(?,?,?)').run(`${one.docId}:L3-3`,f.note,'MANUAL');
+  const own=request('delete',one.docId),op=await preview(own),oldPrepare=f.db.prepare.bind(f.db);
+  f.db.prepare=query=>/DELETE FROM documents/.test(query)?{run:async()=>{throw new Error('Injected SQL failure');}}:oldPrepare(query);
+  await assert.rejects(apply(own,op),/Injected SQL/);f.db.prepare=oldPrepare;
+  assert.ok(sql.prepare('SELECT id FROM documents WHERE id=?').get(one.docId));
+  assert.ok((await bm25Search(f.db,'Deduplicatedterm',20,[f.a])).length);
+  await apply(own,op);assert.equal(await blobExists(one.blobHash),true);
+  assert.ok(sql.prepare('SELECT 1 FROM graph_edges WHERE source_id=?').get(`${one.docId}-similar`));
+  assert.equal(sql.prepare('SELECT 1 FROM graph_edges WHERE source_id=?').get(`${one.docId}:L3-3`),undefined);
+  assert.equal((await bm25Search(f.db,'Deduplicatedterm',20,[f.a])).length,0);
+  const last=request('unlink-scope',two.docId,f.b),lastp=await preview(last);assert.equal(lastp.purge,true);
+  const pending=await remove({action:'apply',...last,previewToken:lastp.previewToken,confirm:true},{removeBlob:async()=>{throw new Error('Busy blob');}});
+  assert.equal(pending.status,'saved');assert.equal(pending.cleanupPending,true);assert.equal(sql.prepare('SELECT 1 FROM documents WHERE id=?').get(two.docId),undefined);
+  assert.equal(await blobExists(one.blobHash),true);assert.equal((await remove({action:'cleanup',scopeKey:f.b})).pending,0);assert.equal(await blobExists(one.blobHash),false);
+  // A bounded cleanup pass must report entries it has not attempted yet.
+  for(let i=1;i<=102;i++)sql.prepare('INSERT INTO sync_state(key,value,updated_at) VALUES(?,?,?)').run(`knowledge_blob_cleanup:${i.toString(16).padStart(64,'0')}`,'pending',Date.now());
+  const {retryBlobCleanup}=await import('../../mcp-server/storage/knowledge_removal.js');
+  const bounded=await retryBlobCleanup(f.db,BLOBS_DIR,{removeBlob:async()=>{}});assert.equal(bounded.attempted,100);assert.equal(bounded.pending,2);
+  assert.equal((await retryBlobCleanup(f.db,BLOBS_DIR,{removeBlob:async()=>{}})).pending,0);
+  // Existing adapters perform the same link cleanup and last-scope purge atomically.
+  const legacy=await removeDocumentScopes(f.db,f.shared,[f.a]);assert.equal(legacy.remainingScopes,1);
+  assert.equal(sql.prepare('SELECT 1 FROM knowledge_links WHERE doc_id=? AND fact_key=?').get(f.shared,f.a),undefined);
+  const cli=(...args)=>JSON.parse(execFileSync(process.execPath,['mcp-server/cli_boot.js','knowledge','remove',...args],{env:process.env,encoding:'utf8'}));
+  const cp=cli('preview','--scope-key',f.a,'--operation','delete','--doc-id',f.note);
+  assert.equal(cli('apply','--scope-key',f.a,'--operation','delete','--doc-id',f.note,'--preview-token',cp.previewToken,'--confirm').deleted,true);
+  const {registerRagTools}=await import('../../mcp-server/tools/rag_tools.js'),tools=new Map();registerRagTools({registerTool:(name,def,fn)=>tools.set(name,fn)});
+  const mp=JSON.parse((await tools.get('manage_knowledge_removal')({action:'preview',...request('delete',f.privateB,f.b)})).content[0].text);assert.equal(mp.docId,f.privateB);
+  const {MemoryPlugin}=await import('../../opencode-plugin/main.js'),plugin=await MemoryPlugin({directory:root,worktree:null,client:{}});
+  assert.equal(JSON.parse(await plugin.tool.manage_knowledge_removal.execute({action:'preview',...request('delete',f.privateB,f.b)})).docId,f.privateB);
+  const native=new Map();await (await import('../../opencode-plugin/main.js')).default.setup({location:{directory:root},session:{hook:async()=>{}},tool:{transform:async run=>run({add:t=>native.set(t.name,t)})}});
+  assert.equal(JSON.parse((await native.get('manage_knowledge_removal').execute({action:'preview',...request('delete',f.privateB,f.b)})).content).docId,f.privateB);
+  const {exportSnapshot,importSnapshot}=await import('../../mcp-server/admin/snapshot.js');const exported=await exportSnapshot({customDb:f.db});
+  const custom=await getDatabase(join(root,'roundtrip.sqlite'),'only-local');try{await importSnapshot({customDb:custom,customBlobDir:join(root,'roundtrip-blobs'),snapshotPathOrData:exported.snapshot});assert.equal(custom.localDb.prepare('SELECT 1 FROM documents WHERE id=?').get(f.note),undefined);assert.ok(custom.localDb.prepare('SELECT 1 FROM documents WHERE id=?').get(f.privateB));}finally{custom.close();}
+  assert.equal(calls,0);globalThis.fetch=nativeFetch;
+  const {startDashboard}=await import('../../mcp-server/dashboard/server.js');app=await startDashboard();
+  const headers={Authorization:`Bearer ${new URL(app.url).hash.slice(1)}`,Origin:app.origin,'Content-Type':'application/json'},body=JSON.stringify({action:'preview',...request('delete',f.privateB,f.b)});
+  assert.equal((await fetch(`${app.origin}/api/knowledge-removal`,{method:'POST',headers,body})).status,200);
+  assert.equal((await fetch(`${app.origin}/api/knowledge-removal`,{method:'POST',headers:{...headers,Origin:'https://evil.test'},body})).status,403);
+  console.log('K4 PASS: scoped/shared/stale preview, global link visibility, exact ownership, SQL rollback, FTS, common blob references, durable cleanup retry, CLI/MCP/both OpenCode/HTTP, snapshot and zero engine network.');
+} finally {globalThis.fetch=nativeFetch;if(app)await app.close();closeDatabase();fs.rmSync(root,{recursive:true,force:true,maxRetries:5});}

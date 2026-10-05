@@ -83,7 +83,7 @@ export async function runSmokeTests() {
 
     const recalled = await recallFacts({ scope: "project" }, ctx);
     assert.ok(recalled.includes("Smoke test fact"), "recall returns the fact");
-    const factId = (recalled.match(/\[id:([a-z0-9]+)\]/) || [])[1];
+    const factId = (recalled.match(/\[id:([a-z0-9_-]+)\]/i) || [])[1];
     assert.ok(factId, "recall exposes the generated fact id");
     console.log("   [PASS] Notebook remember/recall OK");
 

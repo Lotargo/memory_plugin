@@ -6,6 +6,7 @@ import {
   isProcessAlive,
 } from "../ml/model_control.js";
 import { getGpuMemoryInfoAsync, getProcessMemoryMB } from "../ml/gpu_monitor.js";
+import { resourceOverview } from '../services/resource_service.js';
 
 // Non-interactive model lifecycle commands for humans and AI agents:
 //   memory-cli models status [--json]
@@ -40,13 +41,13 @@ function getServerSnapshot() {
   return null;
 }
 
-function printStatus(state, config, gpu) {
+function printStatus(state, config, resources) {
   const devLabel = (d) => (d && d !== "cpu" ? `${d.toUpperCase()} (GPU/VRAM)` : "CPU (RAM)");
   console.log("\n  [MODELS] Runtime status:");
   console.log(`    Configured device:  ${devLabel(state?.resolvedDevice || "cpu")} (setting: ${config.executionDevice || "cpu"})`);
   console.log(`    Auto-unload timer:  ${(config.modelUnloadTimeoutMinutes || 0) > 0 ? `${config.modelUnloadTimeoutMinutes} min` : "OFF"}`);
   if (!state) {
-    console.log("    MCP server:         not running (no live models loaded anywhere)");
+    console.log("    MCP server:         no live registered state; other processes are unknown");
     console.log("    Note: models load lazily inside the MCP server on first use.");
   } else {
     const emb = state.embedding || {};
@@ -58,27 +59,36 @@ function printStatus(state, config, gpu) {
       console.log(`    Last model use:     ${state.lastActivity} (idle ${state.idleForSeconds}s)`);
     }
   }
-  if (gpu) {
-    console.log(`    GPU VRAM:           ${gpu.usedMB} / ${gpu.totalMB} MB used`);
-  } else {
-    console.log("    GPU VRAM:           unavailable (no nvidia-smi)");
+  const size = bytes => bytes === null ? 'unavailable' : `${(bytes / 1024 ** 3).toFixed(2)} GiB`;
+  console.log(`    Operating system:   ${resources.platform.name} / ${resources.platform.arch}${resources.platform.environment === 'wsl' ? ' (WSL)' : ''}`);
+  console.log(`    System RAM:         ${size(resources.ram.usedBytes)} / ${size(resources.ram.totalBytes)} (${resources.ram.usedBasis})`);
+  console.log(`    Available RAM:      ${size(resources.ram.availableBytes)}; free: ${size(resources.ram.freeBytes)}`);
+  for (const gpu of resources.gpu.devices) {
+    console.log(`    GPU:                ${gpu.name} (${gpu.memoryKind}; ${gpu.source})`);
+    console.log(gpu.memoryKind === 'unified' ? '    GPU memory:         shared CPU/GPU RAM; separate VRAM does not apply; GPU allocation unavailable' : `    Dedicated memory:   ${size(gpu.usedBytes)} / ${size(gpu.totalBytes)}`);
+    if (gpu.sharedUsedBytes !== null) console.log(`    Shared memory:      ${size(gpu.sharedUsedBytes)}`);
   }
+  if (!resources.gpu.devices.length) console.log(`    GPU memory:         ${resources.gpu.status === 'empty' ? 'no GPU detected' : 'unavailable'}`);
+  for (const owner of resources.processes) console.log(`    Process RAM:        PID ${owner.pid} (${owner.role}): ${size(owner.rssBytes)}${owner.status === 'stale' ? ' (stale)' : ''}`);
   console.log("");
 }
 
 async function cmdStatus(args) {
   const config = getConfig();
   const state = getServerSnapshot();
-  const gpu = await getGpuMemoryInfoAsync();
+  const resources = await resourceOverview({observerRole: 'cli'});
+  const first = resources.gpu.devices.find(gpu => gpu.source === 'nvidia-smi' && gpu.usedBytes !== null && gpu.totalBytes !== null);
+  const gpu = first ? {usedMB: first.usedBytes / 1024 ** 2, totalMB: first.totalBytes / 1024 ** 2} : null;
   if (args.includes("--json")) {
-    console.log(JSON.stringify({ config: { executionDevice: config.executionDevice, modelUnloadTimeoutMinutes: config.modelUnloadTimeoutMinutes || 0 }, server: state, gpuMemory: gpu }, null, 2));
+    console.log(JSON.stringify({ config: { executionDevice: config.executionDevice, modelUnloadTimeoutMinutes: config.modelUnloadTimeoutMinutes || 0 }, server: state, gpuMemory: gpu, resources }, null, 2));
     return;
   }
-  printStatus(state, config, gpu);
+  printStatus(state, config, resources);
 }
 
 async function dispatchToServer(cmd, payload, timeoutMs) {
-  const { id } = sendModelCommand(cmd, payload);
+  const state = getServerSnapshot();
+  const { id } = sendModelCommand(cmd, payload, { targetPid: state?.controlProtocol === 2 ? state.serverPid : undefined, expiresAt: Date.now() + timeoutMs });
   const ack = await waitForCommandAck(id, timeoutMs);
   if (!ack) return null;
   return ack.result;
@@ -92,7 +102,7 @@ async function cmdUnload(args) {
 
   if (!stateBefore) {
     const gpuAfter = await getGpuMemoryInfoAsync();
-    console.log("\n  [MODELS] No running MCP server detected — nothing is holding models in memory.");
+    console.log("\n  [MODELS] No live registered MCP state. Loaded models in other processes are unknown.");
     if (gpuAfter) console.log(`  [OK] VRAM currently used: ${gpuAfter.usedMB} / ${gpuAfter.totalMB} MB`);
     console.log("");
     return;
@@ -247,7 +257,7 @@ export async function handleModelCommands(args) {
       console.log(`memory-cli models — ML model lifecycle control
 
 Usage:
-  memory-cli models status [--json]          Show where models live (CPU/RAM vs GPU/VRAM), VRAM usage, timer state
+  memory-cli models status [--json]          Show models, OS, system/process RAM and per-GPU memory
   memory-cli models unload                   Unload embedding + reranker from the running MCP server and report freed RAM/VRAM
   memory-cli models load [--device cpu|gpu]  Preload models into the running server (optionally switching device first)
   memory-cli models device cpu|gpu           Set execution device; loaded models reload on the new device

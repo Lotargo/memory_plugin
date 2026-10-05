@@ -117,6 +117,7 @@ export function parseMeta(content) {
 
 export async function readMemory(key) {
   if (!key) return [];
+  if (existsSync(join(MEMORY_DIR, '.knowledge-journal.json'))) return withSnapshotLock(MEMORY_DIR, () => readMemory(key));
   const { getConfig, assertLocalMemoryReady } = await import("./config/config_manager.js");
   const config = getConfig();
   assertLocalMemoryReady(config);
@@ -153,7 +154,10 @@ export async function writeMemoryFile(key, content) {
   if (!key) return;
   const { assertLocalMemoryReady } = await import("./config/config_manager.js");
   assertLocalMemoryReady();
-  await withSnapshotLock(MEMORY_DIR, () => atomicWrite(memoryPath(key), content));
+  await withSnapshotLock(MEMORY_DIR, async () => {
+    const { persistNotebookKnowledge } = await import('./services/knowledge_links_service.js');
+    if (!(await persistNotebookKnowledge(key, content))) atomicWrite(memoryPath(key), content);
+  });
 }
 
 export async function writeMemory(key, entries, { expectedVersion = readVersions.get(entries), localOnly = false } = {}) {
@@ -173,7 +177,10 @@ export async function writeMemory(key, entries, { expectedVersion = readVersions
       error.code = "CONFLICT";
       throw error;
     }
-    await atomicWrite(memoryPath(key), content);
+    const { persistNotebookKnowledge } = await import('./services/knowledge_links_service.js');
+    const saved = await persistNotebookKnowledge(key, content);
+    if (!saved) atomicWrite(memoryPath(key), content);
+    else entries.splice(0, entries.length, ...saved.entries);
     readVersions.set(entries, notebookVersion(entries));
   });
 
@@ -212,20 +219,12 @@ export async function listProjectStores() {
 }
 
 export async function migrateLegacyStore(legacyKey, targetDir) {
-  const legacyFp = join(MEMORY_DIR, `${legacyKey.replace(/[^a-zA-Z0-9_-]/g, "_")}.md`);
-  if (!existsSync(legacyFp)) return { ok: false, reason: "not_found", key: legacyKey };
-  const content = await readFile(legacyFp, "utf-8");
-  if (parseMeta(content).key) return { ok: false, reason: "already_bound", key: legacyKey };
-
-  const targetKey = await projectKey(targetDir, null);
-  if (!targetKey) return { ok: false, reason: "not_a_git_repo", key: legacyKey };
-
-  const facts = content.split("\n").filter((l) => l.startsWith("- ["));
-  await writeMemory(targetKey, facts);
+  const { executeProjectOperation } = await import('./services/project_service.js');
   try {
-    await unlink(legacyFp);
-  } catch (e) {}
-  return { ok: true, key: targetKey, file: memoryPath(targetKey), facts: facts.length };
+    const result = await executeProjectOperation('migrate', { sourceKey:legacyKey,
+      ...(targetDir?.startsWith('git:') ? {targetKey:targetDir,directory:process.cwd()} : {directory:targetDir}) });
+    return {ok:true,key:result.targetKey,file:storeFilePath(result.targetKey),facts:result.mergedFacts,backup:result.backup};
+  } catch (error) { return {ok:false,reason:error.code || 'migration_failed',message:error.message,key:legacyKey}; }
 }
 
 // Mass-stamp titles onto legacy facts in a store. Returns how many lines were

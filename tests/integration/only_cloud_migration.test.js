@@ -13,6 +13,8 @@ const remoteBlobs = path.join(root, "old-cloud-blobs");
 fs.mkdirSync(memoryDir); fs.mkdirSync(remoteDir);
 process.env.MEMORY_DIR = memoryDir;
 process.env.OPENCODE_CONFIG_DIR = path.join(root, "opencode");
+// Setup's marketplace guard must inspect this fixture, not the user's plugin.
+process.env.CODEX_HOME = path.join(root, 'codex');
 process.env.MEMORY_DISABLE_BACKGROUND_SYNC = "1";
 process.env.MEMORY_DISABLE_PERSONA_SYNC = "1";
 const configPath = path.join(memoryDir, "config.json");

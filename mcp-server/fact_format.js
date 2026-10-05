@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 // Shared fact-line format + metadata parsing for the Notebook Layer 1 store.
 //
 // A fact line looks like:
@@ -104,11 +105,12 @@ export function withMeta(line, patch) {
   return formatFactEntry({ date: p.date, time: p.time, text: p.text, meta });
 }
 
-// Generate a short random id that is unique within the given entries.
+// New identities use UUID entropy and survive text edits and deletion/recreate
+// cycles. Existing short IDs remain valid and are never silently rewritten.
 export function nextFactId(entries) {
   let id;
   do {
-    id = Math.random().toString(36).slice(2, 8);
+    id = `f_${randomUUID().replaceAll('-', '')}`;
   } while (entries.some((e) => factMeta(e).id === id));
   return id;
 }

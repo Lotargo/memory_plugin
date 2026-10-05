@@ -1,21 +1,20 @@
 // Structured Notebook contract shared by local adapters. No HTTP or UI rules.
 import { readFile } from "node:fs/promises";
 import { readMemory, writeMemory, listProjectStores, MEMORY_DIR, GLOBAL_KEY, notebookVersion, memoryFileName, today } from "../memory.js";
-import { parseFactEntry, factTitle, factBody, factMeta, formatFactEntry, isDirectiveFact, isDisabledFact, isExpiredLine, isSuperseded, nextFactId, ttlMs } from "../fact_format.js";
-import { getConfig } from "../config/config_manager.js";
+import { parseFactEntry, factTitle, factBody, factMeta, formatFactEntry, withMeta, isDirectiveFact, isDisabledFact, isExpiredLine, isSuperseded, nextFactId, ttlMs } from "../fact_format.js";
+import { getConfig, assertStorageMode, assertLocalMemoryReady } from "../config/config_manager.js";
 import { getDatabase } from "../db/database.js";
 import { listIdentities } from "../identity.js";
-import { buildPersonaOverlayBlock, syncPersonaPrompts } from "../prompt_manager.js";
+import { syncPersonaPrompts } from "../prompt_manager.js";
 import { withSnapshotLock } from "../storage/snapshot_lock.js";
+import { hasKnowledgeSchema } from '../storage/knowledge_schema.js';
 
 export function serviceError(code, message) { return Object.assign(new Error(message), { code }); }
 
 function requireLocalMode() {
-  const mode = getConfig().mode;
-  const supported = ["only-local", "cloud-snapshots"];
-  if (!supported.includes(mode)) {
-    throw serviceError("UNSUPPORTED", `Panel editing is not yet available in ${mode}. Use the existing CLI; no mode was changed.`);
-  }
+  const config = getConfig();
+  assertStorageMode(config.mode);
+  assertLocalMemoryReady(config);
 }
 
 export async function listNotebookTargets() {
@@ -30,6 +29,11 @@ export async function listNotebookTargets() {
   }
   for (const identity of identities) {
     if (!targets.some(item => item.key === identity.key)) targets.push({ key: identity.key, name: identity.name, aliases: identity.aliases, legacy: false });
+  }
+  // A RAG-only project remains selectable without a local checkout/Notebook.
+  const ragScopes = await (await getDatabase()).prepare("SELECT DISTINCT scope_key FROM document_scopes ORDER BY scope_key").all();
+  for (const { scope_key: key } of ragScopes) {
+    if (!targets.some(item => item.key === key)) targets.push({ key, name: key, aliases: [], legacy: false, notebookAvailable: false });
   }
   // Distinct keys mapping to the same legacy filename must never be writable.
   for (const target of targets) {
@@ -53,27 +57,64 @@ function record(line, index, links) {
   if (!parsed) return { ref: `legacy:${index}`, invalid: true, body: line, reasons: ["invalid"] };
   const meta = factMeta(line);
   return { ref: meta.id ? `id:${meta.id}` : `legacy:${index}`, id: meta.id || null, title: factTitle(line), body: factBody(line),
+    fingerprint: notebookVersion([line]),
     date: parsed.date, time: parsed.time, meta, kind: isDirectiveFact(line) ? "directive" : "fact",
     reasons: [isExpiredLine(line) && "expired", isSuperseded(line) && "superseded", isDisabledFact(line) && "disabled"].filter(Boolean),
-    links: links.filter(link => link.fact_text === factBody(line) || link.fact_text === parsed.text).map(link => ({ id: link.id, docId: link.doc_id, title: link.doc_title, startLine: link.start_line, endLine: link.end_line })) };
+    links: links.filter(link => link.fact_id ? meta.id === link.fact_id : link.fact_text === factBody(line) || link.fact_text === parsed.text).map(link => ({ id: link.id, docId: link.doc_id, title: link.doc_title, startLine: link.start_line, endLine: link.end_line, visible: !!link.visible, status: link.resolvedStatus || 'needs_review', factRef: link.fact_id ? `id:${link.fact_id}` : null })) };
 }
 
 export async function readNotebook({ key }) {
+  return withSnapshotLock(MEMORY_DIR, () => readNotebookLocked({ key }));
+}
+// A collection is a read-only view. Each record retains its exact store/ref;
+// versions and mutations always belong to a concrete Notebook, never this view.
+export async function readNotebookCollection() {
+  return withSnapshotLock(MEMORY_DIR, async () => {
+    const records = [], unavailable = [];
+    for (const target of await listNotebookTargets()) {
+      if (target.unavailable) {
+        unavailable.push({ key: target.key, name: target.name, code: 'UNSUPPORTED' });
+        continue;
+      }
+      try {
+        const notebook = await readNotebookLocked({ key: target.key });
+        records.push(...notebook.records.map(record => ({ ...record,
+          ref: JSON.stringify([target.key, record.ref]), sourceRef: record.ref,
+          sourceKey: target.key, sourceName: target.name })));
+      } catch (error) {
+        unavailable.push({ key: target.key, name: target.name, code: error.code || 'UNAVAILABLE' });
+      }
+    }
+    return { target: { key: '__all__', name: 'Все хранилища' }, readOnly: true,
+      records, unavailable, observedAt: new Date().toISOString() };
+  });
+}
+async function readNotebookLocked({ key }) {
   const target = await requireTarget(key);
-  const entries = await readMemory(key);
-  const links = await (await getDatabase()).prepare("SELECT k.*, d.title AS doc_title FROM knowledge_links k LEFT JOIN documents d ON d.id = k.doc_id WHERE k.fact_key = ?").all(key);
-  return { target, readOnly: false, version: notebookVersion(entries), records: entries.map((line, index) => record(line, index, links)), observedAt: new Date().toISOString() };
+  const entries = target.notebookAvailable === false ? [] : await readMemory(key);
+  const links = await (await getDatabase()).prepare(`SELECT k.*, d.title AS doc_title,
+    EXISTS (SELECT 1 FROM document_scopes ds WHERE ds.doc_id = k.doc_id AND ds.scope_key IN (?, 'global')) AS visible
+    FROM knowledge_links k LEFT JOIN documents d ON d.id = k.doc_id WHERE k.fact_key = ?`).all(key, key);
+  const { resolvedLinkState } = await import('./knowledge_links_service.js');
+  const sql = (await getDatabase()).localDb;
+  const safeLinks = links.map(link => ({ ...link, doc_title: link.visible ? link.doc_title : null,
+    resolvedStatus: hasKnowledgeSchema(sql) ? resolvedLinkState(sql, link).status : 'needs_review' }));
+  const version = hasKnowledgeSchema(sql) ? notebookVersion([JSON.stringify(entries), JSON.stringify(safeLinks.sort((a, b) => a.id.localeCompare(b.id)))]) : notebookVersion(entries);
+  return { target, readOnly: target.notebookAvailable === false, version, records: entries.map((line, index) => record(line, index, safeLinks)), observedAt: new Date().toISOString() };
 }
 
 export async function notebookOverview() {
   const config = getConfig();
   const version = JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8")).version;
-  const base = { version, mode: config.mode, readOnly: false, memoryDir: MEMORY_DIR, observedAt: new Date().toISOString(),
+  const base = { version, mode: config.mode, readOnly: !!config.legacyCloudRestoreRequired, memoryDir: MEMORY_DIR, observedAt: new Date().toISOString(),
     models: "not-observed", cloud: "not-queried", clients: "not-observed" };
   try {
     const targets = await listNotebookTargets();
     return { ...base, targets };
-  } catch (error) { return { ...base, targets: [], unavailable: error.message }; }
+  } catch (error) {
+    return { ...base, readOnly: true, targets: [], code: error.code || "UNAVAILABLE",
+      unavailable: error.code === "MIGRATION_REQUIRED" ? error.message : "Local memory is unavailable. Check storage permissions and retry." };
+  }
 }
 
 function textField(value, label, { empty = false, max = 50000 } = {}) {
@@ -116,18 +157,20 @@ function editedLine(line, input, entries) {
 }
 
 // Optimistic whole-store version protects ID-less legacy rows and previews too.
-// Linked-body updates/deletion are deliberately unavailable in this increment:
-// the existing text-keyed graph needs a transactional migration contract first.
+// Migrated source links are maintained by writeMemory's shared journal.
 export async function mutateNotebook(request) {
   return withSnapshotLock(MEMORY_DIR, () => mutateLocked(request));
 }
 
 async function mutateLocked({ key, expectedVersion, action, ref, fields, confirmDelete = false, confirmProtected = false }) {
   requireLocalMode();
-  await requireTarget(key);
+  const target = await requireTarget(key);
+  if (target.notebookAvailable === false) throw serviceError("UNSUPPORTED", "This scope has knowledge only. Register its Git identity before creating Notebook records.");
   const entries = await readMemory(key);
-  if (typeof expectedVersion !== "string" || expectedVersion !== notebookVersion(entries)) throw serviceError("CONFLICT", "Notebook changed. Reload and review your edit again.");
-  if (!["create", "update", "delete"].includes(action)) throw serviceError("INVALID", "Unknown action.");
+  const fileVersion = notebookVersion(entries), migrated = hasKnowledgeSchema(await getDatabase());
+  const currentVersion = migrated ? (await readNotebook({ key })).version : fileVersion;
+  if (typeof expectedVersion !== "string" || expectedVersion !== currentVersion) throw serviceError("CONFLICT", "Notebook or its links changed. Reload and review your edit again.");
+  if (!["create", "update", "delete", "supersede"].includes(action)) throw serviceError("INVALID", "Unknown action.");
   let index = -1;
   if (action !== "create") {
     if (typeof ref !== "string") throw serviceError("INVALID", "Record reference is required.");
@@ -136,15 +179,24 @@ async function mutateLocked({ key, expectedVersion, action, ref, fields, confirm
     index = matches[0].i;
   }
   const oldLine = entries[index];
-  const nextLine = action === "delete" ? null : editedLine(oldLine, fields, entries);
-  if (action === "create" && entries.some(line => factBody(line).toLowerCase().trim() === factBody(nextLine).toLowerCase().trim())) {
+  if (action === 'supersede' && (!parseFactEntry(oldLine) || isSuperseded(oldLine))) {
+    throw serviceError('CONFLICT', 'This record is malformed or already superseded. Reload before replacing it.');
+  }
+  let nextLine = action === "delete" ? null : editedLine(action === 'supersede' ? null : oldLine, fields, entries);
+  if (["create", "supersede"].includes(action) && entries.some(line => factBody(line).toLowerCase().trim() === factBody(nextLine).toLowerCase().trim())) {
     throw serviceError("INVALID", "A record with this body already exists in this store.");
+  }
+  if (action === 'supersede') {
+    const oldId = factMeta(oldLine).id || nextFactId([...entries, nextLine]);
+    nextLine = withMeta(nextLine, { supersedes: oldId });
+    entries[index] = withMeta(oldLine, { id: oldId, supersededBy: factMeta(nextLine).id });
+    entries.push(nextLine);
   }
   if (action === "delete") {
     if (confirmDelete !== true) throw serviceError("CONFIRMATION", "Confirm deletion of this record in this store.");
     if (factMeta(oldLine).keep === "1" && confirmProtected !== true) throw serviceError("CONFIRMATION", "Separately confirm deletion of this protected record.");
   }
-  if (oldLine) {
+  if (oldLine && action !== 'supersede' && !hasKnowledgeSchema(await getDatabase())) {
     const oldText = parseFactEntry(oldLine)?.text || oldLine;
     const rows = await (await getDatabase()).prepare("SELECT id, fact_text FROM knowledge_links WHERE fact_key = ? AND (fact_text = ? OR fact_text = ?)").all(key, factBody(oldLine), oldText);
     if (rows.length && (action === "delete" || factBody(oldLine) !== factBody(nextLine) || (rows.some(row => row.fact_text === oldText) && oldText !== parseFactEntry(nextLine).text))) {
@@ -153,8 +205,8 @@ async function mutateLocked({ key, expectedVersion, action, ref, fields, confirm
   }
   if (action === "create") entries.push(nextLine);
   else if (action === "delete") entries.splice(index, 1);
-  else entries[index] = nextLine;
-  await writeMemory(key, entries, { expectedVersion, localOnly: true });
+  else if (action === "update") entries[index] = nextLine;
+  await writeMemory(key, entries, { expectedVersion: fileVersion, localOnly: true });
   const result = { status: "saved", key, ref: nextLine ? `id:${factMeta(nextLine).id}` : null, persona: [], contextNotice: "Existing agent sessions may retain old context; refresh the client context." };
   if (key === GLOBAL_KEY && ((oldLine && isDirectiveFact(oldLine)) || (nextLine && isDirectiveFact(nextLine)))) {
     if (process.env.MEMORY_DISABLE_PERSONA_SYNC === "1") result.persona = [{ status: "disabled_by_environment" }];
@@ -166,10 +218,7 @@ async function mutateLocked({ key, expectedVersion, action, ref, fields, confirm
   return { ...result, notebook: await readNotebook({ key }) };
 }
 
-export async function previewNotebookPersona({ key }) {
-  await requireTarget(key);
-  const global = await readMemory(GLOBAL_KEY);
-  const project = key === GLOBAL_KEY ? [] : await readMemory(key);
-  return { global: buildPersonaOverlayBlock(global), project: buildPersonaOverlayBlock(project),
-    coverage: "Managed prompt builder: global directives. Project block is a preview; project injection depends on the client (OpenCode supports it). This is not observed agent usage." };
+export async function previewNotebookPersona(input) {
+  const { previewPersonaContext } = await import('./persona_service.js');
+  return previewPersonaContext(input);
 }

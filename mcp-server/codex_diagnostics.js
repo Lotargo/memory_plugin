@@ -3,6 +3,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { getCodexMemoryAgentSections, isSupportedNodeVersion } from "./codex_config.js";
+import { resolveClientPaths } from './client_paths.js';
+import { integrationStatus } from './plugin_integration.js';
 
 function decodeTomlString(raw) {
   const value = String(raw || "").trim();
@@ -150,6 +152,7 @@ export async function runDirectMcpSmoke({
       request("tools/call", { name: "recall", arguments: { scope: "all" } }),
       "recall(scope=all)"
     );
+    if (infoResult?.isError || recallResult?.isError) throw new Error(`MCP tool returned an error: ${toolText(infoResult?.isError ? infoResult : recallResult)}`);
     settled = true;
     return {
       ok: true,
@@ -161,7 +164,13 @@ export async function runDirectMcpSmoke({
   } finally {
     settled = true;
     rejectAll(new Error("MCP diagnostics finished"));
-    if (child.exitCode === null) child.kill();
+    if (child.exitCode === null && child.signalCode === null) {
+      await new Promise(resolve => {
+        const timer = setTimeout(resolve, 5000);
+        child.once('exit', () => { clearTimeout(timer); resolve(); });
+        child.kill();
+      });
+    }
   }
 }
 
@@ -187,7 +196,18 @@ export async function runCodexDoctor({
     output.log(`[${level}] ${label}${detail ? `: ${detail}` : ""}`);
   };
 
-  const configPath = join(home, ".codex", "config.toml");
+  const paths = resolveClientPaths({ home, cwd, env });
+  const configPath = paths.codexConfigPath;
+  const integration = await integrationStatus('codex', { paths, cwd });
+  if (integration.conflict) {
+    record('FAIL', 'Duplicate memory integrations', 'Both marketplace and direct memory-agent are configured; use marketplace install to migrate');
+    return { ok: false, checks, configPath, integration };
+  }
+  if (integration.pluginEnabled) {
+    record('INFO', 'Marketplace memory integration', integration.selector);
+    record('INFO', 'Runtime acceptance', 'Use memory-plugin marketplace doctor --client codex to check the installed adapter; trust its SessionStart hook in a new client session.');
+    return { ok: false, checks, configPath, integration, configurationOk: true, runtimeVerified: false };
+  }
   if (!existsSync(configPath)) {
     record("FAIL", "Codex config found", configPath);
     return { ok: false, checks, configPath };
@@ -243,7 +263,7 @@ export async function runCodexDoctor({
     record("WARN", "Current project identity", error.message);
   }
 
-  const agentsPath = join(home, ".codex", "AGENTS.md");
+  const agentsPath = join(paths.codexDir, "AGENTS.md");
   if (existsSync(agentsPath)) {
     const agents = readFileSync(agentsPath, "utf8");
     const starts = countOccurrences(agents, "<!-- START MEMORY AGENT PROMPT -->");

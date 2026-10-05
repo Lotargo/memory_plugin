@@ -230,7 +230,8 @@ export async function recallFacts(
           const docStr = links
             .map((l) => {
               const range = l.start_line ? `:L${l.start_line}${l.end_line ? `-${l.end_line}` : ""}` : "";
-              return `${l.doc_title || l.doc_path}${range}`;
+              const state = l.status === 'valid' ? '' : ' [needs_review: coordinates unverified]';
+              return `${l.doc_title || l.doc_path}${range}${state}`;
             })
             .join(", ");
           lineText += ` 🔗 [Linked Docs: ${docStr}]`;
@@ -385,6 +386,8 @@ export async function updateFactText({ id, newText, title, kind, scope, director
   try {
     const { getDatabase } = await import("../../db/database.js");
     const db = await getDatabase();
+    const { hasKnowledgeSchema } = await import('../../storage/knowledge_schema.js');
+    if (hasKnowledgeSchema(db)) return 'Fact updated; links retained by stable fact identity';
     const linkedRows = await db
       .prepare("SELECT * FROM knowledge_links WHERE fact_key = ? AND fact_text = ?")
       .all(key, oldBody);

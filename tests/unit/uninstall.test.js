@@ -114,8 +114,8 @@ export async function runUninstallTests() {
     await writeFile(
       join(agentStateDir, "prompt-state.json"),
       JSON.stringify({
-        [codexPromptPath]: { hash: "old", existedBefore: true },
-        [claudePromptPath]: { hash: "keep", existedBefore: true },
+        [codexPromptPath]: { hash: "0".repeat(64), existedBefore: true },
+        [claudePromptPath]: { hash: "1".repeat(64), existedBefore: true },
       }, null, 2),
       "utf-8"
     );
@@ -124,11 +124,13 @@ export async function runUninstallTests() {
 
     const codexResult = runUninstall(["--codex"], { cwd: workspace, env });
     assert.strictEqual(codexResult.status, 0, codexResult.stderr || codexResult.stdout);
-    assert.strictEqual(await readFile(codexPromptPath, "utf-8"), `${codexUserText}\n`);
+    // A3 removes marker spans and preserves every byte outside them, including
+    // separators; it no longer normalizes the user's trailing whitespace.
+    assert.strictEqual(await readFile(codexPromptPath, "utf-8"), `${codexUserText}\n\n\n\n\n`);
     assert.strictEqual(await readFile(claudePromptPath, "utf-8"), claudeUserText);
     const promptState = JSON.parse(await readFile(join(agentStateDir, "prompt-state.json"), "utf-8"));
     assert.strictEqual(promptState[codexPromptPath], undefined, "selected prompt state must be removed");
-    assert.deepStrictEqual(promptState[claudePromptPath], { hash: "keep", existedBefore: true });
+    assert.deepStrictEqual(promptState[claudePromptPath], { hash: "1".repeat(64), existedBefore: true });
 
     await mkdir(opencodeDir, { recursive: true });
     const unrelatedFilePlugin = "file:///C:/projects/memory-dashboard/opencode-plugin/main.js";

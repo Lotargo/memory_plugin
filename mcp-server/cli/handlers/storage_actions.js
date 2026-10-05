@@ -1,11 +1,7 @@
+import { browseNotebookFacts } from "../notebook.js";
 import { join, basename } from "node:path";
 import { getDatabase } from "../../db/database.js";
 import {
-  readMemory,
-  readMemoryRaw,
-  writeMemory,
-  notebookVersion,
-  storeFilePath,
   GLOBAL_KEY,
   projectName,
   projectKey,
@@ -16,16 +12,6 @@ import {
   canonicalPath,
   MEMORY_DIR,
 } from "../../memory.js";
-import {
-  parseFactEntry,
-  factText,
-  factBody,
-  withMeta,
-  displayFact,
-  isKeepFact,
-  metaBadges,
-  formatFactEntry,
-} from "../../fact_format.js";
 import { deleteDocument } from "../../ingest/pipeline.js";
 import { getModelStorageInfo, deleteModelCache, listAllCachedModels } from "../../ml/model_manager.js";
 import {
@@ -45,114 +31,6 @@ export async function handleStorageAction(value, config, stats) {
       while (nbRunning) {
         const projKey = await projectKey(null, null);
         const projLabel = await projectName(null, null);
-
-        async function browseFacts(key, title) {
-          let factRunning = true;
-          while (factRunning) {
-            const rawEntries = await readMemory(key);
-            const factList = await readMemoryRaw(key);
-
-            if (!factList || factList.length === 0) {
-              console.clear();
-              console.log(`\n  \x1b[1m\x1b[37mNOTEBOOK FACTS: STORE EMPTY\x1b[0m`);
-              console.log(`  [*] Notebook store [${key}] has no saved facts.\n`);
-              await waitForEnter();
-              return;
-            }
-
-            const file = memoryFileName(key);
-            const factItems = factList.map((fact, idx) => {
-              const badges = metaBadges(fact);
-              return {
-                label: `${idx + 1}. ${factText(fact)}`,
-                value: idx,
-                badge: badges.length ? badges.join(" ") : undefined,
-                info: `Select to manage this fact from ${file}`,
-              };
-            });
-            factItems.push({ label: "< Back", value: "back" });
-
-            const factRes = await selectSimpleMenu({
-              title: `NOTEBOOK FACTS [${title}]`,
-              subtitle: `Total facts: ${factList.length}`,
-              items: factItems,
-            });
-
-            if (factRes.action === "back" || factRes.value === "back") {
-              return;
-            }
-
-            const selectedIdx = factRes.value;
-            const selectedEntry = rawEntries[selectedIdx];
-            const selDisplay = displayFact(selectedEntry);
-            const selBadges = metaBadges(selectedEntry);
-
-            const actionItems = [
-              { label: "[UPDATE] Edit fact text", value: "update", info: "Rewrite the fact, keeping its date and metadata" },
-            ];
-            if (isKeepFact(selectedEntry)) {
-              actionItems.push({ label: "[UNPROTECT] Remove keep protection", value: "unprotect", info: "Allow forget to delete it without force" });
-            } else {
-              actionItems.push({ label: "[PROTECT] Mark as important (keep)", value: "protect", info: "forget will skip it unless force=true" });
-            }
-            actionItems.push({ label: "[DELETE] Delete this fact from store", value: "delete", info: "Remove fact permanently" });
-            actionItems.push({ label: "< Cancel / Back", value: "cancel" });
-
-            const actionRes = await selectSimpleMenu({
-              title: "FACT ACTION",
-              subtitle: `Fact: "${selDisplay}"${selBadges.length ? " [" + selBadges.join("] [") + "]" : ""}`,
-              items: actionItems,
-            });
-
-            if (actionRes.action === "back" || actionRes.value === "cancel") {
-              return;
-            }
-
-            if (actionRes.action === "select" && actionRes.value === "update") {
-              const p = parseFactEntry(selectedEntry);
-              const newText = await promptText(`New text for fact #${selectedIdx + 1}:`);
-              if (!newText) continue;
-              const newLine = formatFactEntry({ date: p.date, time: p.time, text: newText, meta: p.meta });
-              const updated = [...rawEntries];
-              updated[selectedIdx] = newLine;
-              await writeMemory(key, updated, { expectedVersion: notebookVersion(rawEntries) });
-              let links = 0;
-              try {
-                const db = await getDatabase();
-                const oldFactText = factText(selectedEntry);
-                const linkedDocs = await db
-                  .prepare("SELECT DISTINCT doc_id FROM knowledge_links WHERE fact_key = ? AND fact_text = ?")
-                  .all(key, oldFactText);
-                const runRes = await db
-                  .prepare("UPDATE knowledge_links SET fact_text = ? WHERE fact_key = ? AND fact_text = ?")
-                  .run(newText, key, oldFactText);
-                links = runRes ? runRes.changes : 0;
-                if (links && linkedDocs.length) {
-                  const { touchDocument } = await import("../../graph/knowledge_linker.js");
-                  for (const row of linkedDocs) await touchDocument(db, row.doc_id);
-                }
-              } catch (e) {}
-              console.clear();
-              console.log(`\n  [OK] Fact updated successfully${links ? `, ${links} doc link(s) updated` : ""}.\n`);
-              await waitForEnter();
-            } else if (actionRes.action === "select" && (actionRes.value === "protect" || actionRes.value === "unprotect")) {
-              const updated = [...rawEntries];
-              updated[selectedIdx] =
-                actionRes.value === "protect" ? withMeta(selectedEntry, { keep: "1" }) : withMeta(selectedEntry, { keep: null });
-              await writeMemory(key, updated, { expectedVersion: notebookVersion(rawEntries) });
-              console.clear();
-              console.log(`\n  [OK] Fact ${actionRes.value === "protect" ? "protected" : "unprotected"} successfully.\n`);
-              await waitForEnter();
-            } else if (actionRes.action === "select" && actionRes.value === "delete") {
-              const updated = [...rawEntries];
-              updated.splice(selectedIdx, 1);
-              await writeMemory(key, updated, { expectedVersion: notebookVersion(rawEntries) });
-              console.clear();
-              console.log("\n  [OK] Fact deleted successfully.\n");
-              await waitForEnter();
-            }
-          }
-        }
 
         const scopeItems = [
           { label: "Global Memory", value: "global", badge: "global.md", info: "User facts stored across all projects" },
@@ -234,7 +112,7 @@ export async function handleStorageAction(value, config, stats) {
                 break;
               }
               if (actRes.value === "view") {
-                await browseFacts(store.key, store.basename);
+                await browseNotebookFacts(store.key, store.basename);
               } else if (actRes.value === "migrate") {
                 const mig = await migrateLegacyStore(store.key, projKey);
                 console.clear();
@@ -253,7 +131,7 @@ export async function handleStorageAction(value, config, stats) {
           continue;
         }
 
-        await browseFacts(scopeRes.value === "global" ? GLOBAL_KEY : projKey, scopeRes.value === "global" ? "GLOBAL" : projLabel);
+        await browseNotebookFacts(scopeRes.value === "global" ? GLOBAL_KEY : projKey, scopeRes.value === "global" ? "GLOBAL" : projLabel);
       }
       break;
     }
@@ -322,36 +200,9 @@ export async function handleStorageAction(value, config, stats) {
           const remoteUrl = await promptText("Enter optional explicit remote URL (or press ENTER to auto-detect):");
 
           try {
-            const { resolveProjectIdentity, upsertIdentity, registerAlias, normalizeRemoteUrl } = await import("../../identity.js");
-            const db = await getDatabase();
-
-            const dir = process.cwd();
-            const identity = await resolveProjectIdentity(dir);
-            if (!identity && !remoteUrl) {
-              console.log("\n  \x1b[31m[ERROR] No Git repository detected and no remote URL specified.\x1b[0m");
-              await waitForEnter();
-              continue;
-            }
-
-            let key = identity ? identity.key : `git:${normalizeRemoteUrl(remoteUrl)}`;
-            let name = identity ? identity.name : basename(dir) || "unbound";
-            let primaryRemote = remoteUrl ? normalizeRemoteUrl(remoteUrl) : (identity ? identity.primaryRemote : null);
-
-            await upsertIdentity(db, { key, name, primaryRemote });
-
-            const aliases = [];
-            if (primaryRemote) {
-              aliases.push({ alias: `remote:${primaryRemote}`, kind: "remote" });
-            }
-            aliases.push({ alias: `path:${canonicalPath(dir)}`, kind: "path" });
-            aliases.push({ alias: `basename:${name}`, kind: "basename" });
-
-            for (const a of aliases) {
-              await registerAlias(db, { alias: a.alias, identityKey: key, kind: a.kind });
-            }
-
-            console.log(`\n  \x1b[32m[SUCCESS] Successfully linked project!\x1b[0m`);
-            console.log(`  Identity Key: ${key}`);
+            const { executeProjectOperation } = await import('../../services/project_service.js');
+            const result = await executeProjectOperation('link', {directory:process.cwd(), remote:remoteUrl || undefined});
+            console.log(`\n  [SUCCESS] Linked ${result.key}; backup: ${result.backup}\n`);
           } catch (err) {
             console.log(`\n  \x1b[31m[ERROR] Link failed: ${err.message}\x1b[0m`);
           }
@@ -362,11 +213,9 @@ export async function handleStorageAction(value, config, stats) {
           const confirm = await promptText("Are you sure you want to unlink the current path alias? (y/N):");
           if (confirm.toLowerCase() === "y" || confirm.toLowerCase() === "yes") {
             try {
-              const { unregisterAlias } = await import("../../identity.js");
-              const db = await getDatabase();
-              const alias = `path:${canonicalPath(process.cwd())}`;
-              await unregisterAlias(db, alias);
-              console.log(`\n  \x1b[32m[SUCCESS] Unlinked path alias: ${alias}\x1b[0m`);
+              const { executeProjectOperation } = await import('../../services/project_service.js');
+              const result = await executeProjectOperation('unlink', {directory:process.cwd()});
+              console.log(`\n  [SUCCESS] Removed path alias; memory retained. Backup: ${result.backup}\n`);
             } catch (err) {
               console.log(`\n  \x1b[31m[ERROR] Unlink failed: ${err.message}\x1b[0m`);
             }
@@ -387,49 +236,9 @@ export async function handleStorageAction(value, config, stats) {
             continue;
           }
           try {
-            const { upsertIdentity, removeIdentity, normalizeRemoteUrl } = await import("../../identity.js");
-            const db = await getDatabase();
-
-            const targetKey = `git:${normalizeRemoteUrl(targetRemote)}`;
-            const sourceKey = identity.key;
-
-            if (sourceKey === targetKey) {
-              console.log("  Source and target identities are already identical.");
-              await waitForEnter();
-              continue;
-            }
-
-            const sourceFacts = await readMemory(sourceKey);
-            const targetFacts = await readMemory(targetKey);
-            const seen = new Set(targetFacts.map((e) => factBody(e).toLowerCase().trim()));
-
-            let mergedCount = 0;
-            for (const f of sourceFacts) {
-              const body = factBody(f).toLowerCase().trim();
-              if (!seen.has(body)) {
-                seen.add(body);
-                targetFacts.push(f);
-                mergedCount++;
-              }
-            }
-
-            await writeMemory(targetKey, targetFacts);
-            await upsertIdentity(db, { key: targetKey, name: identity.name, primaryRemote: normalizeRemoteUrl(targetRemote) });
-            await db.prepare("UPDATE project_aliases SET identity_key = ? WHERE identity_key = ?;").run(targetKey, sourceKey);
-            const { moveKnowledgeScope } = await import("../../graph/knowledge_linker.js");
-            await moveKnowledgeScope(db, sourceKey, targetKey);
-            await removeIdentity(db, sourceKey);
-
-            try {
-              const sourceFp = storeFilePath(sourceKey);
-              const { existsSync } = await import("node:fs");
-              if (existsSync(sourceFp)) {
-                const { unlink } = await import("fs/promises");
-                await unlink(sourceFp);
-              }
-            } catch (e) {}
-
-            console.log(`\n  \x1b[32m[SUCCESS] Relinked and merged ${mergedCount} facts successfully!\x1b[0m`);
+            const { executeProjectOperation } = await import('../../services/project_service.js');
+            const result = await executeProjectOperation('relink', {directory:process.cwd(),remote:targetRemote});
+            console.log(`\n  [SUCCESS] Moved ${result.mergedFacts} facts; backup: ${result.backup}\n`);
           } catch (err) {
             console.log(`\n  \x1b[31m[ERROR] Relink failed: ${err.message}\x1b[0m`);
           }

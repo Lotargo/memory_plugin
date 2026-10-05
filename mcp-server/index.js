@@ -17,9 +17,19 @@ function readPackageVersion() {
 }
 
 const cliArgs = process.argv.slice(2);
+if (cliArgs[0] === "knowledge") {
+  const { handleKnowledgeCommand } = await import("./cli/knowledge_commands.js");
+  await handleKnowledgeCommand(cliArgs.slice(1));
+  process.exit(process.exitCode || 0);
+}
 
 // Snapshot arguments belong exclusively to that command, even if a value
 // happens to match a global command such as setup or uninstall.
+if (["web", "dashboard"].includes(cliArgs[0])) {
+  const { handleWebCommand } = await import("./cli/web_commands.js");
+  await handleWebCommand(cliArgs.slice(1));
+  process.exit(process.exitCode || 0);
+}
 if (cliArgs[0] === "snapshots") {
   const { handleSnapshotCommands } = await import("./cli/snapshot_commands.js");
   await handleSnapshotCommands(cliArgs);
@@ -30,6 +40,9 @@ if (cliArgs[0] === "snapshots") {
 // otherwise `memory_plugin link` etc. would fall through and start an MCP
 // server that silently blocks on stdin.
 const CLI_COMMANDS = new Set([
+  "notebook",
+  "prompts",
+  "web",
   "dashboard",
   "cli",
   "config",
@@ -51,6 +64,7 @@ const CLI_COMMANDS = new Set([
   "models",
   "model",
   "snapshots",
+  "marketplace",
 ]);
 
 function printUsage() {
@@ -62,6 +76,11 @@ Usage:
   memory_plugin setup --uninstall [--purge] [--purge-cache] [--dry-run] [--yes]
   memory_plugin uninstall [--purge] [--purge-cache] [--dry-run] [--yes] [--opencode|--claude|--codex|--gemini|--antigravity]
   memory_plugin cli                  Interactive terminal UI
+  memory-plugin web                  Start/reuse the background browser panel
+  memory-plugin web status|stop|restart
+  memory-plugin web autostart on|off|status
+  memory-plugin web --foreground [--port N] Temporary panel until Ctrl+C
+  memory-plugin web port [N]         Show or save its default port
   memory_plugin dashboard [--port N] Local browser panel (Notebook first increment)
   memory_plugin login [--from-env|--api-token|--api-key|--db-url <URL>]
   memory_plugin logout [--api-key]
@@ -71,6 +90,7 @@ Usage:
   memory_plugin enable-prompt | disable-prompt
   memory_plugin models status [--json] | unload | load [--device cpu|gpu] | device cpu|gpu | timer off|<minutes>
   memory_plugin doctor --codex
+  memory-plugin marketplace help     Local plugin build, install, channel switch and status
   memory_plugin snapshots help       ZIP checkpoints, schedules in hours, restore and period deletion
 
 Options:
@@ -146,3 +166,5 @@ startSnapshotScheduler();
 const transport = new StdioServerTransport();
 await server.connect(transport);
 console.error(`memory-agent MCP server running, data dir: ${MEMORY_DIR}`);
+const { autoStartWeb } = await import('./dashboard/runtime.js');
+void autoStartWeb().catch(error => console.error(`Memory panel: ${error.message}`));
