@@ -333,6 +333,21 @@ npm run persona:migrate          # from the repository
 
 Higher-priority platform and safety instructions remain authoritative.
 
+The panel's **Обслуживание** reviews title migration for one Notebook and global legacy persona classification before writing. It shows stable IDs assigned to old records, checks the Notebook and source-link versions, and verifies a pinned full local ZIP before publishing through the shared recovery journal. Knowledge-link migration must already be complete; use **Знания → Подготовить связи** if needed. Client files are synchronized separately through **Инструкции → Файлы клиентов**.
+
+Settings reset/restore in **Обслуживание** covers search, models and source-access preferences, with a local integrity-checked backup and a fresh preview before restoration. Storage mode, cloud credentials, snapshot schedule, migration guards, port and startup remain preserved. Model owners and existing vectors require separate runtime commands or reindexing. RAG import/reset, diagnostics and uninstall UI remain planned.
+
+```bash
+memory-cli maintenance status
+memory-cli maintenance preview --operation migrate-titles --key <store>
+memory-cli maintenance apply --operation migrate-titles --key <store> --preview-token <token> --confirm
+memory-cli maintenance preview --operation reset-settings
+memory-cli maintenance apply --operation reset-settings --preview-token <token> --confirm
+memory-cli maintenance preview --operation restore-settings --backup-id <id>
+```
+
+`memory-plugin maintenance` accepts the same commands. `maintenance status` lists known stores and settings backup IDs; `maintenance help` describes all four operations. The TUI now reviews reset and title migration for one selected store. The legacy explicit title/persona CLI commands also use the shared backup and version checks; automatic prompt sync belongs only to the legacy persona command, with failures reported as partial.
+
 ---
 
 ## Project Identity and Scope Isolation
