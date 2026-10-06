@@ -22,7 +22,7 @@ const state = { overview: null, notebook: null, view: 'notebook', selectedRef: n
 const fragment = location.hash.slice(1);
 const connectionToken = /^[a-f0-9]{64}$/.test(fragment) ? fragment : '';
 history.replaceState(null, '', location.pathname);
-const names = { notebook: 'Notebook', persona: 'Инструкции', archive: 'История', knowledge: 'Знания' };
+const names = { notebook: 'Все записи', persona: 'Инструкции', archive: 'История', knowledge: 'Знания' };
 const reasons = { expired: 'Срок истёк', superseded: 'Заменена', disabled: 'Выключена', invalid: 'Повреждённый формат' };
 const fields = ['title', 'body', 'kind', 'ttl', 'tags', 'keep', 'disabled'];
 const fieldNames = { title: 'Заголовок', body: 'Текст записи', kind: 'Тип', ttl: 'Срок действия', tags: 'Теги', keep: 'Защита от удаления', disabled: 'Инструкция выключена' };

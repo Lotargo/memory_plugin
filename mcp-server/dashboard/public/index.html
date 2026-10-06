@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>Memory — Notebook</title>
+  <title>Memory — Все записи</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
@@ -26,7 +26,7 @@
         <p id="scopeHint" class="caption">Доступна во всех проектах</p>
       </div>
       <nav class="view-nav" aria-label="Разделы памяти">
-        <button type="button" data-view="notebook" aria-current="page"><span>Notebook</span><span id="notebookCount" class="nav-count">—</span></button>
+        <button type="button" data-view="notebook" aria-current="page"><span>Все записи</span><span id="notebookCount" class="nav-count">—</span></button>
         <button type="button" data-view="persona"><span>Инструкции</span><span id="directiveCount" class="nav-count">—</span></button>
         <button type="button" data-view="archive"><span>История</span><span id="archiveCount" class="nav-count">—</span></button>
         <button type="button" data-view="knowledge"><span>Знания</span></button>
@@ -46,7 +46,7 @@
     </aside>
     <main class="main-area" id="main" tabindex="-1">
       <header class="topbar">
-        <div class="location"><button type="button" id="navigation" class="mobile-navigation" aria-haspopup="dialog">Область</button><h1 id="viewTitle">Notebook</h1><span class="location-divider" aria-hidden="true">/</span><span id="scopeName" class="scope-name">Глобальная память</span></div>
+        <div class="location"><button type="button" id="navigation" class="mobile-navigation" aria-haspopup="dialog">Область</button><h1 id="viewTitle">Все записи</h1><span class="location-divider" aria-hidden="true">/</span><span id="scopeName" class="scope-name">Глобальная память</span></div>
         <div class="top-actions"><button type="button" id="promptFiles" class="button ghost" hidden>Файлы клиентов</button><button type="button" id="personaPreview" class="button ghost" aria-label="Предпросмотр" hidden><span class="preview-long">Предпросмотр</span><span class="preview-short" aria-hidden="true">Правила</span></button><button type="button" id="refresh" class="button secondary">Обновить</button><button type="button" id="create" class="button primary" disabled>+ Новая запись</button></div>
       </header>
       <div id="message" class="notice" role="status" aria-live="polite" hidden></div>
