@@ -70,7 +70,7 @@ export async function runDirectMcpSmoke({
   timeoutMs = 30_000,
 } = {}) {
   if (!command) throw new Error("MCP command is required");
-  const child = spawn(command, args, { cwd, env: { ...env }, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(command, args, { cwd, env: { ...env }, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
 

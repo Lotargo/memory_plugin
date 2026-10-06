@@ -35,7 +35,7 @@ if (process.env.npm_config_global === "true" || process.env.MEMORY_PREINSTALL_FO
     if (process.platform === "win32") {
       try {
         const psCmd = `Get-CimInstance Win32_Process | Where-Object { ($_.CommandLine -like '*mcp-server/boot.js*' -or $_.CommandLine -like '*mcp-server\\\\boot.js*' -or $_.CommandLine -like '*mcp-server/index.js*' -or $_.CommandLine -like '*mcp-server\\\\index.js*') -and $_.CommandLine -notlike '*install*' -and $_.ProcessId -ne ${currentPid} -and $_.ProcessId -ne ${ppid} } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`;
-        execSync(`powershell -NoProfile -NonInteractive -Command "${psCmd}"`, { stdio: "ignore" });
+        execSync(`powershell -NoProfile -NonInteractive -Command "${psCmd}"`, { stdio: "ignore", windowsHide: true });
       } catch {}
     } else {
       try {

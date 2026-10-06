@@ -7,7 +7,7 @@ export async function getGpuUtilizationAsync() {
   try {
     const { stdout } = await execFileAsync("nvidia-smi", 
       ["--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"],
-      { timeout: 1000 }
+      { timeout: 1000, windowsHide: true }
     );
     const val = parseInt(stdout.trim(), 10);
     if (!isNaN(val)) return val;
@@ -17,7 +17,7 @@ export async function getGpuUtilizationAsync() {
     try {
       const { stdout } = await execFileAsync("powershell", 
         ["-NoProfile", "-Command", "(Get-CimInstance Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine | Measure-Object -Property UtilizationPercentage -Sum).Sum"],
-        { timeout: 1500 }
+        { timeout: 1500, windowsHide: true }
       );
       const val = parseInt(stdout.trim(), 10);
       if (!isNaN(val)) return Math.min(100, val);
@@ -31,7 +31,7 @@ export async function getGpuMemoryInfoAsync() {
   try {
     const { stdout } = await execFileAsync("nvidia-smi",
       ["--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"],
-      { timeout: 1500 }
+      { timeout: 1500, windowsHide: true }
     );
     const [used, total] = stdout.trim().split(",").map((v) => parseInt(v.trim(), 10));
     if (!isNaN(used) && !isNaN(total)) return { usedMB: used, totalMB: total };
@@ -48,7 +48,7 @@ export async function getProcessMemoryMB(pid) {
     try {
       const { stdout } = await execFileAsync("powershell",
         ["-NoProfile", "-Command", `(Get-Process -Id ${pid} -ErrorAction Stop).WorkingSet64`],
-        { timeout: 2500 }
+        { timeout: 2500, windowsHide: true }
       );
       const bytes = parseInt(stdout.trim(), 10);
       if (!isNaN(bytes)) return Math.round(bytes / (1024 * 1024));
@@ -56,7 +56,7 @@ export async function getProcessMemoryMB(pid) {
     return null;
   }
   try {
-    const { stdout } = await execFileAsync("ps", ["-o", "rss=", "-p", String(pid)], { timeout: 2000 });
+    const { stdout } = await execFileAsync("ps", ["-o", "rss=", "-p", String(pid)], { timeout: 2000, windowsHide: true });
     const kb = parseInt(stdout.trim(), 10);
     if (!isNaN(kb)) return Math.round(kb / 1024);
   } catch {}

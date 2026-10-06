@@ -82,6 +82,7 @@ export function linkGlobalNpmPackage({ repoRoot = REPO_ROOT } = {}) {
   const result = spawnSync(command, args, {
     cwd: repoRoot,
     stdio: "inherit",
+    windowsHide: true,
     // A direct npm-cli.js invocation is preferred. The shell fallback is only
     // needed when dev-link is launched outside npm and no npm_execpath exists;
     // the command and arguments are fixed, not user-provided.

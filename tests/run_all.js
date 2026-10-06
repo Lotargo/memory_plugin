@@ -10,6 +10,7 @@ const testSuites = [
   // --- 1. UNIT TESTS ---
   { category: "Unit", name: "fact_format", file: "tests/unit/fact_format.test.js" },
   { category: "Unit", name: "identity", file: "tests/unit/identity.test.js" },
+  { category: "Unit", name: "background_launch", file: "tests/unit/background_launch.test.js" },
   { category: "Unit", name: "codex_compat", file: "tests/unit/codex_compat.test.js" },
   { category: "Unit", name: "prompt_manager", file: "tests/unit/prompt_manager.test.js" },
   { category: "Unit", name: "client_cli", file: "tests/unit/client_cli.test.js" },

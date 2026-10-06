@@ -22,7 +22,7 @@ export function browserLaunchSpec(url, platform = process.platform) {
 function openBrowser(url) {
   try {
     const { command, args } = browserLaunchSpec(url);
-    const child = spawn(command, args, { stdio: "ignore", detached: true });
+    const child = spawn(command, args, { stdio: "ignore", detached: true, windowsHide: true });
     child.on("error", () => {});
     child.unref();
   } catch {

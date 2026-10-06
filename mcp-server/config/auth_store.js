@@ -2,13 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import os from "node:os";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { MEMORY_DIR, ensureDirSync } from "../memory.js";
 
 const SECRETS_FILE = path.join(MEMORY_DIR, "auth_secrets.enc");
 
 // ── Module-level caches ─────────────────────────────────────────────────────
-// These avoid re-running expensive sync operations (execSync, PBKDF2, file I/O)
+// These avoid re-running expensive sync operations (execFileSync, PBKDF2, file I/O)
 // on every CLI navigation or tool call.  invalidateAuthCache() must be called
 // whenever secrets are deleted or the API key is removed.
 let _cachedMachineId = undefined;  // undefined = not yet resolved
@@ -31,9 +31,10 @@ function getMachineId() {
   let id = null;
   try {
     if (process.platform === "win32") {
-      const out = execSync("reg query HKLM\\SOFTWARE\\Microsoft\\Cryptography /v MachineGuid", {
+      const out = execFileSync("reg.exe", ["query", "HKLM\\SOFTWARE\\Microsoft\\Cryptography", "/v", "MachineGuid"], {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true,
       });
       const m = out.match(/MachineGuid\s+REG_SZ\s+([0-9a-fA-F-]{36})/i);
       if (m) id = m[1].toLowerCase();
@@ -45,9 +46,10 @@ function getMachineId() {
         } catch {}
       }
     } else if (process.platform === "darwin") {
-      const out = execSync("ioreg -rd1 -c IOPlatformExpertDevice", {
+      const out = execFileSync("ioreg", ["-rd1", "-c", "IOPlatformExpertDevice"], {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true,
       });
       const m = out.match(/"IOPlatformUUID"\s*=\s*"([^"]+)"/);
       if (m) id = m[1];

@@ -20,7 +20,7 @@ export function normalizeRemoteUrl(url) {
 export async function detectGitToplevel(dir) {
   const absoluteDir = resolve(dir || process.cwd());
   try {
-    const { stdout } = await execFileAsync("git", ["rev-parse", "--show-toplevel"], { cwd: absoluteDir });
+    const { stdout } = await execFileAsync("git", ["rev-parse", "--show-toplevel"], { cwd: absoluteDir, windowsHide: true });
     return resolve(stdout.trim());
   } catch (err) {
     let current = absoluteDir;
@@ -40,7 +40,7 @@ export async function detectGitToplevel(dir) {
 export async function getRemoteUrls(toplevel) {
   const urls = [];
   try {
-    const { stdout } = await execFileAsync("git", ["config", "--get-regexp", "remote\\..*\\.url"], { cwd: toplevel });
+    const { stdout } = await execFileAsync("git", ["config", "--get-regexp", "remote\\..*\\.url"], { cwd: toplevel, windowsHide: true });
     const lines = stdout.split("\n").filter(Boolean);
     for (const line of lines) {
       const parts = line.split(/\s+/);

@@ -355,7 +355,7 @@ const isEntryPoint =
 if (isEntryPoint) {
   if (!process.argv.includes("--no-respawn") && !global.gc) {
     const { spawn } = await import("node:child_process");
-    const child = spawn(process.execPath, ["--expose-gc", ...process.argv.slice(1)], { stdio: "inherit" });
+    const child = spawn(process.execPath, ["--expose-gc", ...process.argv.slice(1)], { stdio: "inherit", windowsHide: true });
     child.on("exit", (code) => process.exit(code ?? 0));
   } else {
     runFullBenchmarkSuite().catch((err) => {
