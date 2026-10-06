@@ -189,6 +189,40 @@ select,.appearance-control select,.list-filter-row select {
 :root[data-theme=dark] select {
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='m1 1 5 5 5-5' fill='none' stroke='%23bfc2b8' stroke-width='1.5'/%3E%3C/svg%3E");
 }
+/* Native pickers share the project picker's theme without replacing form controls. */
+@supports (appearance:base-select) {
+  select,:root[data-theme] select,.appearance-control select,.list-filter-row select {
+    appearance:base-select;background-image:none;padding-right:12px;
+    align-items:center;gap:12px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;
+  }
+  select:not(:disabled):hover {border-color:var(--secondary)}
+  select:disabled {opacity:.5;cursor:default}
+  select::picker-icon {
+    content:"";width:8px;height:8px;flex-shrink:0;margin-right:2px;
+    border:solid var(--secondary);border-width:0 1.5px 1.5px 0;transform:rotate(45deg);
+  }
+  select:open::picker-icon {transform:rotate(225deg)}
+  select::picker(select) {
+    appearance:base-select;background:var(--canvas);color:var(--ink);
+    border:1px solid var(--line);border-radius:var(--radius);padding:6px;
+    margin-block:6px;width:anchor-size(width);min-width:max(anchor-size(width),180px);max-width:calc(100vw - 24px);
+    max-height:min(320px,calc(100dvh - 24px));overflow-y:auto;
+    overscroll-behavior:contain;box-shadow:0 8px 24px rgb(0 0 0 / .18);
+    font:inherit;line-height:1.5;
+  }
+  select option {
+    display:block;position:relative;min-height:36px;padding:8px 34px 8px 10px;
+    border:0;border-radius:var(--radius);background:transparent;color:var(--ink);
+    font:inherit;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;
+  }
+  select option:not(:disabled):hover,select option:focus-visible {background:var(--hover)}
+  select option:checked {background:var(--nav-selected)}
+  select option:focus-visible {outline:2px solid var(--accent);outline-offset:-2px}
+  select option::checkmark {position:absolute;right:10px;top:50%;transform:translateY(-50%);color:var(--accent)}
+  select option:disabled {color:var(--muted);opacity:.6;cursor:default}
+  select optgroup {color:var(--secondary);font-weight:600}
+  @media(pointer:coarse) {select option {min-height:44px}}
+}
 @media(forced-colors:active) {select,.appearance-control select,.list-filter-row select {appearance:auto;background-image:none}}
 .markdown-content {line-height:1.75;white-space:normal;overflow-wrap:anywhere;min-width:0}
 .markdown-content>:first-child {margin-top:0}
