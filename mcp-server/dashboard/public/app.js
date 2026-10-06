@@ -183,21 +183,32 @@ function renderNavigation() {
   $('create').classList.toggle('primary', !state.edit);
   $('create').classList.toggle('secondary', !!state.edit);
   document.title = `Memory — ${names[state.view]}`;
-  document.querySelectorAll('[data-project]').forEach(button => {
-    button.disabled = state.busy || state.loading || !!state.overview?.targets.find(target => target.key === button.dataset.project)?.unavailable;
-    if (button.dataset.project === $('target').value) button.setAttribute('aria-current', 'true');
-    else button.removeAttribute('aria-current');
-  });
 }
 function renderTargets(key) {
-  $('target').replaceChildren(); $('projects').replaceChildren();
-  for (const target of state.overview.targets) {
-    const name = projectName(target);
-    const option = node('option', name.length > 80 ? `${name.slice(0, 77)}…` : name); option.value = target.key; option.disabled = !!target.unavailable;
-    $('target').append(option);
+  const projects = state.overview.targets.filter(target => target.key !== 'global')
+    .sort((a, b) => projectName(a).localeCompare(projectName(b), 'ru', { numeric: true }));
+  const groups = [
+    { label: null, targets: state.overview.targets.filter(target => target.key === 'global') },
+    { label: 'Проекты', targets: projects.filter(target => !target.unavailable && target.key.startsWith('git:')) },
+    { label: 'Другие хранилища', targets: projects.filter(target => !target.unavailable && !target.key.startsWith('git:')) },
+    { label: 'Требуют проверки', targets: projects.filter(target => target.unavailable) }
+  ];
+  $('target').replaceChildren();
+  for (const group of groups) {
+    if (!group.targets.length) continue;
+    const parent = group.label ? node('optgroup') : $('target');
+    if (group.label) parent.label = group.label;
+    for (const target of group.targets) {
+      const name = target.key === 'global' ? 'Глобальная память' : projectName(target);
+      const option = node('option', name.length > 80 ? `${name.slice(0, 77)}…` : name);
+      option.value = target.key; option.disabled = !!target.unavailable;
+      option.title = target.key;
+      parent.append(option);
+    }
+    if (group.label) $('target').append(parent);
   }
   $('target').value = state.overview.targets.some(target => target.key === key && !target.unavailable) ? key : 'global';
-  renderProjects();
+  $('projectCount').textContent = projects.length || '';
   $('version').textContent = `v${state.overview.version}`;
 }
 function projectName(target) {
@@ -211,42 +222,6 @@ function projectName(target) {
     if (local) return `${local[1]} · ${local[2].slice(-4)}`;
   }
   return target.name;
-}
-function renderProjects() {
-  const all = state.overview?.targets.filter(target => target.key !== 'global') || [];
-  const terms = $('projectSearch').value.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
-  const matches = all.filter(target => {
-    const text = `${projectName(target)} ${target.name} ${target.key} ${target.aliases.map(alias => alias.alias).join(' ')}`.toLocaleLowerCase();
-    return terms.every(term => text.includes(term));
-  }).sort((a, b) => projectName(a).localeCompare(projectName(b), 'ru', { numeric: true }));
-  $('projects').replaceChildren();
-  $('projectCount').textContent = terms.length ? `${matches.length}/${all.length}` : all.length || '';
-  const groups = [
-    { title: null, targets: matches.filter(target => !target.unavailable && target.key.startsWith('git:')) },
-    { title: 'Другие хранилища', targets: matches.filter(target => !target.unavailable && !target.key.startsWith('git:')) },
-    { title: 'Требуют проверки', targets: matches.filter(target => target.unavailable) }
-  ];
-  for (const group of groups) {
-    if (!group.targets.length) continue;
-    const list = node('ul');
-    for (const target of group.targets) {
-      const item = node('li'), button = node('button'), marker = node('span', null, 'project-marker');
-      marker.setAttribute('aria-hidden', 'true');
-      button.append(marker, node('span', projectName(target), 'project-name')); button.type = 'button'; button.dataset.project = target.key;
-      button.disabled = !!target.unavailable || state.busy || state.loading;
-      button.title = `${target.key}${target.unavailable ? '\nТребуется исправление идентичности в CLI' : ''}`;
-      if (target.unavailable) button.setAttribute('aria-label', `${projectName(target)} — требуется проверка идентичности`);
-      if (target.key === $('target').value) button.setAttribute('aria-current', 'true');
-      button.addEventListener('click', () => selectTarget(target.key)); item.append(button); list.append(item);
-    }
-    if (group.title) {
-      const details = node('details', null, 'project-group'), summary = node('summary', group.title);
-      summary.append(node('span', String(group.targets.length), 'nav-count'));
-      details.open = !!terms.length || group.targets.some(target => target.key === $('target').value);
-      details.append(summary, list); $('projects').append(details);
-    } else $('projects').append(list);
-  }
-  if (!matches.length) $('projects').append(node('p', all.length ? 'Проект не найден' : 'Пока нет проектов', 'caption'));
 }
 function renderList() {
   const records = filteredRecords();
@@ -357,8 +332,6 @@ async function selectTarget(key) {
   if (!(await allowDiscard())) { $('target').value = state.notebook?.target.key || 'global'; return; }
   $('target').value = key;
   state.allStores = false; $('allStores').checked = false;
-  const selectedGroup = [...$('projects').querySelectorAll('[data-project]')].find(button => button.dataset.project === key)?.closest('details');
-  if (selectedGroup) selectedGroup.open = true;
   closeNavigation(); document.body.classList.remove('detail-open'); notice();
   await loadTarget(key);
 }
@@ -539,7 +512,6 @@ $('openRecordStore').addEventListener('click', async () => {
   const record = selected(); if (!record?.sourceKey) return;
   await selectTarget(record.sourceKey); await selectRecord(record.sourceRef); $('recordTitle').focus();
 });
-$('projectSearch').addEventListener('input', renderProjects);
 $('refresh').addEventListener('click', refresh); $('create').addEventListener('click', () => startEdit());
 $('edit').addEventListener('click', () => startEdit(selected())); $('delete').addEventListener('click', requestDelete);
 $('supersede').addEventListener('click', () => startEdit(selected(), 'supersede'));

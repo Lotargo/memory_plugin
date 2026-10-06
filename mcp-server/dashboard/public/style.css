@@ -31,37 +31,23 @@ p {text-wrap:pretty} .caption {font-size:.8125rem;color:var(--secondary);line-he
 .visually-hidden {position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .skip-link {position:fixed;left:12px;top:-80px;z-index:10;padding:12px;color:var(--primary-ink);background:var(--primary)} .skip-link:focus {top:12px}
 .app-shell {display:grid;grid-template-columns:220px minmax(0,1fr);height:100dvh;isolation:isolate}
-.sidebar {display:flex;flex-direction:column;min-height:0;padding:20px 16px 16px;background:var(--sidebar);border-right:1px solid var(--line);gap:12px}
+.sidebar {display:flex;flex-direction:column;min-height:0;padding:20px 16px 16px;background:var(--sidebar);border-right:1px solid var(--line);gap:12px;overflow-y:auto}
 .brand {display:flex;align-items:center;gap:10px;padding:0 8px;font-size:1.375rem;font-weight:600;letter-spacing:-.05em}
 .brand-mark {display:block;width:32px;height:32px;flex-shrink:0} .brand-period {color:var(--accent)}
-.scope-control {display:grid;gap:8px;padding:0 4px} .scope-control label {font-size:.8125rem;color:var(--secondary)}
-select,input,textarea {background:var(--canvas);border:1px solid var(--line)} select {min-width:0;width:100%;height:36px;padding:0 28px 0 10px;font-size:.875rem} .scope-control select {font-weight:600}
-.view-nav {display:grid;gap:4px}
-.view-nav button,.project-list button {display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;font-size:.875rem;padding:8px 12px;min-height:36px}
-.view-nav button:hover,.project-list button:hover {background:var(--hover)}
-.view-nav button[aria-current="page"],.project-list button[aria-current="true"] {background:var(--nav-selected);color:var(--ink)}
+select,input,textarea {background:var(--canvas);border:1px solid var(--line)} select {min-width:0;width:100%;height:36px;padding:0 28px 0 10px;font-size:.875rem}
+.view-nav {display:grid;gap:4px;flex-shrink:0}
+.view-nav button {display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;font-size:.875rem;padding:8px 12px;min-height:36px}
+.view-nav button:hover {background:var(--hover)}
+.view-nav button[aria-current="page"] {background:var(--nav-selected);color:var(--ink)}
 .nav-count {font-size:.8125rem;font-variant-numeric:tabular-nums;color:var(--secondary)}
-.project-section {display:flex;flex:1;min-height:0;flex-direction:column;gap:8px}
+.project-section {display:grid;gap:8px;min-width:0;flex-shrink:0;margin-bottom:auto}
 .project-heading {display:flex;align-items:center;justify-content:space-between;padding:0 8px}
 .project-section h2 {font-size:.8125rem;color:var(--secondary);letter-spacing:0}
-.project-section>input {width:100%;min-width:0;height:34px;padding:7px 10px;font-size:.8125rem;background:var(--sidebar)}
-.project-list {display:grid;align-content:start;gap:8px;overflow-y:auto;min-height:0;flex:1;scrollbar-gutter:stable}
-.project-list ul {list-style:none;margin:0;padding:0;display:grid;gap:2px;min-width:0}
-.project-list button {width:100%;justify-content:flex-start;gap:10px;color:var(--secondary);min-width:0;min-height:34px;padding:7px 8px}
-.project-list .caption {padding:4px 8px}
-.project-marker {width:5px;height:5px;flex-shrink:0;border-radius:50%;background:var(--secondary);opacity:.45}
-.project-list button[aria-current="true"] .project-marker {background:var(--accent);opacity:1}
-.project-list button[aria-current="true"] .project-name {font-weight:600}
-.project-list button:disabled .project-marker {background:var(--error);opacity:1}
-.project-name {min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;line-height:20px}
-.project-group {min-width:0;border-top:1px solid var(--line);padding-top:8px}
-.project-group summary {display:list-item;margin-left:18px;padding:6px 8px 6px 0;font-size:.75rem;color:var(--secondary);cursor:pointer;user-select:none}
-.project-group summary:hover {color:var(--ink)} .project-group summary:focus-visible {outline:2px solid var(--accent);outline-offset:-2px;border-radius:var(--radius)}
-.project-group summary .nav-count {float:right;font-size:inherit;margin-left:8px}
-.project-group ul {margin-top:4px}
+.project-section>select {font-weight:600}
+.project-section>.caption {padding:0 4px}
 .appearance-control {display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:.8125rem;color:var(--secondary)}
 .appearance-control select {width:120px;height:32px;background:var(--sidebar);font-size:.8125rem}
-.sidebar-bottom {display:grid;gap:8px;padding:12px 8px 0;border-top:1px solid var(--line)}
+.sidebar-bottom {display:grid;gap:8px;padding:12px 8px 0;border-top:1px solid var(--line);flex-shrink:0}
 .local-label {display:flex;gap:8px;align-items:center;font-size:.8125rem;color:var(--secondary)}
 .status-dot {width:6px;height:6px;flex-shrink:0;border-radius:50%;background:var(--success)}
 .sidebar-bottom button {text-align:left;font-size:.8125rem;padding:0;display:flex;justify-content:space-between;gap:8px;color:var(--secondary)} .sidebar-bottom button:hover {color:var(--ink)}
@@ -138,7 +124,7 @@ dt {color:var(--ink);font-weight:600} dd {margin:0;color:var(--secondary);overfl
 .dialog-description {margin-bottom:24px} .persona-section {display:grid;gap:12px;padding:20px 0;border-top:1px solid var(--line)} .persona-section pre {white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:inherit;font-size:1rem;line-height:1.8} .persona-dialog>.caption {margin-top:24px}
 .persona-section ol {margin:0;padding-left:24px;display:grid;gap:20px;line-height:1.8;overflow-wrap:anywhere} .persona-section li {padding-left:4px} .persona-section li p {margin-top:4px}
 .system-properties {margin-bottom:28px} .system-dialog section {display:grid;gap:12px;padding-top:24px;border-top:1px solid var(--line)}
-.navigation-dialog {padding:0;max-width:340px} .navigation-close {padding:12px 16px 0;display:flex;justify-content:flex-end;background:var(--sidebar)} .navigation-dialog .sidebar {display:flex;border:0;height:min(680px,calc(100dvh - 130px));min-height:440px}
+.navigation-dialog {padding:0;max-width:340px} .navigation-close {padding:12px 16px 0;display:flex;justify-content:flex-end;background:var(--sidebar)} .navigation-dialog .sidebar {display:flex;border:0;height:min(680px,calc(100dvh - 130px));min-height:0}
 @media(max-width:1180px) {
   .app-shell {grid-template-columns:1fr} .app-shell>.sidebar {display:none}
   .mobile-navigation {display:inline-flex;padding:5px 8px;background:var(--well);border:1px solid var(--line);font-size:.8125rem;min-height:30px}
@@ -158,9 +144,9 @@ dt {color:var(--ink);font-weight:600} dd {margin:0;color:var(--secondary);overfl
   .properties dl,.system-properties {grid-template-columns:1fr;gap:4px} .properties dd,.system-properties dd {margin-bottom:12px}
   .notice {padding:12px 16px} .dialog {padding:24px} .dialog-actions {flex-wrap:wrap} .change-values {grid-template-columns:1fr;gap:8px}
   .check-option {font-size:1rem} .check-option input {width:20px;height:20px} .navigation-dialog {padding:0}
-  .project-section>input,.appearance-control select {height:44px;font-size:1rem} .project-group summary {font-size:.875rem;min-height:44px;padding-top:12px;padding-bottom:12px}
+  .project-section>select,.appearance-control select {height:44px;font-size:1rem}
 }
-@media(pointer:coarse) {.view-nav button,.project-list button,.sidebar-bottom button,.mobile-navigation,.project-group summary {min-height:48px}}
+@media(pointer:coarse) {.view-nav button,.sidebar-bottom button,.mobile-navigation {min-height:48px}}
 @media(prefers-reduced-motion:reduce) {*,*::before,*::after {scroll-behavior:auto!important}}
 .knowledge-area {display:grid;grid-template-columns:320px minmax(0,1fr);min-height:0;overflow:auto;flex:1}
 .knowledge-area[hidden] {display:none}

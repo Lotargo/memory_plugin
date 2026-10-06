@@ -20,18 +20,19 @@
   <div class="app-shell" id="shell">
     <aside class="sidebar" id="sidebar" aria-label="Навигация и область памяти">
       <div class="brand"><img class="brand-mark" src="/favicon.svg" alt="" width="32" height="32"><span>memory<span class="brand-period">.</span></span></div>
-      <div class="scope-control">
-        <label for="target">Область памяти</label>
-        <select id="target" name="target" aria-describedby="scopeHint"><option value="global">Глобальная память</option></select>
-        <p id="scopeHint" class="caption">Доступна во всех проектах</p>
-      </div>
       <nav class="view-nav" aria-label="Разделы памяти">
         <button type="button" data-view="notebook" aria-current="page"><span>Все записи</span><span id="notebookCount" class="nav-count">—</span></button>
         <button type="button" data-view="persona"><span>Инструкции</span><span id="directiveCount" class="nav-count">—</span></button>
         <button type="button" data-view="archive"><span>История</span><span id="archiveCount" class="nav-count">—</span></button>
         <button type="button" data-view="knowledge"><span>Знания</span></button>
       </nav>
-      <section class="project-section" aria-labelledby="projectsHeading"><div class="project-heading"><h2 id="projectsHeading">Проекты</h2><span id="projectCount" class="nav-count"></span></div><button id="manageProjects" type="button" class="button ghost" aria-haspopup="dialog">Управление проектами</button><label class="visually-hidden" for="projectSearch">Поиск проектов</label><input id="projectSearch" name="projectSearch" type="search" placeholder="Найти проект…" autocomplete="off" aria-controls="projects"><div id="projects" class="project-list"></div></section>
+      <section class="project-section" aria-labelledby="projectsHeading">
+        <div class="project-heading"><h2 id="projectsHeading">Проекты</h2><span id="projectCount" class="nav-count"></span></div>
+        <label class="visually-hidden" for="target">Проект или глобальная память</label>
+        <select id="target" name="target" aria-describedby="scopeHint"><option value="global">Глобальная память</option></select>
+        <p id="scopeHint" class="caption">Доступна во всех проектах</p>
+        <button id="manageProjects" type="button" class="button ghost" aria-haspopup="dialog">Управление проектами</button>
+      </section>
       <div class="sidebar-bottom">
         <div class="appearance-control"><label for="theme">Тема</label><select id="theme" name="theme"><option value="system">Системная</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></div>
         <span class="local-label"><span class="status-dot" aria-hidden="true"></span>На этом компьютере</span>
