@@ -50,6 +50,8 @@ function openDialog(id) {
   dialog.showModal();
 }
 document.querySelectorAll('dialog').forEach(dialog => {
+  // Backdrop dismissal requests cancel, preserving the same guards as Escape.
+  dialog.setAttribute('closedby', 'any');
   dialog.addEventListener('close', () => {
     const previous = focusBeforeDialog.get(dialog);
     if (previous?.isConnected && previous.getClientRects().length) previous.focus();
