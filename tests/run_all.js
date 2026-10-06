@@ -38,6 +38,7 @@ const testSuites = [
   { category: "Integration", name: "notebook_tui", file: "tests/integration/notebook_tui.test.js" },
   { category: "Integration", name: "directive_transfer", file: "tests/integration/directive_transfer.test.js" },
   { category: "Integration", name: "persona_preview", file: "tests/integration/persona_preview.test.js" },
+  { category: "Integration", name: "persona_delivery", file: "tests/integration/persona_delivery.test.js" },
   { category: "Integration", name: "prompt_service", file: "tests/integration/prompt_service.test.js" },
   { category: "Integration", name: "maintenance", file: "tests/integration/maintenance.test.js" },
   { category: "Integration", name: "rag_maintenance", file: "tests/integration/rag_maintenance.test.js" },

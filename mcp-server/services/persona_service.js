@@ -5,6 +5,8 @@ import { buildPersonaOverlayBlock, activePersonaDirectives } from '../prompt_man
 import { buildMemoryContext, buildOpenCodeV2MemoryContext, buildSystemMemoryOverlay, partitionMemoryEntries } from '../context/opencode_context.js';
 import { readNotebook, listNotebookTargets, serviceError } from './notebook_service.js';
 import { withSnapshotLock } from '../storage/snapshot_lock.js';
+import { compilePersona, renderClaudePersona } from '../context/persona_context.js';
+import { isNativePersonaEnabled } from './persona_delivery_service.js';
 
 export const PERSONA_CLIENTS = [
   { id: 'opencode', name: 'OpenCode', builder: 'native' },
@@ -52,7 +54,14 @@ export async function previewPersonaContext({ key, client = 'opencode' } = {}) {
     }
     const globalLines = stores.get(GLOBAL_KEY) || [], projectLines = key === GLOBAL_KEY ? [] : stores.get(key) || [];
     const native = selectedClient.builder === 'native';
+    const field = compilePersona(globalLines, now);
     return { client: selectedClient, clients: PERSONA_CLIENTS, target: selected.target,
+      persona: field.persona, personaSourceIds: field.sourceIds,
+      projectPersona: compilePersona(projectLines, now).persona,
+      nativeDeliveryEnabled: isNativePersonaEnabled(selectedClient.id),
+      adapter: { mode: selectedClient.id === 'claude' ? 'output-style-or-global-instructions'
+        : native ? 'native-context' : selectedClient.id === 'codex' ? 'global-instructions' : 'shared-global-instructions',
+        text: selectedClient.id === 'claude' ? renderClaudePersona(field.persona) : buildPersonaOverlayBlock(globalLines, now) },
       versions: { global: global.version, selected: selected.version }, observedAt: new Date(now).toISOString(),
       directives, unavailable,
       // Preserve the original generic preview fields for existing adapters.

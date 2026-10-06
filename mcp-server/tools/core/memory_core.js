@@ -213,7 +213,10 @@ export async function recallFacts(
     if (isKeepFact(factLine)) badges.push("KEEP");
     if (isSuperseded(factLine)) badges.push("SUPERSEDED");
     if (meta.inject === "1") badges.push("INJECT");
-    if (isDirectiveFact(factLine)) badges.push("DIRECTIVE");
+    if (isDirectiveFact(factLine)) {
+      const { personaExclusionReasons } = await import('../../context/persona_context.js');
+      badges.push(personaExclusionReasons(factLine, now).length ? 'INACTIVE_DIRECTIVE' : 'DIRECTIVE');
+    }
     if (meta.disabled === "1") badges.push("DISABLED");
     if (meta.id) badges.push(`id:${meta.id}`);
     if (meta.tags) badges.push(`tags:${meta.tags}`);

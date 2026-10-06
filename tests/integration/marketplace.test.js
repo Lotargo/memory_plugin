@@ -94,7 +94,9 @@ try {
     await assert.rejects(runSetup(['setup', `--${client}`]), /duplicate/);
     const target = client === 'codex' ? 'Codex' : 'Claude Code';
     assert.equal((await enableGlobalPrompt([target]))[0].status, 'plugin_managed');
-    assert.equal((await syncPersonaPrompts([target], []))[0].status, 'plugin_managed');
+    const personalitySync = (await syncPersonaPrompts([target], []))[0];
+    assert.ok(['up_to_date', 'synced'].includes(personalitySync.status));
+    assert.equal(personalitySync.mode, 'global-instructions', 'Native personality lifecycle is independent of the marketplace MCP channel');
     const prompt = join(home, client === 'codex' ? '.codex' : '.claude', client === 'codex' ? 'AGENTS.md' : 'CLAUDE.md');
     if (existsSync(prompt)) assert.ok(!(await readFile(prompt, 'utf8')).includes('START MEMORY'));
     const entry = join(output, client, 'plugins', 'memory', 'scripts', 'entry.cjs');

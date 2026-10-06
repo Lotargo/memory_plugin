@@ -1,5 +1,6 @@
 import { parseFactEntry, factMeta, isSuperseded, displayFact, isDirectiveFact, isDisabledFact, isExpiredLine } from "../fact_format.js";
 import { MEMORY_ROUTING_POLICY } from '../tools/core/memory_routing.js';
+import { personaExclusionReasons, compilePersona } from './persona_context.js';
 
 const MEMORY_INSTRUCTION =
   "AUTO-INJECTED SESSION MEMORY (ALREADY LOADED):\n" +
@@ -41,7 +42,7 @@ export function partitionMemoryEntries(entries, now = Date.now()) {
   const directives = [];
   const facts = [];
   for (const entry of entries.filter((item) => !isSuperseded(item) && !isDisabledFact(item))) {
-    if (isDirectiveFact(entry) && !isExpiredLine(entry, now)) directives.push(entry);
+    if (!personaExclusionReasons(entry, now).length) directives.push(entry);
     else facts.push(entry);
   }
   return { directives, facts };
@@ -116,11 +117,9 @@ export function buildMemoryContext(globalFacts, projectFacts, projectKey, inject
 }
 
 export function buildSystemMemoryOverlay(globalFacts, projectFacts, projectKey, now = Date.now()) {
-  const global = partitionMemoryEntries(globalFacts, now).directives;
-  const project = partitionMemoryEntries(projectFacts, now).directives;
   const parts = [OPENCODE_SYSTEM_MEMORY_POLICY];
-  const globalText = formatInjectedFacts(global, null, now);
-  const projectText = formatInjectedFacts(project, null, now);
+  const globalText = compilePersona(globalFacts, now).persona;
+  const projectText = compilePersona(projectFacts, now).persona;
   if (globalText) parts.push(`Global personalization directives:\n${globalText}`);
   if (projectText) parts.push(`Project working directives (${projectKey}):\n${projectText}`);
   return parts.join("\n\n");

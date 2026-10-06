@@ -40,7 +40,10 @@ if (process.argv[2] === 'uninstall' && process.argv[3] && !process.argv[3].start
   await handleUninstallCommand(process.argv.slice(3));
   process.exit(process.exitCode || 0);
 }
-if (process.argv[2] === 'rag-maintenance') {
+if (process.argv[2] === 'persona') {
+  const { handlePersonaCommand } = await import('./cli/persona_commands.js');
+  await handlePersonaCommand(process.argv.slice(3));
+} else if (process.argv[2] === 'rag-maintenance') {
   const { handleRagMaintenanceCommand } = await import('./cli/rag_maintenance_commands.js');
   await handleRagMaintenanceCommand(process.argv.slice(3));
 } else if (process.argv[2] === 'prompts') {

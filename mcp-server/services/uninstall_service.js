@@ -11,6 +11,8 @@ import { getGlobalPromptTargets } from '../prompt_manager.js';
 import { preparePromptRemoval } from './prompt_service.js';
 import { atomicWrite, withSnapshotLock } from '../storage/snapshot_lock.js';
 import { MEMORY_DIR } from '../memory.js';
+import { PERSONA_DELIVERY_PATHS, prepareNativePersonaRemoval } from './persona_delivery_service.js';
+import { stripPersonaOverlayBlock } from '../prompt_manager.js';
 
 const paths = resolveClientPaths();
 const root = path.join(MEMORY_DIR, 'uninstall');
@@ -79,6 +81,13 @@ function definition(client) {
 function allowedFiles(client) {
   const target = definition(client), files = new Map([['config', target.config], ['prompt-state', paths.promptStateFile]]);
   if (target.prompt) files.set('prompt', target.prompt);
+  files.set('persona-state', PERSONA_DELIVERY_PATHS.state);
+  files.set('persona-field', PERSONA_DELIVERY_PATHS.field);
+  if (client === 'claude') {
+    files.set('persona-style', PERSONA_DELIVERY_PATHS.claudeStyle);
+    files.set('persona-settings', PERSONA_DELIVERY_PATHS.claudeSettings);
+  }
+  if (client === 'antigravity') files.set('persona-shared-gemini', PERSONA_DELIVERY_PATHS.gemini);
   for (const entry of tree(packagedSkill)) if (!entry.directory) files.set(`skill:${entry.name}`, path.join(target.skill, entry.name));
   return files;
 }
@@ -222,6 +231,19 @@ async function prepare(input, rows) {
       const id = file.path === paths.promptStateFile ? 'prompt-state' : 'prompt', before = read(file.path);
       if (text(before) !== file.before.text || before.exists !== file.before.exists) fail('CONFLICT', 'Prompt changed during review.');
       add(id, before, file.after.exists ? fromText(file.after.text, before) : absent());
+    }
+    const personality = await prepareNativePersonaRemoval(client);
+    for (const file of personality.files) {
+      const id = [...allowed].find(([, filePath]) => filePath === file.path)?.[0];
+      if (!id) fail('UNSUPPORTED', 'Unexpected native personality removal target.');
+      const before = read(file.path);
+      if (before.exists !== file.before.exists || text(before) !== file.before.text) fail('CONFLICT', 'Personality changed during review.');
+      const existing = files.find(item => item.path === file.path);
+      if (existing) {
+        // The legacy operation removes the memory prompt, the native one removes
+        // personality. Merge both edits rather than restoring either block.
+        if (existing.after.exists) existing.after = fromText(stripPersonaOverlayBlock(text(existing.after)), before);
+      } else add(id, before, file.after.exists ? fromText(file.after.text, before) : absent());
     }
     // Even a currently empty prompt/state participates in stale-preview checks.
     for (const file of [target.prompt, paths.promptStateFile].filter(Boolean)) observations.push([file, read(file)]);

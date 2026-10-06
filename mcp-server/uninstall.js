@@ -536,6 +536,11 @@ export async function runUninstall(rawArgs = process.argv.slice(2)) {
   // 6. Global Prompt blocks
   try {
     const { disableGlobalPrompt, getGlobalPromptStatus } = await import("./prompt_manager.js");
+    const { removeNativePersonaForUninstall } = await import('./services/persona_delivery_service.js');
+    const personalityClients = [opts.doOpenCode && 'opencode', opts.doCodex && 'codex', opts.doClaude && 'claude',
+      opts.doGemini && 'gemini', opts.doAntigravity && 'antigravity'].filter(Boolean);
+    const personality = await removeNativePersonaForUninstall(personalityClients, { dryRun: opts.dryRun });
+    if (personality.changed) console.log(`  [OK] Native personality: ${opts.dryRun ? 'would update' : 'updated'} ${personality.changed} owned file(s)`);
     const promptTargets = [];
     if (opts.doCodex) promptTargets.push("Codex");
     if (opts.doClaude) promptTargets.push("Claude Code");

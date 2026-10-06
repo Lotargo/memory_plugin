@@ -7,10 +7,11 @@ export function createPersonaPreview({ api, node, openDialog, scope, errorText, 
   const dialog = $('personaDialog');
   function render() {
     if (!preview) return;
+    $('personaField').value = preview.persona || '';
     const native = preview.coverage === 'native-builders';
     $('personaCoverage').textContent = native
       ? 'Настоящие построители OpenCode V1 и V2: глобальная память и выбранный проект. Инструкции передаются полностью, без лимита количества.'
-      : 'Частичный предпросмотр: шаблон глобального persona overlay. Содержимое файлов клиента, установка плагина, recall и контекст активной сессии здесь не проверяются.';
+      : 'Предпросмотр формата адаптера из глобальных инструкций. Содержимое файлов клиента и контекст активной сессии здесь не проверяются.';
     $('personaObserved').textContent = `Снимок памяти: ${new Date(preview.observedAt).toLocaleString('ru')}. Передача в активную сессию и использование агентом: нет данных.`;
     $('personaUnavailable').hidden = !preview.unavailable.length;
     $('personaUnavailable').textContent = preview.unavailable.length
@@ -38,6 +39,11 @@ export function createPersonaPreview({ api, node, openDialog, scope, errorText, 
       section.append(list); $('personaContent').append(section);
     }
     $('personaBlocks').replaceChildren();
+    if (preview.adapter) {
+      const details = node('details', null, 'persona-block');
+      details.append(node('summary', `Формат клиента (шаблон): ${preview.client.name}`), node('pre', preview.adapter.text || 'Блок пуст.', 'knowledge-text'));
+      $('personaBlocks').append(details);
+    }
     for (const block of preview.blocks) {
       const details = node('details', null, 'persona-block');
       details.append(node('summary', `Исходный блок: ${block.label}`), node('pre', block.text || 'Блок пуст.', 'knowledge-text'));
@@ -48,6 +54,7 @@ export function createPersonaPreview({ api, node, openDialog, scope, errorText, 
     const current = ++sequence, client = $('personaClient').value;
     preview = null;
     $('personaContent').replaceChildren(); $('personaBlocks').replaceChildren();
+    $('personaField').value = '';
     for (const id of ['personaCoverage', 'personaObserved', 'personaSummary']) $(id).textContent = '';
     $('personaUnavailable').hidden = true;
     $('personaError').hidden = true;

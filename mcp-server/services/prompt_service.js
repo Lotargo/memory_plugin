@@ -8,6 +8,7 @@ import { START_MARKER, END_MARKER, PERSONA_START_MARKER, PERSONA_END_MARKER,
   PROMPT_BLOCK, getGlobalPromptTargets, buildIncludeBlock, buildPersonaOverlayBlock } from '../prompt_manager.js';
 import { atomicWrite, withSnapshotLock } from '../storage/snapshot_lock.js';
 import { readMemory, MEMORY_DIR, GLOBAL_KEY } from '../memory.js';
+import { isNativePersonaEnabled, PERSONA_DELIVERY_PATHS } from './persona_delivery_service.js';
 
 const paths = resolveClientPaths();
 const journalPath = path.join(paths.agentConfigDir, 'prompt-journal.json');
@@ -89,6 +90,8 @@ async function channel(target) {
 function ensureNoJournal() {
   safePath(journalPath);
   if (fs.existsSync(journalPath)) throw fault('RECOVERY_REQUIRED', 'An interrupted prompt operation requires recovery before another preview.');
+  safePath(PERSONA_DELIVERY_PATHS.journal);
+  if (fs.existsSync(PERSONA_DELIVERY_PATHS.journal)) throw fault('RECOVERY_REQUIRED', 'An interrupted personality operation requires memory-cli persona recover --confirm.');
 }
 async function snapshot(target, entries) {
   const current = read(target.filePath), shared = read(paths.promptFile), stateFile = read(paths.promptStateFile);
@@ -97,14 +100,19 @@ async function snapshot(target, entries) {
   // Directives containing management delimiters must never become file controls.
   if (persona && (blocks(persona).length !== 1 || blocks(persona)[0].kind !== 'persona')) throw fault('UNSUPPORTED', 'Directive text contains reserved managed markers.');
   const spans = blocks(current.text), owner = state[target.filePath];
-  return { current, shared, stateFile, state, integration, persona, spans, owner };
+  return { current, shared, stateFile, state, integration, persona, spans, owner,
+    nativePersona: isNativePersonaEnabled() };
 }
 function plan(target, operation, snap) {
   let text = snap.current.text;
   const prompt = target.includeSupported ? buildIncludeBlock(paths.promptFile) : PROMPT_BLOCK;
   if (operation === 'enable') text = replaceBlock(text, 'prompt', prompt);
   if (operation === 'disable') text = replaceBlock(text, 'prompt', '');
-  text = replaceBlock(text, 'persona', operation === 'disable' ? '' : snap.persona);
+  if (snap.nativePersona) {
+    // Personality has its own lifecycle. Memory-prompt operations must not reintroduce
+    // old Claude/Antigravity overlays or disable native Codex/Gemini personality.
+    if (!['codex', 'gemini'].includes(target.id)) text = replaceBlock(text, 'persona', '');
+  } else text = replaceBlock(text, 'persona', operation === 'disable' ? '' : snap.persona);
   blocks(text);
   if (Buffer.byteLength(text, 'utf8') > 512 * 1024) throw fault('UNSUPPORTED', 'The proposed client file exceeds 512 KiB.');
   // Only delete an unmodified file we originally created. Unknown ownership is
@@ -120,7 +128,7 @@ function plan(target, operation, snap) {
 }
 function version(target, operation, snap, proposal, entries) {
   return hash(JSON.stringify({ target: target.id, operation, current: snap.current, shared: snap.shared,
-    state: snap.stateFile, integration: snap.integration, entries, proposal }));
+    state: snap.stateFile, integration: snap.integration, nativePersona: snap.nativePersona, entries, proposal }));
 }
 async function preview(target, operation, entries) {
   ensureNoJournal();

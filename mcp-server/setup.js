@@ -313,6 +313,9 @@ export async function runSetup(args = process.argv.slice(2)) {
         console.log(`  [WARN] ${r.name}: failed to enable global prompt (${r.error})`);
       }
     });
+    const { initializeNativePersona } = await import('./services/persona_delivery_service.js');
+    const personality = await initializeNativePersona([...promptTargets, ...(doOpenCode ? ['OpenCode'] : [])]);
+    for (const item of personality) console.log(`  [OK] ${item.name}: personality ${item.status} (${item.mode})`);
   } catch (err) {
     console.log("  [SKIP] Global prompt setup skipped:", err.message);
   }

@@ -40,6 +40,8 @@ Usage:
   memory-cli migrate_titles [--key <key>]
   memory-cli dev-link                Link the working repository for local development
   memory-cli sync-persona            Synchronize global directives into client prompts
+  memory-cli persona migrate --dry-run
+                                     Preview native personality migration (Notebook unchanged)
   memory-cli migrate-persona [--dry-run]
                                      Mark legacy global persona entries as directives
   memory-cli enable-prompt | disable-prompt

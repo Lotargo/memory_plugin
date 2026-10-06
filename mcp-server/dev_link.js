@@ -132,6 +132,9 @@ export async function runDevLink({ skipNpmLink = false } = {}) {
   console.log(`  [OK] Original config backup: ${linked.backupPath}`);
   const { enableGlobalPrompt } = await import("./prompt_manager.js");
   const promptResults = await enableGlobalPrompt();
+  const { initializeNativePersona } = await import('./services/persona_delivery_service.js');
+  const personalityResults = await initializeNativePersona();
+  for (const result of personalityResults) console.log(`  [OK] ${result.name}: personality ${result.status} (${result.mode})`);
   const promptFailures = promptResults.filter((result) => result.status === "failed");
   if (promptFailures.length) {
     throw new Error(`Failed to synchronize client prompts: ${promptFailures.map((item) => item.name).join(", ")}`);

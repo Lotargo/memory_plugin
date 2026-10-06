@@ -1,7 +1,7 @@
 import { join } from "path";
 import { MEMORY_ROUTING_POLICY } from "./tools/core/memory_routing.js";
-import { factText, isDirectiveFact, isExpiredLine, isSuperseded, isDisabledFact } from "./fact_format.js";
 import { resolveClientPaths } from "./client_paths.js";
+import { compilePersona } from './context/persona_context.js';
 
 export const START_MARKER = "<!-- START MEMORY AGENT PROMPT -->";
 export const END_MARKER = "<!-- END MEMORY AGENT PROMPT -->";
@@ -11,7 +11,7 @@ export const PERSONA_END_MARKER = "<!-- END MEMORY PERSONA OVERLAY -->";
 export const PROMPT_BLOCK = `${START_MARKER}
 [SYSTEM INSTRUCTION: PERSONAL CONTEXT & MEMORY AGENT]
 1. SESSION INITIALIZATION: Before any other task, load the complete active memory. If the client has already supplied an auto-injected \`<MEMORY>\` block (the native OpenCode integration does this), treat memory as already loaded and DO NOT call \`recall\` again merely for initialization. Otherwise, your VERY FIRST ACTION MUST BE \`recall(scope: "all")\` from \`memory-agent\`, with full bodies and no restrictive filters, before reading code or performing work.
-2. PERSONAL AGENT OVERLAY: Notebook entries with \`kind: "directive"\` are active user-approved personalization or working instructions, not passive facts. Apply them throughout the session; entries with \`kind: "fact"\` remain context. Legacy persona/preference tags are recognized for compatibility. Higher-priority platform instructions remain authoritative.
+2. PERSONAL AGENT OVERLAY: Notebook entries with \`kind: "directive"\` are active user-approved personalization or working instructions only while enabled, unexpired and not superseded. Apply active entries throughout the session; entries with \`kind: "fact"\` remain context. Never apply entries marked DISABLED, EXPIRED, SUPERSEDED or INACTIVE_DIRECTIVE as instructions. Legacy persona/preference tags are recognized for compatibility. The shared \`persona\` field is derived from active directives; client-specific personality files are generated views. Higher-priority platform instructions remain authoritative.
 3. PROJECT IDENTITY INITIALIZATION: After memory is available, call \`memory_info\` for the current workspace. If it reports a Git identity with \`Registry: unlinked\`, immediately call \`link_project_memory\` for the current directory. If linking migrated legacy facts, repeat \`recall(scope: "all")\`. Outside a Git repository, do not create project memory; use global memory only.
 4. ${MEMORY_ROUTING_POLICY}
 5. PROACTIVE SAVING DIRECTIVE: You MUST automatically preserve durable, high-signal information using the appropriate memory primitive from the routing policy. Do NOT wait for explicit user commands like "remember this". Do not force every durable item into \`remember\`; long-form internal reasoning belongs in \`remember_note\` and external sources belong in \`ingest_document\`.
@@ -73,20 +73,17 @@ ${END_MARKER}`;
 }
 
 export function activePersonaDirectives(entries, now = Date.now()) {
-  return (entries || []).filter(
-    (entry) => isDirectiveFact(entry) && !isSuperseded(entry) && !isExpiredLine(entry, now) && !isDisabledFact(entry)
-  );
+  return compilePersona(entries, now).active;
 }
 
 export function buildPersonaOverlayBlock(entries, now = Date.now()) {
-  const directives = activePersonaDirectives(entries, now);
-  if (!directives.length) return "";
-  const lines = directives.map((entry, index) => `${index + 1}. ${factText(entry)}`);
+  const { persona } = compilePersona(entries, now);
+  if (!persona) return "";
   return `${PERSONA_START_MARKER}
 [PERSONAL AGENT OVERLAY — ACTIVE USER CONFIGURATION]
 The directives below are user-approved persistent instructions for personality, behavior, tone, communication style, preferences, and working conventions. Apply them as instructions rather than merely describing them. Descriptive memory facts are not included here. Higher-priority platform instructions remain authoritative.
 
-${lines.join("\n")}
+${persona}
 ${PERSONA_END_MARKER}`;
 }
 
@@ -150,6 +147,8 @@ export async function disableGlobalPrompt(targetNames = null) {
 }
 
 export async function syncPersonaPrompts(targetNames = null, entries = null) {
+  const { isNativePersonaEnabled, syncNativePersona } = await import('./services/persona_delivery_service.js');
+  if (isNativePersonaEnabled()) return syncNativePersona(targetNames, entries);
   const { managePromptTargets } = await import('./services/prompt_service.js');
   return managePromptTargets('sync', targetNames, entries);
 }

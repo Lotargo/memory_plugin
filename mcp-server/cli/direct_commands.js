@@ -7,6 +7,10 @@ import {
 } from "../memory.js";
 
 export async function handleDirectCommands(cliArgs) {
+  if (cliArgs[0] === 'persona') {
+    const { handlePersonaCommand } = await import('./persona_commands.js');
+    await handlePersonaCommand(cliArgs.slice(1)); return true;
+  }
   if (cliArgs[0] === 'clients') {
     const { handleClientCommand } = await import('./client_commands.js');
     await handleClientCommand(cliArgs.slice(1)); return true;
