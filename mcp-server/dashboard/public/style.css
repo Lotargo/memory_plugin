@@ -44,6 +44,23 @@ select,input,textarea {background:var(--canvas);border:1px solid var(--line)} se
 .project-heading {display:flex;align-items:center;justify-content:space-between;padding:0 8px}
 .project-section h2 {font-size:.8125rem;color:var(--secondary);letter-spacing:0}
 .project-section>select {font-weight:600}
+.scope-trigger {display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-width:0;min-height:40px;padding:8px 12px;text-align:left;border:1px solid var(--line);border-radius:var(--radius);background:var(--canvas);font-size:.875rem;font-weight:500}
+.scope-trigger:hover:not(:disabled) {background:var(--hover)} .scope-trigger>span {overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scope-trigger svg {width:16px;height:16px;flex-shrink:0;color:var(--secondary)} .scope-trigger[aria-expanded="true"] svg {transform:rotate(180deg)}
+.project-picker {position:fixed;inset:auto;margin:0;padding:8px;border:1px solid var(--line);border-radius:var(--radius);background:var(--canvas);color:var(--ink);box-shadow:0 8px 24px rgb(0 0 0 / .18);overflow:hidden}
+.project-picker:popover-open {display:flex;flex-direction:column;gap:8px}
+.project-picker>input {flex-shrink:0;width:100%;min-width:0;height:38px;padding:8px 10px;font-size:.875rem;background:var(--well)}
+.scope-global {flex-shrink:0;border-bottom:1px solid var(--line);padding-bottom:8px}
+.scope-option {display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-width:0;min-height:36px;padding:8px 10px;text-align:left;border-radius:var(--radius);font-size:.875rem;font-weight:400}
+.scope-option:hover:not(:disabled) {background:var(--hover)} .scope-option[aria-current="true"] {background:var(--nav-selected)}
+.scope-option:focus-visible {outline-offset:-2px} .scope-option-text {display:grid;gap:2px;min-width:0}
+.scope-option-name {overflow:hidden;text-overflow:ellipsis;white-space:nowrap} .scope-option-hint {font-size:.75rem;color:var(--secondary)}
+.scope-option-check {width:16px;flex-shrink:0;color:var(--accent);text-align:center}
+.project-picker-list {overflow-y:auto;min-height:0;overscroll-behavior:contain;scrollbar-gutter:stable}
+.scope-group+.scope-group {margin-top:12px} .scope-group h3 {display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 10px 6px;font-size:.75rem;font-weight:500;color:var(--secondary)}
+.scope-group h3 .nav-count {font-size:inherit} .scope-group ul {list-style:none;margin:0;padding:0;display:grid;gap:2px}
+.scope-count {padding:8px 10px 0;border-top:1px solid var(--line);font-size:.75rem;color:var(--secondary);flex-shrink:0}
+.scope-empty {padding:12px 10px;font-size:.875rem;color:var(--secondary)}
 .project-section>.caption {padding:0 4px}
 .appearance-control {display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:.8125rem;color:var(--secondary)}
 .appearance-control select {width:120px;height:32px;background:var(--sidebar);font-size:.8125rem}
@@ -144,7 +161,7 @@ dt {color:var(--ink);font-weight:600} dd {margin:0;color:var(--secondary);overfl
   .properties dl,.system-properties {grid-template-columns:1fr;gap:4px} .properties dd,.system-properties dd {margin-bottom:12px}
   .notice {padding:12px 16px} .dialog {padding:24px} .dialog-actions {flex-wrap:wrap} .change-values {grid-template-columns:1fr;gap:8px}
   .check-option {font-size:1rem} .check-option input {width:20px;height:20px} .navigation-dialog {padding:0}
-  .project-section>select,.appearance-control select {height:44px;font-size:1rem}
+  .project-section>select,.scope-trigger,.appearance-control select {height:44px;font-size:1rem}
 }
 @media(pointer:coarse) {.view-nav button,.sidebar-bottom button,.mobile-navigation {min-height:48px}}
 @media(prefers-reduced-motion:reduce) {*,*::before,*::after {scroll-behavior:auto!important}}

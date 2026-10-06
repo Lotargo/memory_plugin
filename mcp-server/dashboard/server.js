@@ -44,6 +44,7 @@ assets.set('/links.js', ['links.js', 'text/javascript; charset=utf-8']);
 assets.set('/knowledge_removal.js',['knowledge_removal.js','text/javascript; charset=utf-8']);
 assets.set('/knowledge_editor.js', ['knowledge_editor.js', 'text/javascript; charset=utf-8']);
 assets.set('/projects.js', ['projects.js', 'text/javascript; charset=utf-8']);
+assets.set('/project_picker.js', ['project_picker.js', 'text/javascript; charset=utf-8']);
 assets.set('/settings.js', ['settings.js', 'text/javascript; charset=utf-8']);
 assets.set('/models.js', ['models.js', 'text/javascript; charset=utf-8']);
 assets.set('/resources.js', ['resources.js', 'text/javascript; charset=utf-8']);

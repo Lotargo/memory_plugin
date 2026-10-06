@@ -98,6 +98,16 @@ try {
   assert.match(themeAsset.headers.get("content-type"), /text\/javascript/);
   assert.match(themeAsset.headers.get("content-security-policy"), /script-src 'self'/);
   assert.ok(!(await themeAsset.text()).includes(token));
+  const appAsset = await fetch(app.origin + '/app.js');
+  assert.equal(appAsset.status, 200);
+  const appSource = await appAsset.text();
+  // Imported UI modules must be registered as JavaScript assets; otherwise the
+  // browser cannot initialize even though the root document returns HTTP 200.
+  for (const [, module] of appSource.matchAll(/from ['"]\.\/([^'"]+\.js)['"]/g)) {
+    const response = await fetch(`${app.origin}/${module}`);
+    assert.equal(response.status, 200, `Browser module ${module} must be served`);
+    assert.match(response.headers.get('content-type'), /text\/javascript/);
+  }
   assert.equal((await fetch(app.origin + "/api/notebook", { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: "{}" })).status, 403);
   const requestHeaders = { ...headers, "Content-Type": "application/json", Origin: app.origin };
   const created = await fetch(app.origin + "/api/notebook", { method: "POST", headers: requestHeaders, body: JSON.stringify({ key, expectedVersion: doc.version, action: "create", fields: { title: "HTTP test", body: "<img src=x onerror=alert(1)>", kind: "fact" } }) });

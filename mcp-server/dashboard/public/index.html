@@ -28,8 +28,15 @@
       </nav>
       <section class="project-section" aria-labelledby="projectsHeading">
         <div class="project-heading"><h2 id="projectsHeading">Проекты</h2><span id="projectCount" class="nav-count"></span></div>
-        <label class="visually-hidden" for="target">Проект или глобальная память</label>
-        <select id="target" name="target" aria-describedby="scopeHint"><option value="global">Глобальная память</option></select>
+        <label class="visually-hidden" id="projectPickerLabel" for="target">Проект или глобальная память</label>
+        <select id="target" name="target" hidden aria-hidden="true" tabindex="-1"><option value="global">Глобальная память</option></select>
+        <button id="projectPickerTrigger" class="scope-trigger" type="button" popovertarget="projectPicker" aria-haspopup="dialog" aria-expanded="false" aria-labelledby="projectPickerLabel projectPickerName" aria-describedby="scopeHint" disabled><span id="projectPickerName">Глобальная память</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+        <div id="projectPicker" class="project-picker" popover="auto" role="dialog" aria-labelledby="projectPickerHeading">
+          <h2 id="projectPickerHeading" class="visually-hidden">Выбор области памяти</h2>
+          <label class="visually-hidden" for="projectPickerSearch">Найти проект</label><input id="projectPickerSearch" type="search" placeholder="Найти проект…" autocomplete="off" autofocus aria-controls="projectPickerList">
+          <div id="projectPickerGlobal" class="scope-global"></div><div id="projectPickerList" class="project-picker-list"></div>
+          <p id="projectPickerCount" class="scope-count" role="status"></p>
+        </div>
         <p id="scopeHint" class="caption">Доступна во всех проектах</p>
         <button id="manageProjects" type="button" class="button ghost" aria-haspopup="dialog">Управление проектами</button>
       </section>

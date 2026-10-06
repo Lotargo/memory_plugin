@@ -12,6 +12,7 @@ import { createModels } from './models.js';
 import { filterNotebookRecords, historicalRecord } from './notebook_filters.js';
 import { createPersonaPreview } from './persona.js';
 import { createDirectiveTransfer } from './directive_transfer.js';
+import { createProjectPicker } from './project_picker.js';
 const $ = id => document.getElementById(id);
 // Programmatic heading focus still announces navigation, while pointer clicks
 // never draw a selection-like rectangle around the entire content block.
@@ -88,6 +89,7 @@ const knowledge = createKnowledgeBrowser({ api, node, notice, scopeKey: () => $(
   $('recordTitle').focus();
 } });
 const historical = historicalRecord;
+const projectPicker = createProjectPicker({ node, targets: () => state.overview?.targets || [], label: projectName, select: selectTarget });
 createProjectManager({ api, node, scopeKey: () => $('target').value, openDialog, allowDiscard, closeNavigation, onSaved: async result => {
   state.edit=null;
   await refresh();
@@ -177,6 +179,7 @@ function renderNavigation() {
   $('statusFilter').options[0].textContent = state.view === 'archive' ? 'Истёкшие и заменённые' : 'Текущие записи';
   $('create').disabled = !state.notebook || state.busy || state.loading || readOnly();
   $('target').disabled = state.busy || state.loading || !state.overview?.targets.length;
+  projectPicker.sync();
   $('create').title = state.allStores ? 'Выберите хранилище для новой записи.' : readOnly() ? 'Редактирование в этом режиме недоступно.' : '';
   $('allStores').disabled = state.busy || state.loading;
   $('collectionHint').hidden = !state.allStores;
@@ -491,7 +494,7 @@ function showSystem() {
   for (const [label, value] of [['Версия', overview?.version], ['Режим', overview?.mode], ['Хранилище', overview?.memoryDir], ['Известных проектов', overview ? String(overview.targets.filter(target => target.key !== 'global').length) : 'Не проверено'], ['Проверено', overview ? new Date(overview.observedAt).toLocaleString('ru') : 'Нет актуальных данных'], ['Модели', 'Состояние не проверялось'], ['Облако', 'Запросы не выполнялись'], ['Клиенты', 'Состояние не проверялось']]) property($('systemProperties'), label, value);
   openDialog('systemDialog');
 }
-function closeNavigation() { if ($('navigationDialog').open) $('navigationDialog').close(); }
+function closeNavigation() { projectPicker.close(); if ($('navigationDialog').open) $('navigationDialog').close(); }
 $('navigation').addEventListener('click', () => { $('mobileNavHost').append($('sidebar')); openDialog('navigationDialog'); });
 $('navigationDialog').addEventListener('close', () => $('shell').prepend($('sidebar')));
 $('target').addEventListener('change', event => selectTarget(event.target.value));
@@ -530,7 +533,7 @@ $('protectedConfirm').addEventListener('change', () => { $('confirmDelete').disa
 $('promptFiles').addEventListener('click', () => prompts.open());
 $('personaPreview').addEventListener('click', previewPersona); $('system').addEventListener('click', showSystem);
 document.addEventListener('keydown', event => {
-  if (event.key === '/' && !document.querySelector('dialog[open]') && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) { event.preventDefault(); $('search').focus(); }
+  if (event.key === '/' && !document.querySelector('dialog[open], :popover-open') && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) { event.preventDefault(); $('search').focus(); }
 });
 window.addEventListener('beforeunload', event => { if (dirty() || state.busy) { event.preventDefault(); event.returnValue = ''; } });
 refresh();
