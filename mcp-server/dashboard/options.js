@@ -17,6 +17,7 @@ export function parseWebPort(value) {
 
 export const WEB_USAGE = `Usage:
   memory-plugin web               Start/reuse the background panel; print its saved URL
+  memory-cli web open             Start/reuse the panel and open it in the system browser
   memory-plugin web start|status|stop|restart
   memory-plugin web autostart on|off|status
   memory-plugin web --foreground [--port N]  Run a temporary panel until Ctrl+C
@@ -31,7 +32,7 @@ Aliases: memory_plugin web, memory-cli web, and dashboard.`;
 export function parseWebCommand(args = []) {
   if (!args.length) return { action: "start" };
   if (args.length === 1 && ["--help", "-h", "help"].includes(args[0])) return { action: "help" };
-  if (args.length === 1 && ['start', 'status', 'stop', 'restart'].includes(args[0])) return { action: args[0] };
+  if (args.length === 1 && ['start', 'open', 'status', 'stop', 'restart'].includes(args[0])) return { action: args[0] };
   if (args.length === 2 && args[0] === 'autostart' && ['on', 'off', 'status'].includes(args[1])) return { action: 'autostart', value: args[1] };
   if (args[0] === '--foreground' && (args.length === 1 || (args.length === 3 && args[1] === '--port'))) {
     return { action: 'start', foreground: true, ...(args.length === 3 ? { port: parseWebPort(args[2]) } : {}) };

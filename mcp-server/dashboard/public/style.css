@@ -40,7 +40,7 @@ select,input,textarea {background:var(--canvas);border:1px solid var(--line)} se
 .view-nav button:hover {background:var(--hover)}
 .view-nav button[aria-current="page"] {background:var(--nav-selected);color:var(--ink)}
 .nav-count {font-size:.8125rem;font-variant-numeric:tabular-nums;color:var(--secondary)}
-.project-section {display:grid;gap:8px;min-width:0;flex-shrink:0;margin-bottom:auto}
+.project-section {display:grid;gap:8px;min-width:0;flex-shrink:0}
 .project-heading {display:flex;align-items:center;justify-content:space-between;padding:0 8px}
 .project-section h2 {font-size:.8125rem;color:var(--secondary);letter-spacing:0}
 .project-section>select {font-weight:600}

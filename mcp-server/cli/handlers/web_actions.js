@@ -3,6 +3,12 @@ import { parseWebPort } from "../../dashboard/options.js";
 import { readTextInput, waitForEnter } from "../ui.js";
 
 export async function handleWebAction(value, config) {
+  if (value === 'web_open') {
+    const { handleWebCommand } = await import('../web_commands.js');
+    await handleWebCommand(['open'], { onError: () => {} });
+    await waitForEnter();
+    return;
+  }
   if (value !== "web_port") return;
   const input = await readTextInput("Web port: 0 = automatic, or 1..65535 (applies on next start)", String(config.webPort));
   if (input.action !== "submit") return;

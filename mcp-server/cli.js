@@ -31,6 +31,7 @@ export async function runCli() {
 Usage:
   memory-cli                         Launch the interactive TUI
   memory-cli web [--port N]          Launch the web interface (0 = automatic)
+  memory-cli web open               Open the panel in the system browser
   memory-cli web port [N]            Show or save its default port
   memory-cli dashboard [--port N]    Launch the local browser panel
   memory-cli login [--from-env|--api-token|--api-key|--db-url <URL>]
@@ -95,7 +96,7 @@ Options:
         label: "WEB INTERFACE",
         value: "web",
         hint: config.webPort === 0 ? "AUTO PORT" : `PORT ${config.webPort}`,
-        info: "Configure the local browser panel port; start with memory-plugin web",
+        info: "Open the memory panel in your browser or configure its port",
       },
       {
         label: "GLOBAL PROMPT & INTEGRATION MANAGEMENT",
@@ -157,7 +158,9 @@ async function showCategorySubmenu(category, config, stats, initialIndex = 0) {
 
   switch (category) {
     case "web":
-      items = [{ label: "Web Interface Port", value: "web_port",
+      items = [{ label: "Open Panel in Browser", value: "web_open",
+        info: "Start or reuse the local panel and open its saved address in the system browser." },
+        { label: "Web Interface Port", value: "web_port",
         badge: config.webPort === 0 ? "AUTOMATIC" : String(config.webPort),
         info: "0 chooses a free port; fixed ports apply on next memory-plugin web start. Override once with --port N." }];
       break;

@@ -633,6 +633,7 @@ The MCP server exposes **22 tools**. The native OpenCode plugin exposes the same
 | `memory-plugin web [--port <0..65535>]` | Start the same web interface; `0` chooses a free port. |
 | `memory-cli knowledge help` | Inspect local Notes/sources, raw text, hierarchy, chunks, scoped links, graph and explicit trial retrieval as JSON, using an explicit scope key. |
 | `memory-cli web port [<0..65535>]` | Show or persist the default web port; takes effect on the next start. |
+| `memory-cli web open` | Start or reuse the local panel and open its saved address in the system browser. |
 | `memory-cli login ...` / `logout` / `auth-status` | Manage Turso authentication. |
 | `memory-cli link --dir <path> [--remote <url>]` | Link a Git project identity. |
 | `memory-cli unlink --dir <path> [--purge]` | Remove an alias or registry identity. |
@@ -758,6 +759,7 @@ The server listens only on `127.0.0.1`. Open the private connection URL printed 
 
 ```bash
 memory-plugin web status          # running version, process and connection URL
+memory-cli web open               # open the panel in the system browser
 memory-plugin web restart         # reload the installed build at the saved address
 memory-plugin web stop            # stop this instance; keep its saved connection
 memory-plugin web autostart off   # disable install/client/login auto-launch
@@ -766,6 +768,8 @@ memory-plugin web --foreground    # temporary panel until Ctrl+C
 ```
 
 `autostart off` leaves an already running instance available; use `web stop` to stop it too. Full plugin uninstall removes its owned Startup entry and stops the managed panel, retaining memory and connection files unless an explicit data purge was requested. Removing just one client keeps the shared panel. After updating an already linked checkout, rerun `npm link --ignore-scripts` to register binary aliases if necessary.
+
+The interactive CLI offers **WEB INTERFACE → Open Panel in Browser** as its first item. Opening the panel reuses the same managed server and saved address. The URL is also printed for manual access if the system browser cannot be launched.
 
 By default, port `0` lets the OS choose a free port on the first managed launch; subsequent launches reuse that address. Set a preferred port through the TUI's **WEB INTERFACE → Web Interface Port**, or use:
 

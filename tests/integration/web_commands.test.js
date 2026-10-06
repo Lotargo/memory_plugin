@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
+import { EventEmitter } from 'node:events';
 
 const root = mkdtempSync(join(tmpdir(), "memory-web-command-"));
 const cwd = fileURLToPath(new URL("../../", import.meta.url));
@@ -13,6 +14,7 @@ process.env.MEMORY_DISABLE_PERSONA_SYNC = "1";
 const { parseWebCommand, parseWebPort } = await import("../../mcp-server/dashboard/options.js");
 const { getConfig, updateConfig } = await import("../../mcp-server/config/config_manager.js");
 const { startDashboard, runDashboard } = await import("../../mcp-server/dashboard/server.js");
+const { requestPanelBrowser } = await import('../../mcp-server/dashboard/browser.js');
 const children = new Set();
 const run = (entry, args) => spawnSync(process.execPath, [entry, ...args], { cwd, env: process.env, encoding: "utf8", timeout: 15000 });
 
@@ -50,6 +52,32 @@ async function stop(child) {
 let occupied;
 try {
   assert.deepEqual(parseWebCommand([]), { action: "start" });
+  assert.deepEqual(parseWebCommand(['open']), { action: 'open' });
+  for (const args of [['open', '--port', '0'], ['open', '--foreground'], ['open', 'https://example.com']]) assert.throws(() => parseWebCommand(args));
+  const browserUrl = `http://127.0.0.1:8765/#${'a'.repeat(64)}`;
+  const launches = [];
+  const fakeSpawn = (code = 0, error = null) => (command, args, options) => {
+    launches.push({ command, args, options });
+    const child = new EventEmitter(); child.unref = () => {};
+    queueMicrotask(() => { if (error) child.emit('error', error); else { child.emit('spawn'); if (code !== null) child.emit('exit', code); } });
+    return child;
+  };
+  for (const platform of ['win32', 'darwin', 'linux']) {
+    assert.equal((await requestPanelBrowser(browserUrl, { platform, spawnProcess: fakeSpawn() })).status, 'requested');
+    const last = launches.at(-1);
+    assert.equal(last.args.at(-1), browserUrl, 'The private fragment is passed literally as an argv value');
+    assert.equal(last.options.shell, false); assert.equal(last.options.windowsHide, true);
+    assert.equal(last.command, {win32:'rundll32.exe',darwin:'open',linux:'xdg-open'}[platform]);
+  }
+  assert.equal((await requestPanelBrowser(browserUrl.replace(':8765', ':80'), { spawnProcess: fakeSpawn() })).status, 'requested');
+  const launchCount = launches.length;
+  for (const url of [browserUrl.replace('127.0.0.1', 'example.com'), browserUrl.replace('http:', 'https:'), browserUrl.replace('/#', '/other#'), browserUrl.split('#')[0], browserUrl.replace('/#', '/?x=1#')]) {
+    await assert.rejects(requestPanelBrowser(url, { spawnProcess: fakeSpawn() }), /saved local panel URL/);
+  }
+  assert.equal(launches.length, launchCount, 'Invalid destinations never launch a process');
+  await assert.rejects(requestPanelBrowser(browserUrl, { spawnProcess: fakeSpawn(0, Object.assign(new Error('missing'), {code:'ENOENT'})) }), /ENOENT.*printed panel URL/);
+  await assert.rejects(requestPanelBrowser(browserUrl, { spawnProcess: fakeSpawn(1) }), /exit 1.*printed panel URL/);
+  assert.equal((await requestPanelBrowser(browserUrl, { spawnProcess: fakeSpawn(null), timeoutMs: 10 })).status, 'requested', 'A long-running browser launcher cannot hold the CLI open');
   for (const value of ["0", "1", "65535"]) assert.equal(parseWebPort(value), Number(value));
   for (const value of ["-1", "65536", "1.5", "", "Infinity", "9007199254740993", "0x100", "12abc"]) assert.throws(() => parseWebPort(value));
   for (const args of [["--port"], ["--port", "0", "--port", "1"], ["--port", "uninstall"], ["port", "123", "--yes"], ["setup"], ["--help", "uninstall"], ["--version"], ["--unknown"]]) assert.throws(() => parseWebCommand(args));
@@ -58,6 +86,7 @@ try {
       const help = run(entry, [name, "--help"]);
       assert.equal(help.status, 0, help.stderr);
       assert.match(help.stdout, /memory-plugin web/);
+      assert.match(help.stdout, /web open/);
       const bad = run(entry, [name, "--port", "uninstall"]);
       assert.equal(bad.status, 1, bad.stderr);
       assert.match(bad.stderr, /Web port/);

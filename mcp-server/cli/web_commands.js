@@ -1,6 +1,6 @@
 import { parseWebCommand, WEB_USAGE } from "../dashboard/options.js";
 
-export async function handleWebCommand(args = []) {
+export async function handleWebCommand(args = [], { launchBrowser, onError } = {}) {
   try {
     const command = parseWebCommand(args);
     if (command.action === "help") {
@@ -30,8 +30,14 @@ export async function handleWebCommand(args = []) {
     if (command.action === 'status') { console.log(JSON.stringify(await webStatus(), null, 2)); return; }
     const result = await ensureWeb({ restart: command.action === 'restart' });
     console.log(`Memory background panel\n${result.url}\nThe panel stays available after this command exits. Stop: memory-plugin web stop.`);
+    if (command.action === 'open') {
+      const launch = launchBrowser || (await import('../dashboard/browser.js')).requestPanelBrowser;
+      await launch(result.url);
+      console.log('Browser launch requested.');
+    }
   } catch (error) {
     console.error(`Web interface: ${error.message}`);
-    process.exitCode = 1;
+    if (onError) onError(error);
+    else process.exitCode = 1;
   }
 }

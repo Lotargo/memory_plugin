@@ -20,6 +20,7 @@ process.env.MEMORY_DISABLE_BACKGROUND_SYNC = '1';
 const { ensureWeb, webStatus, stopWeb, readConnection, registerWebStartup, removeWebRuntime, startupPath, autoStartWeb, setWebAutostart } = await import('../../mcp-server/dashboard/runtime.js');
 const { updateConfig } = await import('../../mcp-server/config/config_manager.js');
 const { startDashboard } = await import('../../mcp-server/dashboard/server.js');
+const { handleWebCommand } = await import('../../mcp-server/cli/web_commands.js');
 const run = async args => (await promisify(execFile)(process.execPath, ['mcp-server/cli_boot.js', 'web', ...args], { cwd, env: process.env, timeout: 30000 })).stdout;
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 let foreign, older;
@@ -37,6 +38,20 @@ try {
   const connection = readConnection();
   assert.equal(first.url, urls[0]);
   assert.equal((await ensureWeb()).pid, first.pid, 'reuse a verified daemon after its launching commands exit');
+  const launched = [], output = [], errors = [];
+  const originalLog = console.log, originalError = console.error;
+  console.log = text => output.push(text); console.error = text => errors.push(text);
+  try {
+    await handleWebCommand(['open'], { launchBrowser: async url => launched.push(url) });
+    assert.deepEqual(launched, [first.url]);
+    assert.equal((await webStatus()).pid, first.pid, 'Opening a browser reuses the verified panel');
+    let browserFailure;
+    await handleWebCommand(['open'], { launchBrowser: async () => { throw new Error('launcher failed'); }, onError: error => { browserFailure = error; } });
+    assert.equal(browserFailure.message, 'launcher failed');
+    assert.ok(output.some(text => text.includes(first.url)), 'The manual URL remains available when launching fails');
+    assert.ok(errors.some(text => text.includes('launcher failed')));
+    assert.equal((await webStatus()).pid, first.pid, 'Browser failure leaves the panel running');
+  } finally { console.log = originalLog; console.error = originalError; }
   const headers = { Authorization: `Bearer ${connection.token}` };
   assert.equal((await fetch(first.origin + '/api/runtime')).status, 401);
   const response = await fetch(first.origin + '/api/overview', { headers });
@@ -59,7 +74,12 @@ try {
   await stopWeb();
   assert.equal((await webStatus()).running, false);
   assert.deepEqual(readConnection(), connection, 'stop preserves the saved address and secret');
-  const second = await ensureWeb();
+  let openedAfterStop;
+  console.log = () => {};
+  try { await handleWebCommand(['open'], { launchBrowser: async url => { openedAfterStop = url; } }); }
+  finally { console.log = originalLog; }
+  const second = await webStatus();
+  assert.equal(openedAfterStop, first.url, 'Opening starts a stopped panel at its saved address');
   assert.equal(second.url, first.url);
   assert.notEqual(second.pid, first.pid);
   assert.equal((await fetch(second.origin + '/api/overview', { headers: { Cookie: cookie } })).status, 200, 'session survives daemon restart');
