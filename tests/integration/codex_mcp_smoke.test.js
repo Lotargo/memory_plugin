@@ -26,7 +26,7 @@ export async function runCodexMcpSmokeTests() {
     const result = await runCodexDoctor({
       home: temp,
       cwd: temp,
-      env: { ...process.env, MEMORY_DIR: join(temp, "memory") },
+      env: { ...process.env, MEMORY_DIR: join(temp, "memory"), MEMORY_WEB_STARTUP_DIR: join(temp, "startup"), MEMORY_DISABLE_WEB_AUTOSTART: "1" },
       output: { log: (message) => messages.push(message) },
     });
     assert.strictEqual(result.ok, true, messages.join("\n"));

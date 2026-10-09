@@ -73,6 +73,8 @@ export async function runUninstallTests() {
     XDG_CACHE_HOME: xdgCache,
     OPENCODE_CONFIG_DIR: opencodeDir,
     MEMORY_DIR: memoryDir,
+    MEMORY_WEB_STARTUP_DIR: join(root, "startup"),
+    MEMORY_DISABLE_WEB_AUTOSTART: "1",
     MEMORY_PLUGIN_DISABLE_NATIVE_CLI: "1",
   };
 

@@ -769,6 +769,8 @@ memory-plugin web --foreground    # temporary panel until Ctrl+C
 
 `autostart off` leaves an already running instance available; use `web stop` to stop it too. Full plugin uninstall removes its owned Startup entry and stops the managed panel, retaining memory and connection files unless an explicit data purge was requested. Removing just one client keeps the shared panel. After updating an already linked checkout, rerun `npm link --ignore-scripts` to register binary aliases if necessary.
 
+The Windows login entry is stable per memory directory, independent of the package version or build path. Repeated launches leave an unchanged entry untouched; an update replaces its command in the same file. A profile redirected through `MEMORY_DIR` or `OPENCODE_CONFIG_DIR` gets no new Windows login entry automatically: enable it explicitly with `web autostart on` or the UI setting. Existing owned entries for custom profiles continue to be refreshed. Diagnostic probes (`MEMORY_CLIENT_PROBE=1`), CI, and `MEMORY_WEB_AUTOSTART=0` suppress automatic launch and registration. Tests that exercise login startup must set `MEMORY_WEB_STARTUP_DIR` to a sandbox directory.
+
 The interactive CLI offers **WEB INTERFACE → Open Panel in Browser** as its first item. Opening the panel reuses the same managed server and saved address. The URL is also printed for manual access if the system browser cannot be launched.
 
 By default, port `0` lets the OS choose a free port on the first managed launch; subsequent launches reuse that address. Set a preferred port through the TUI's **WEB INTERFACE → Web Interface Port**, or use:

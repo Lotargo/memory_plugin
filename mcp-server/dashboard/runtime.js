@@ -1,11 +1,11 @@
 import fs from 'node:fs';
-import { join, resolve, dirname } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { MEMORY_DIR } from '../memory.js';
+import { MEMORY_DIR, resolveDefaultMemoryDir } from '../memory.js';
 import { getConfig, updateConfig } from '../config/config_manager.js';
-import { withSnapshotLock } from '../storage/snapshot_lock.js';
+import { atomicWrite, withSnapshotLock } from '../storage/snapshot_lock.js';
 
 const packageRoot = fileURLToPath(new URL('../../', import.meta.url));
 const webDir = join(MEMORY_DIR, 'web');
@@ -155,20 +155,32 @@ export function startupPath() {
   return root ? join(root, `memory-plugin-web-${storageId.slice(0, 12)}.vbs`) : null;
 }
 
-export function registerWebStartup({ remove = false, dryRun = false } = {}) {
+export function registerWebStartup({ remove = false, dryRun = false, automatic = false } = {}) {
   const file = startupPath();
   if (!file) return { supported: false, enabled: false };
+  let previous;
   if (fs.existsSync(file)) {
-    const old = fs.readFileSync(file).toString('utf16le').replace(/^\uFEFF/, '');
+    previous = fs.readFileSync(file);
+    const old = previous.toString('utf16le').replace(/^\uFEFF/, '');
     if (!old.startsWith(startupMarker + '\r\n')) throw new Error(`Startup entry is not owned by this plugin: ${file}`);
+  }
+  // A redirected profile may be a test or a diagnostic process. Only explicit
+  // opt-in (CLI/UI), or an existing owned entry, permits its OS login startup.
+  // Tests exercising login startup must point at their own Startup directory.
+  const normalPath = value => process.platform === 'win32' ? resolve(value).toLowerCase() : resolve(value);
+  if (automatic && !previous && !process.env.MEMORY_WEB_STARTUP_DIR
+    && normalPath(MEMORY_DIR) !== normalPath(resolveDefaultMemoryDir())) {
+    return { supported: true, enabled: false, skipped: true, reason: 'custom-memory-directory', path: file };
   }
   if (dryRun) return { supported: true, enabled: fs.existsSync(file), path: file };
   if (remove) { fs.rmSync(file, { force: true }); return { supported: true, enabled: false, path: file }; }
   const literal = value => '"' + value.replaceAll('"', '""') + '"';
   const command = [process.execPath, join(packageRoot, 'mcp-server', 'cli_boot.js')].map(value => '"' + value + '"').join(' ') + ' web start';
   const body = `${startupMarker}\r\nSet shell = CreateObject("WScript.Shell")\r\nshell.Environment("PROCESS")("MEMORY_DIR") = ${literal(resolve(MEMORY_DIR))}\r\nshell.Run ${literal(command)}, 0, False\r\n`;
-  fs.mkdirSync(dirname(file), { recursive: true });
-  fs.writeFileSync(file, Buffer.from('\uFEFF' + body, 'utf16le'));
+  const bytes = Buffer.from('\uFEFF' + body, 'utf16le');
+  // Do not rewrite the login entry on every client launch. A new build updates
+  // the command in the same profile-owned file, rather than adding an entry.
+  if (!previous?.equals(bytes)) atomicWrite(file, bytes, { renameRetries: 20 });
   return { supported: true, enabled: true, path: file };
 }
 
@@ -180,9 +192,11 @@ export async function setWebAutostart(enabled) {
 }
 
 export async function autoStartWeb() {
-  if (process.env.CI || process.env.MEMORY_DISABLE_WEB_AUTOSTART === '1' || process.env.MEMORY_DISABLE_BACKGROUND_SYNC === '1' || process.env.MEMORY_WEB_AUTOSTART_CHILD === '1') return { skipped: true };
+  if (process.env.CI || process.env.MEMORY_CLIENT_PROBE === '1' || process.env.MEMORY_WEB_AUTOSTART === '0'
+    || process.env.MEMORY_DISABLE_WEB_AUTOSTART === '1' || process.env.MEMORY_DISABLE_BACKGROUND_SYNC === '1'
+    || process.env.MEMORY_WEB_AUTOSTART_CHILD === '1') return { skipped: true };
   if (!getConfig().webAutoStart) return { skipped: true };
-  registerWebStartup();
+  registerWebStartup({ automatic: true });
   return ensureWeb();
 }
 

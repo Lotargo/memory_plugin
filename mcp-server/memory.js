@@ -19,7 +19,10 @@ function observed(entries) {
 function resolveMemoryDir() {
   if (process.env.MEMORY_DIR) return process.env.MEMORY_DIR;
   if (process.env.OPENCODE_CONFIG_DIR) return join(process.env.OPENCODE_CONFIG_DIR, "memory");
+  return resolveDefaultMemoryDir();
+}
 
+export function resolveDefaultMemoryDir() {
   const legacyDir = join(homedir(), ".config", "opencode", "memory");
   if (existsSync(legacyDir)) {
     return legacyDir;
