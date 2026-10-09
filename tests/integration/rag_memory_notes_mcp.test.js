@@ -35,7 +35,7 @@ export async function runRagMemoryNotesMcpTests() {
 
   child = spawn(process.execPath, [join(ROOT, "mcp-server/index.js")], {
     cwd: temp,
-    env: { ...process.env, MEMORY_DIR: memoryDir },
+    env: { ...process.env, MEMORY_DIR: memoryDir, MEMORY_DISABLE_WEB_AUTOSTART: "1" },
     stdio: ["pipe", "pipe", "pipe"],
   });
   child.stdout.setEncoding("utf8");

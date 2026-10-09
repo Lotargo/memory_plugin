@@ -37,7 +37,15 @@ try {
   assert.equal(fs.existsSync(log),false,'status launched a client'); assert.equal(fs.existsSync(process.env.MEMORY_DIR),false,'status created memory storage');
   assert.ok(!JSON.stringify(initial).includes('CLIENT_SECRET_NEVER_RETURN'));
   assert.deepEqual(fs.readFileSync(paths.codexConfigPath),before);
-  const version = await probe('codex','version'); assert.equal(version.status,'passed',JSON.stringify(version)); assert.equal(version.cliVersion,'1.2.3'); assert.ok(!JSON.stringify(version).includes('CLIENT_SECRET'));
+  // Claude receives the personality through a selected output style, not a CLAUDE.md block.
+  assert.equal((await status('claude')).components.prompt.persona,false);
+  const styleFile = join(paths.claudeDir,'output-styles','memory-persona.md'), settingsFile = join(paths.claudeDir,'settings.json');
+  write(styleFile,'---\nname: memory-persona\n---\n'); json(settingsFile,{outputStyle:'other'});
+  assert.equal((await status('claude')).components.prompt.persona,false,'unselected style must not count');
+  json(settingsFile,{outputStyle:'memory-persona'});
+  assert.equal((await status('claude')).components.prompt.persona,true,'selected output style must count');
+  fs.rmSync(join(paths.claudeDir,'output-styles'),{recursive:true}); fs.rmSync(settingsFile);
+  const version =await probe('codex','version'); assert.equal(version.status,'passed',JSON.stringify(version)); assert.equal(version.cliVersion,'1.2.3'); assert.ok(!JSON.stringify(version).includes('CLIENT_SECRET'));
   const direct = await probe('codex','doctor'); assert.equal(direct.status,'passed',JSON.stringify(direct)); assert.ok(direct.toolCount>=22); assert.equal(direct.activeSession,'not-observed');
   assert.equal(fs.existsSync(join(process.env.MEMORY_DIR,'control')),false,'doctor started the model command channel');
   write(paths.codexConfigPath,`${before}\nenabled = false\n`);assert.equal((await status('codex')).channel.mode,'disabled');assert.equal((await probe('codex','doctor')).status,'unavailable');

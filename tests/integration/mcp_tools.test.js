@@ -95,7 +95,7 @@ export async function runMcpToolsTests() {
 
   child = spawn(process.execPath, [join(ROOT, "mcp-server/index.js")], {
     cwd: temp,
-    env: { ...process.env, MEMORY_DIR, MEMORY_DISABLE_PERSONA_SYNC: "1" },
+    env: { ...process.env, MEMORY_DIR, MEMORY_DISABLE_PERSONA_SYNC: "1", MEMORY_DISABLE_WEB_AUTOSTART: "1" },
     stdio: ["pipe", "pipe", "pipe"],
   });
   attach(child);
@@ -214,7 +214,7 @@ export async function runMcpToolsTests() {
     const nonGitDir = mkdtempSync(join(tmpdir(), "mcp-nongit-"));
     child = spawn(process.execPath, [join(ROOT, "mcp-server/index.js")], {
       cwd: nonGitDir,
-      env: { ...process.env, MEMORY_DIR: join(nonGitDir, "mem"), MEMORY_DISABLE_PERSONA_SYNC: "1" },
+      env: { ...process.env, MEMORY_DIR: join(nonGitDir, "mem"), MEMORY_DISABLE_PERSONA_SYNC: "1", MEMORY_DISABLE_WEB_AUTOSTART: "1" },
       stdio: ["pipe", "pipe", "pipe"],
     });
     attach(child);

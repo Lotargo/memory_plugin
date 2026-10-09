@@ -110,9 +110,17 @@ async function capture(client, options) {
     if (channel.direct && disabled && !channel.marketplace && !channel.nativePlugin) channel.mode = 'disabled';
     const skill = r.read(path.join(target.dir,'skills','using-memory','SKILL.md'));
     const prompt = target.prompt ? r.read(target.prompt) : null;
+    // Claude Code receives the personality through a selected output style, not a CLAUDE.md block.
+    let persona = !!prompt && prompt.text.includes(PERSONA_START_MARKER);
+    if (client === 'claude' && !persona) {
+      try {
+        persona = r.read(path.join(target.dir, 'output-styles', 'memory-persona.md')).exists
+          && r.json(path.join(target.dir, 'settings.json')).outputStyle === 'memory-persona';
+      } catch { persona = false; }
+    }
     const item = { ...base, status: channel.conflict ? 'conflict' : channel.foreign ? 'foreign' : 'available', channel,
       components: { skill: { path: skill.path, exists: skill.exists, ownership: 'not-verified' },
-        prompt: prompt ? { path: prompt.path, exists: prompt.exists, prompt: prompt.text.includes(START_MARKER), persona: prompt.text.includes(PERSONA_START_MARKER) } : { channel: 'native-context' } } };
+        prompt: prompt ? { path: prompt.path, exists: prompt.exists, prompt: prompt.text.includes(START_MARKER), persona } : { channel: 'native-context' } } };
     const files = [...r.files.values()].map(({ path, exists, hash }) => ({ path, exists, hash }));
     item.files = files;
     item.version = sha(JSON.stringify({ client, files, channel, executable }));

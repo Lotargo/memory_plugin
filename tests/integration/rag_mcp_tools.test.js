@@ -89,7 +89,7 @@ export async function runRagMcpToolsTests() {
 
   child = spawn(process.execPath, [join(ROOT, "mcp-server/index.js")], {
     cwd: temp,
-    env: { ...process.env, MEMORY_DIR },
+    env: { ...process.env, MEMORY_DIR, MEMORY_DISABLE_WEB_AUTOSTART: "1" },
     stdio: ["pipe", "pipe", "pipe"],
   });
   attach(child);
