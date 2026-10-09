@@ -31,7 +31,7 @@ const { pathToFileURL } = require('node:url');
     const context = PROMPT_BLOCK.replace('from `memory-agent`', 'from the MCP server supplied by the memory plugin')
       + '\nUse the memory plugin tools by their names as exposed by this client. Do not assume the standalone MCP namespace.\n'
       + `Current workspace directory: ${JSON.stringify(cwd)}. Pass this directory explicitly to project-scoped memory tools; do not use the installed plugin or runtime directory.\n`
-      + 'If the complete active memory has already been recalled in this conversation, do not repeat initialization merely because this hook ran on resume.\n';
+      + 'If the startup recall has already been done in this conversation, do not repeat initialization merely because this hook ran on resume.\n';
     process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } }) + '\n');
   } else if (action === 'mcp') {
     await integration.assertPluginLaunchAllowed(receipt.client);

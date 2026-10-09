@@ -57,7 +57,9 @@ export function registerMemoryTools(server) {
         "query filters by keyword (all space-separated terms must match). " +
         "tags filters by comma-separated tags. since/until filter by date (YYYY-MM-DD, inclusive). " +
         "Superseded facts are excluded by default; pass includeSuperseded=true to inspect history. " +
-        "Expired facts are shown with [EXPIRED], protected ones with [KEEP]. The response includes the store file paths.",
+        "Expired facts are shown with [EXPIRED], protected ones with [KEEP]. The response includes the store file paths. " +
+        "Global facts and active directives are always returned in full. Project facts are a window of the 10 newest (newest first) by default; " +
+        "the response says how many older ones are not shown. For history use offset (skips the newest N) and limit (page size; limit=0 returns everything), or filter with query/tags/since/until.",
       inputSchema: z.object({
         scope: defEnum(["project", "global", "all", "list_projects"], "all").describe("'project', 'global', 'all', or 'list_projects'"),
         directory: optStr().describe("Directory path of the project to read facts from (e.g. '/path/to/project')"),
@@ -67,8 +69,8 @@ export function registerMemoryTools(server) {
         since: optStr().describe("Optional start date filter, YYYY-MM-DD (inclusive)"),
         until: optStr().describe("Optional end date filter, YYYY-MM-DD (inclusive)"),
         mode: z.enum(["headers", "full"]).nullish().transform((v) => v || "full").describe("Result mode: 'full' (with body, default) or 'headers' (title and badges only)"),
-        offset: optNum().describe("Pagination offset (optional)"),
-        limit: optNum().describe("Pagination limit (optional)"),
+        offset: optNum().describe("Skip the newest N entries of each store (optional, default 0)"),
+        limit: optNum().describe("Entries per store, newest first; 0 returns everything. Default: 10 for project facts, unlimited for global facts"),
         includeSuperseded: defBool(false).describe("Include superseded historical facts (excluded by default)"),
       }),
     },

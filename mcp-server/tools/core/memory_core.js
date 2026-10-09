@@ -41,7 +41,11 @@ import { requireProjectKey, resolveFactIndex } from "../helpers.js";
 // `ctx` carries the host's notion of the current location:
 //   { worktree, directory } — the MCP server passes nothing and falls back to cwd.
 
-const TITLE_PATTERN = /^\*\*([^*]+)\*\*\s*(?:—|--|-|:)?\s*(.*)$/;
+// Project memory is shown as a window of the newest facts by default; the
+// agent asks for older ones (offset/limit/query) when a task needs history.
+export const PROJECT_RECALL_LIMIT = 10;
+
+const TITLE_PATTERN =/^\*\*([^*]+)\*\*\s*(?:—|--|-|:)?\s*(.*)$/;
 
 function splitTitle(rawText, explicitTitle) {
   let finalTitle = explicitTitle ? explicitTitle.trim() : null;
@@ -178,7 +182,11 @@ export async function recallFacts(
   const results = [];
   const now = Date.now();
   const targetMode = mode || "full";
-  const targetOffset = offset !== undefined && offset !== null ? offset : 0;
+  const targetOffset = offset !== undefined && offset !== null ? Number(offset) : 0;
+  const hasExplicitLimit = limit !== undefined && limit !== null;
+  const explicitLimit = hasExplicitLimit ? Number(limit) : 0;
+  if (!Number.isInteger(targetOffset) || targetOffset < 0) throw new Error("offset must be a non-negative integer.");
+  if (!Number.isInteger(explicitLimit) || explicitLimit < 0) throw new Error("limit must be a non-negative integer (0 returns everything).");
   const targetProjectInput = extractEffectiveDir({ directory, project }, ctx);
 
   if (scope === "list_projects") {
@@ -258,17 +266,42 @@ export async function recallFacts(
     if (results.length) results.push("");
     results.push(`--- ${key === GLOBAL_KEY ? "Global" : `Project: ${key === target ? label : key}`} ---`);
 
-    const hasLimit = limit !== undefined && limit !== null;
-    const targetLimit = hasLimit ? limit : matched.length;
-    const paginated = matched.slice(targetOffset, targetOffset + targetLimit);
-    for (let i = 0; i < paginated.length; i++) {
-      results.push(
-        await formatFactWithLinks(paginated[i].entry, paginated[i].storageIndex + 1, key)
-      );
+    // Active directives (personality/working instructions) are always listed in
+    // full and never count toward the window. Everything else is windowed only
+    // for project memory by default, so the agent sees the latest project
+    // decisions first; global memory stays complete unless a limit is passed.
+    const { personaExclusionReasons } = await import("../../context/persona_context.js");
+    const pinned = [];
+    const rest = [];
+    for (const item of matched) {
+      (isDirectiveFact(item.entry) && !personaExclusionReasons(item.entry, now).length ? pinned : rest).push(item);
     }
-    if (hasLimit && matched.length > targetLimit) {
+    const cap = hasExplicitLimit ? explicitLimit : key === GLOBAL_KEY ? 0 : PROJECT_RECALL_LIMIT;
+    const windowed = cap > 0;
+    let page = rest;
+    if (windowed) {
+      const stamp = (item) => {
+        const p = parseFactEntry(item.entry);
+        return p ? `${p.date} ${p.time}` : "";
+      };
+      page = [...rest]
+        .sort((a, b) => (factMeta(b.entry).inject === "1") - (factMeta(a.entry).inject === "1")
+          || stamp(b).localeCompare(stamp(a)) || b.storageIndex - a.storageIndex);
+    }
+    const shown = windowed ? page.slice(targetOffset, targetOffset + cap) : page.slice(targetOffset);
+    // Without a window the store is listed exactly as saved (storage order).
+    const listed = !windowed ? matched.slice(targetOffset) : targetOffset === 0 ? [...pinned, ...shown] : shown;
+    for (const item of listed) {
+      results.push(await formatFactWithLinks(item.entry, item.storageIndex + 1, key));
+    }
+    const hidden = Math.max(0, rest.length - targetOffset - shown.length);
+    if (windowed && (hidden > 0 || targetOffset > 0)) {
+      const scopeNote = pinned.length ? " non-directive" : "";
       results.push(
-        `Showing entries ${targetOffset + 1}-${Math.min(targetOffset + targetLimit, matched.length)} of ${matched.length}`
+        `Showing ${shown.length} of ${rest.length}${scopeNote} entries, newest first` +
+          `${targetOffset ? ` (skipped the newest ${targetOffset})` : ""}; ${hidden} older not shown.` +
+          `${hidden ? ` Repeat this call with offset=${targetOffset + shown.length} for the next page, limit=0 for everything,` +
+            ` or narrow it with query/tags/since/until.` : ""}`
       );
     }
     results.push(`Store file: ${storeFilePath(key)}`);

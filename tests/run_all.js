@@ -23,6 +23,7 @@ const testSuites = [
   { category: "Unit", name: "rag_memory_notes", file: "tests/unit/rag_memory_notes.test.js" },
   { category: "Unit", name: "project_identity", file: "tests/unit/project_identity.test.js" },
   { category: "Unit", name: "notebook_targeting", file: "tests/unit/notebook_targeting.test.js" },
+  { category: "Unit", name: "recall_window", file: "tests/unit/recall_window.test.js" },
   { category: "Unit", name: "unit_audit_fixes", file: "tests/unit/unit_audit_fixes.test.js" },
   { category: "Unit", name: "benchmark_report", file: "tests/unit/benchmark_report.test.js" },
   { category: "Unit", name: "chunker", file: "tests/unit/chunker.test.js" },

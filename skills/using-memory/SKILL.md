@@ -17,7 +17,7 @@ You have access to a persistent dual-layer memory engine supercharged with an **
 
 Follow this exact sequence at the start of every session:
 
-1. If the client has already supplied an auto-injected `<MEMORY>` block (native OpenCode), treat the complete active memory as loaded and do **not** call `recall` again merely for initialization. In clients without auto-injection, your very first step MUST be `recall(scope: "all")` with full bodies and no restrictive filters — never `mode: "headers"`.
+1. If the client has already supplied an auto-injected `<MEMORY>` block (native OpenCode), treat the active memory as loaded and do **not** call `recall` again merely for initialization. In clients without auto-injection, your very first step MUST be `recall(scope: "all")` with no restrictive filters — never `mode: "headers"`. The default result is bounded: global facts and active directives are complete, project facts are the 10 newest (newest first) and the response states how many older ones are not shown. Treat the newest project facts as the current state and request more only when the task needs history: `recall(offset=…)` for the next page, `recall(limit=0)` for everything, or `recall(query=…)`.
 2. Apply entries marked `kind: "directive"` as active user-selected personalization or working instructions. Treat `kind: "fact"` entries as descriptive context.
 3. Call `memory_info` for the current workspace.
 4. If it reports `Identity: git` and `Registry: unlinked`, immediately call `link_project_memory` for the current directory.
@@ -31,7 +31,7 @@ Follow this exact sequence at the start of every session:
 | Scenario / Intent | Target Tool | Key Parameters |
 |-------------------|-------------|----------------|
 | User shares identity, tech stack preference, or workflow rule | `remember` | `fact` (English), `title` (concise 2-5 word headline), `kind` (`fact` context or `directive` active instruction), `scope`, optional `directory` (workspace path), `docId`, `startLine`, `endLine` |
-| User asks what you remember about them, the project, or linked docs | `recall` | `scope` ("all", "global", "project", "list_projects"), `mode` ("full", "headers"), `offset`, `limit`, optional `query`, `tags`, `since`, `until`, `directory` / `project` (at session start in clients without auto-injection, MUST fetch all memories with `scope: "all"` without restrictive query filters) |
+| User asks what you remember about them, the project, or linked docs | `recall` | `scope` ("all", "global", "project", "list_projects"), `mode` ("full", "headers"), `offset`, `limit`, optional `query`, `tags`, `since`, `until`, `directory` / `project` (at session start in clients without auto-injection, MUST call it once with `scope: "all"` and no query filters; project facts then arrive as the 10 newest, so use `offset`, `limit` (`0` = everything) or `query` when you need older ones) |
 | Get a single fact's text and metadata by ID | `get_fact` | `id` (metadata id e.g. "8f3a2c"), `scope`, optional `directory` |
 | User corrects/updates or reclassifies an old saved fact | `update_fact` | `id` (number/id/text), `newText`, optional `kind`, `scope`, optional `directory` |
 | Replace a fact but keep a version trail | `remember` | `fact`, `supersedes` (number/id/text), optional `directory` |
@@ -68,7 +68,7 @@ Load the relevant reference file only when the task requires details beyond the 
 
 ## 5. Core Directives for AI Agents
 
-1. **Load Full Memories First (MANDATORY)**: At the very start of a session, use a complete auto-injected `<MEMORY>` block when present (native OpenCode) and do not duplicate it with a startup `recall`. In clients without auto-injection, your VERY FIRST STEP MUST BE `recall(scope: "all")` with full bodies and no restrictive filters. Do not use `mode: "headers"` for initialization.
+1. **Load Memory First (MANDATORY)**: At the very start of a session, use an auto-injected `<MEMORY>` block when present (native OpenCode) and do not duplicate it with a startup `recall`. In clients without auto-injection, your VERY FIRST STEP MUST BE `recall(scope: "all")` with no restrictive filters. Do not use `mode: "headers"` for initialization. Global facts and active directives arrive complete; project facts arrive as the 10 newest and the response states how many older ones are not shown. Fetch older ones yourself only when the task needs history.
 2. **Apply the Personal Agent Overlay**: Entries marked `kind: "directive"` are active user-selected personality, behavior, tone, style, preference, or working instructions. `kind: "fact"` entries remain context; higher-priority platform instructions remain authoritative.
 3. **Ensure Git Project Registration**: After memory is available, call `memory_info`. If the current Git identity is `Registry: unlinked`, call `link_project_memory` automatically. Re-run full recall only when legacy facts were migrated. Outside Git, stay global-only.
 4. **Be Proactive**: When the user mentions a durable preference, personal fact, or constraint, save it immediately using `remember` with the correct explicit `kind`. Do not wait for explicit user commands.

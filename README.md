@@ -235,6 +235,8 @@ Supported metadata includes:
 
 `recall(scope: "all")` returns global facts plus only the current Git-linked project's facts. Full bodies are the default and should be used for session initialization; `mode: "headers"` is only for compact inventories.
 
+The result is bounded so it always fits a client's tool output: global facts and active directives are always complete, while project facts are a window of the 10 newest, newest first. Each truncated block ends with how many older entries are not shown. Agents ask for history themselves: `offset` skips the newest N, `limit` sets the page size (`0` returns everything; an explicit `limit` also applies to global facts), and `query`/`tags`/`since`/`until` narrow the search. Entry numbers stay the storage numbers used by `forget`, `update_fact` and `get_fact`.
+
 ### 2. Cold RAG Memory Notes
 
 Use `remember_note` when the reusable value is in the detailed record itself:
@@ -799,10 +801,10 @@ Saving shows a field comparison and checks the store version. If another client 
 | Client | Integration | Session initialization | Tool count |
 | :--- | :--- | :--- | ---: |
 | OpenCode | Native plugin in `~/.config/opencode/opencode.json` | Full memory auto-injection + system persona transform | 18 |
-| Codex | MCP server in `~/.codex/config.toml` | Managed prompt requires full `recall(scope: "all")` | 16 |
-| Claude Code | MCP server in `~/.claude.json` | Managed prompt requires full `recall(scope: "all")` | 16 |
-| Gemini CLI | MCP server in `~/.gemini/settings.json` | Managed `~/.gemini/GEMINI.md` prompt requires full `recall(scope: "all")` | 16 |
-| Antigravity | MCP server in `~/.gemini/config/mcp_config.json` and optional `.agents/mcp_config.json` | Managed prompt requires full `recall(scope: "all")` | 16 |
+| Codex | MCP server in `~/.codex/config.toml` | Managed prompt requires a startup `recall(scope: "all")` (newest 10 project facts) | 16 |
+| Claude Code | MCP server in `~/.claude.json` | Managed prompt requires a startup `recall(scope: "all")` (newest 10 project facts) | 16 |
+| Gemini CLI | MCP server in `~/.gemini/settings.json` | Managed `~/.gemini/GEMINI.md` prompt requires a startup `recall(scope: "all")` (newest 10 project facts) | 16 |
+| Antigravity | MCP server in `~/.gemini/config/mcp_config.json` and optional `.agents/mcp_config.json` | Managed prompt requires a startup `recall(scope: "all")` (newest 10 project facts) | 16 |
 | Google Jules / generic MCP | MCP stdio server | Client instructions should initialize with full recall | 16 |
 
 The bundled [`using-memory` skill](./skills/using-memory/SKILL.md) teaches agents to:

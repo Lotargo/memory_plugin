@@ -82,7 +82,7 @@ Supported metadata keys (set via `remember`, rendered as badges by `recall`):
 
 ## Scope Isolation and Conflicts
 
-- `scope: "all"` returns the complete global store plus only the current Git project's store.
+- `scope: "all"` returns the complete global store plus only the current Git project's store. Active directives are always listed in full. Project facts are a window of the 10 newest (newest first) unless `limit` is passed; the response ends the block with how many older entries are not shown. `offset` skips the newest N, `limit` sets the page size (`0` returns everything), and an explicit `limit` also applies to the global store. Entry numbers always stay the storage numbers used by `forget`, `update_fact` and `get_fact`.
 - Outside a Git repository, `scope: "all"` returns global memory only. It must not create a `null` project store.
 - Memories from unrelated projects are never included in normal session initialization. Use the explicit `project` parameter only when the user asks to inspect another project.
 - Global and project facts are both context sources. Neither store automatically overrides the other; if facts conflict, the agent evaluates the available context and decides how to proceed.
