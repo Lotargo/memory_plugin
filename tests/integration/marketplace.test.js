@@ -32,6 +32,24 @@ try {
   assert.ok(!existsSync(join(built.runtime, 'dev_docs')));
   assert.ok(!existsSync(join(built.runtime, '.git')));
   assert.deepEqual(JSON.parse(await readFile(join(built.runtime, 'package.json'), 'utf8')).scripts, {});
+  const codexPlugin = join(output, 'codex', 'plugins', 'memory');
+  const codexOverlay = JSON.parse(await readFile(join(codexPlugin, '.codex-plugin', 'plugin.json'), 'utf8'));
+  assert.equal(codexOverlay.hooks, './hooks/hooks.json');
+  assert.equal(codexOverlay.mcpServers, './.mcp.json');
+  const codexMcp = JSON.parse(await readFile(join(codexPlugin, '.mcp.json'), 'utf8')).mcpServers['memory-agent'];
+  assert.deepEqual(codexMcp, { command: process.execPath, args: [join(codexPlugin, 'scripts', 'entry.cjs'), 'mcp'] });
+  const codexHook = JSON.parse(await readFile(join(codexPlugin, 'hooks', 'hooks.json'), 'utf8')).hooks.SessionStart[0].hooks[0];
+  if (process.platform === 'win32') {
+    assert.ok(codexHook.commandWindows.startsWith('& '));
+    const execution = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', codexHook.commandWindows], {
+      cwd: workspace, env: { ...process.env, PLUGIN_ROOT: codexPlugin }, input: JSON.stringify({ cwd: workspace }), encoding: 'utf8', timeout: 15000, windowsHide: true,
+    });
+    assert.equal(execution.status, 0, execution.stderr);
+    assert.ok(JSON.parse(execution.stdout).hookSpecificOutput.additionalContext.includes(JSON.stringify(workspace)));
+  } else assert.equal(codexHook.commandWindows, undefined);
+  const claudePlugin = join(output, 'claude', 'plugins', 'memory');
+  assert.ok(existsSync(join(claudePlugin, '.claude-plugin', 'plugin.json')));
+  assert.equal(JSON.parse(await readFile(join(claudePlugin, '.mcp.json'), 'utf8')).mcpServers['memory-agent'].command, process.execPath);
   await assert.rejects(buildMarketplace({ output }), /already exists/);
   await assert.rejects(buildMarketplace({ output: 'relative' }), /absolute/);
   await assert.rejects(buildMarketplace({ output: join(temp, 'bad-data'), memoryDir: join(temp, 'bad-data', 'data') }), /outside/);

@@ -69,12 +69,24 @@ export async function buildMarketplace({ output, memoryDir, prepare = true, inst
     await cp(join(ROOT, 'skills'), join(plugin, 'skills'), { recursive: true });
     await jsonWrite(join(plugin, 'runtime.json'), { schema: 1, client, runtime, memoryDir, version: pkg.version, sourceDigest });
     const macro = client === 'codex' ? '${PLUGIN_ROOT}' : '${CLAUDE_PLUGIN_ROOT}';
-    const mcp = { mcpServers: { 'memory-agent': { command: process.execPath, args: [`${macro}/scripts/entry.cjs`, 'mcp'] } } };
-    const hooks = { hooks: { SessionStart: [{ hooks: [{ type: 'command', command: `"${process.execPath.replace(/\\/g, '/')}" "${macro}/scripts/entry.cjs" hook`, timeout: 10 }] }] } };
+    // Codex's legacy MCP loader does not expand PLUGIN_ROOT. These catalogs
+    // already belong to this machine and retain their immutable build, so pin
+    // its adapter path just as runtime.json pins the prepared engine path.
+    const entry = client === 'codex' ? join(plugin, 'scripts', 'entry.cjs') : `${macro}/scripts/entry.cjs`;
+    const mcp = { mcpServers: { 'memory-agent': { command: process.execPath, args: [entry, 'mcp'] } } };
+    const handler = { type: 'command', command: `"${process.execPath.replace(/\\/g, '/')}" "${macro}/scripts/entry.cjs" hook`, timeout: 10 };
+    if (client === 'codex' && process.platform === 'win32') {
+      // A quoted executable is a string expression in PowerShell. Read the
+      // plugin path as an environment value so spaces and '$' stay literal.
+      const node = process.execPath.replace(/\\/g, '/').replace(/'/g, "''");
+      handler.commandWindows = `& '${node}' (Join-Path $env:PLUGIN_ROOT 'scripts/entry.cjs') hook`;
+    }
+    const hooks = { hooks: { SessionStart: [{ hooks: [handler] }] } };
     await jsonWrite(join(plugin, 'hooks', 'hooks.json'), hooks);
     const identity = { name: PLUGIN_NAME, version: pkg.version, description: 'Local persistent memory, RAG and agent instructions', author: { name: 'Lotargo' }, license: 'MIT' };
     if (client === 'codex') {
-      await jsonWrite(join(plugin, '.codex-plugin', 'plugin.json'), { ...identity, skills: './skills/', mcpServers: './.mcp.json', hooks: './hooks/hooks.json', interface: { displayName: 'Memory', shortDescription: 'Local memory and RAG', developerName: 'Lotargo', category: 'Productivity', capabilities: ['Read', 'Write'] } });
+      await jsonWrite(join(plugin, '.codex-plugin', 'plugin.json'), { ...identity, skills: './skills/', mcpServers: './.mcp.json', hooks: './hooks/hooks.json',
+        interface: { displayName: 'Memory', shortDescription: 'Local memory and RAG', developerName: 'Lotargo', category: 'Productivity', capabilities: ['Read', 'Write'] } });
       await jsonWrite(join(base, '.agents', 'plugins', 'marketplace.json'), { name: MARKETPLACE_NAME, interface: { displayName: 'Lotargo Memory — Local' }, plugins: [{ name: PLUGIN_NAME, source: { source: 'local', path: './plugins/memory' }, policy: { installation: 'AVAILABLE', authentication: 'ON_INSTALL' }, category: 'Productivity' }] });
     } else {
       await jsonWrite(join(plugin, '.claude-plugin', 'plugin.json'), { ...identity, mcpServers: './.mcp.json' });
