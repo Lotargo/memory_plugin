@@ -15,6 +15,7 @@ Detailed reference for Layer 1 (Notebook Store) tools: `remember`, `recall`, `ge
 ## Formatting & Fact Titles
 
 - Always translate the fact into clear, concise English before calling `remember`.
+- Keep a fact body under 800 characters. `remember` and `update_fact` still save a longer one but return a warning: move the details to `remember_note` and keep a short fact linked to it with `docId`.
 - **Always specify a descriptive `title` parameter** (a 2-5 word headline, e.g., `title: "Backend Framework Preference"`).
 - Facts are stored in `**Title** — body` format. Initial session recall and auto-injected `<MEMORY>` blocks MUST include full fact bodies. Header-only recall was tested and rejected because it loses essential context. Use `mode: "headers"` only when the user explicitly asks for a compact inventory, never for session initialization.
 

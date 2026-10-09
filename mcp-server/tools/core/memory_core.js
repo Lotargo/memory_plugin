@@ -45,6 +45,16 @@ import { requireProjectKey, resolveFactIndex } from "../helpers.js";
 // agent asks for older ones (offset/limit/query) when a task needs history.
 export const PROJECT_RECALL_LIMIT = 10;
 
+// Notebook facts stay hot and short; past this size the body belongs in a
+// Memory Note. The fact is still saved, the agent is only told to move it.
+export const LONG_FACT_CHARS = 800;
+export function longFactHint(body) {
+  const length = String(body || "").length;
+  return length > LONG_FACT_CHARS
+    ? ` (warning: this fact is ${length} characters; facts should stay under ${LONG_FACT_CHARS}. Move the details to remember_note and keep a short fact linked to it with docId.)`
+    : "";
+}
+
 const TITLE_PATTERN =/^\*\*([^*]+)\*\*\s*(?:—|--|-|:)?\s*(.*)$/;
 
 function splitTitle(rawText, explicitTitle) {
@@ -142,7 +152,7 @@ export async function rememberFact(
     }
   }
 
-  return `Memory updated${supersededInfo}${linkInfo}`;
+  return `Memory updated${supersededInfo}${linkInfo}${longFactHint(finalFact)}`;
 }
 
 async function resolveTargetKey(projectPath) {
@@ -394,7 +404,12 @@ export async function forgetFacts({ query, scope, force, directory, project }, c
   return text;
 }
 
-export async function updateFactText({ id, newText, title, kind, scope, directory, project }, ctx = {}) {
+export async function updateFactText(args, ctx = {}) {
+  const result = await replaceFactText(args, ctx);
+  return result + longFactHint(splitTitle(args.newText, args.title).finalFact);
+}
+
+async function replaceFactText({ id, newText, title, kind, scope, directory, project }, ctx = {}) {
   if (kind && !['fact', 'directive'].includes(kind)) throw new Error("kind must be 'fact' or 'directive'.");
   const key = requireProjectKey(await resolveScopeKey(scope, { directory, project }, ctx));
   const entries = await readMemory(key);

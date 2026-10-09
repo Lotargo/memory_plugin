@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.7.1] - Unreleased
 
+- `remember` and `update_fact` now warn when a fact body is longer than 800 characters. The fact is still saved; the response tells the agent to move the details to `remember_note` and keep a short fact linked to it, so Notebook memory stays short enough to load every session.
+
 - Every place that launches or registers a Node command now uses a real Node executable instead of `process.execPath`: the CLI's `--expose-gc` relaunch, model and diagnostic workers, `setup` registrations for Claude Code and Codex, the local marketplace build (npm, MCP entry, SessionStart hook, receipt) and the client doctor. Inside a host binary such as `opencode-cli.exe` these previously launched or wrote the host itself. The shared `nodeExecutable()` lives in `client_cli.js`.
 
 - `recall` now returns a bounded result so it fits a client's tool output. Global facts and active directives stay complete; project facts are a window of the 10 newest, newest first, and every truncated block states how many older entries are not shown. `offset` skips the newest N, `limit` sets the page size (`0` returns everything; an explicit `limit` applies to both stores and now counts from the newest entry instead of the oldest), and storage numbers stay unchanged for `forget`, `update_fact` and `get_fact`. The managed prompt, skill and README no longer require loading the complete project history at session start; agents request older facts themselves. OpenCode's auto-injected `<MEMORY>` block is unchanged.
