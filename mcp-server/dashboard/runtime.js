@@ -1,9 +1,10 @@
 import fs from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { MEMORY_DIR, resolveDefaultMemoryDir } from '../memory.js';
+import { resolveClientExecutable } from '../client_cli.js';
 import { getConfig, updateConfig } from '../config/config_manager.js';
 import { atomicWrite, withSnapshotLock } from '../storage/snapshot_lock.js';
 
@@ -61,6 +62,17 @@ export function webBuildId() {
 
 const withLaunchLock = run => withSnapshotLock(webDir, run);
 
+// Hosts embed this code in their own binaries (for example `opencode-cli.exe`),
+// where `process.execPath` is the host, not Node: it cannot run the panel
+// worker or the login script and just prints its own usage. Always launch the
+// panel with a real Node executable.
+const isNodeExecutable = file => /^node(?:js)?(?:\.exe)?$/i.test(basename(String(file || '')));
+export function nodeExecutable({ execPath = process.execPath, env = process.env } = {}) {
+  if (isNodeExecutable(execPath)) return execPath;
+  const found = resolveClientExecutable('node', { env });
+  return found && isNodeExecutable(found) ? found : execPath;
+}
+
 async function inspect(connection) {
   if (!connection?.port) return null;
   const origin = `http://127.0.0.1:${connection.port}`;
@@ -103,14 +115,20 @@ export async function stopWeb() {
   return withLaunchLock(() => stopConnection(readConnection()));
 }
 
-export async function ensureWeb({ restart = false } = {}) {
+// The panel is an independent human-facing service, not part of any one client.
+// `adopt` is for automatic launches (MCP hosts, plugins, installers): they use a
+// verified panel as it is, even from another build, and never replace it. Only an
+// explicit command (`web start|restart`) may swap a running panel for this build.
+export async function ensureWeb({ restart = false, adopt = false } = {}) {
   return withLaunchLock(async () => {
     let connection = readConnection();
     if (!connection) { connection = { token: randomBytes(32).toString('hex'), port: 0 }; await writeConnection(connection); }
     const buildId = await webBuildId();
     const current = await inspect(connection);
     const configuredPort = getConfig().webPort;
-    if (current && !restart && current.buildId === buildId && (!configuredPort || configuredPort === connection.port)) return { running: true, reused: true, ...current };
+    if (current && !restart && (adopt || current.buildId === buildId) && (!configuredPort || configuredPort === connection.port)) {
+      return { running: true, reused: true, ...(current.buildId !== buildId ? { otherBuild: true } : {}), ...current };
+    }
     if (current) await stopConnection(connection);
     if (configuredPort && configuredPort !== connection.port) { connection = { ...connection, port: configuredPort }; await writeConnection(connection); }
     const logPath = join(webDir, 'server.log');
@@ -119,7 +137,7 @@ export async function ensureWeb({ restart = false } = {}) {
     const log = fs.openSync(logPath, 'a', 0o600);
     let child;
     try {
-      child = spawn(process.execPath, [join(packageRoot, 'mcp-server', 'dashboard', 'worker.js')], {
+      child = spawn(nodeExecutable(), [join(packageRoot, 'mcp-server', 'dashboard', 'worker.js')], {
         cwd: packageRoot, detached: true, windowsHide: true, stdio: ['ignore', log, log],
         env: { ...process.env, MEMORY_DIR: resolve(MEMORY_DIR), MEMORY_DISABLE_PERSONA_SYNC: '1', MEMORY_DISABLE_BACKGROUND_SYNC: '1', MEMORY_WEB_AUTOSTART_CHILD: '1' }
       });
@@ -158,11 +176,19 @@ export function startupPath() {
 export function registerWebStartup({ remove = false, dryRun = false, automatic = false } = {}) {
   const file = startupPath();
   if (!file) return { supported: false, enabled: false };
-  let previous;
+  let previous, previousText = '';
   if (fs.existsSync(file)) {
     previous = fs.readFileSync(file);
-    const old = previous.toString('utf16le').replace(/^\uFEFF/, '');
-    if (!old.startsWith(startupMarker + '\r\n')) throw new Error(`Startup entry is not owned by this plugin: ${file}`);
+    previousText = previous.toString('utf16le').replace(/^\uFEFF/, '');
+    if (!previousText.startsWith(startupMarker + '\r\n')) throw new Error(`Startup entry is not owned by this plugin: ${file}`);
+  }
+  // Clients start automatically with different executables and package roots.
+  // They must not take turns rewriting one login entry: an automatic launch
+  // leaves a working owned entry alone. Only a missing entry, or one whose
+  // launcher is not Node or no longer exists, is repaired; explicit enable rewrites.
+  if (automatic && previous && !remove && !dryRun) {
+    const targets = [...previousText.matchAll(/""([^"]+)""/g)].map(match => match[1]);
+    if (targets.length && isNodeExecutable(targets[0]) && targets.every(target => fs.existsSync(target))) return { supported: true, enabled: true, kept: true, path: file };
   }
   // A redirected profile may be a test or a diagnostic process. Only explicit
   // opt-in (CLI/UI), or an existing owned entry, permits its OS login startup.
@@ -175,7 +201,7 @@ export function registerWebStartup({ remove = false, dryRun = false, automatic =
   if (dryRun) return { supported: true, enabled: fs.existsSync(file), path: file };
   if (remove) { fs.rmSync(file, { force: true }); return { supported: true, enabled: false, path: file }; }
   const literal = value => '"' + value.replaceAll('"', '""') + '"';
-  const command = [process.execPath, join(packageRoot, 'mcp-server', 'cli_boot.js')].map(value => '"' + value + '"').join(' ') + ' web start';
+  const command = [nodeExecutable(), join(packageRoot, 'mcp-server', 'cli_boot.js')].map(value => '"' + value + '"').join(' ') + ' web start';
   const body = `${startupMarker}\r\nSet shell = CreateObject("WScript.Shell")\r\nshell.Environment("PROCESS")("MEMORY_DIR") = ${literal(resolve(MEMORY_DIR))}\r\nshell.Run ${literal(command)}, 0, False\r\n`;
   const bytes = Buffer.from('\uFEFF' + body, 'utf16le');
   // Do not rewrite the login entry on every client launch. A new build updates
@@ -197,7 +223,7 @@ export async function autoStartWeb() {
     || process.env.MEMORY_WEB_AUTOSTART_CHILD === '1') return { skipped: true };
   if (!getConfig().webAutoStart) return { skipped: true };
   registerWebStartup({ automatic: true });
-  return ensureWeb();
+  return ensureWeb({ adopt: true });
 }
 
 export async function removeWebRuntime({ dryRun = false } = {}) {

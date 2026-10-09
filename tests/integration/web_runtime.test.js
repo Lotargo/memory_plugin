@@ -17,7 +17,7 @@ process.env.MEMORY_WEB_STARTUP_DIR = join(root, 'startup');
 process.env.MEMORY_DISABLE_WEB_AUTOSTART = '1';
 process.env.MEMORY_DISABLE_PERSONA_SYNC = '1';
 process.env.MEMORY_DISABLE_BACKGROUND_SYNC = '1';
-const { ensureWeb, webStatus, stopWeb, readConnection, registerWebStartup, removeWebRuntime, startupPath, autoStartWeb, setWebAutostart } = await import('../../mcp-server/dashboard/runtime.js');
+const { ensureWeb, webStatus, stopWeb, readConnection, registerWebStartup, removeWebRuntime, startupPath, autoStartWeb, setWebAutostart, nodeExecutable } = await import('../../mcp-server/dashboard/runtime.js');
 const { updateConfig } = await import('../../mcp-server/config/config_manager.js');
 const { startDashboard } = await import('../../mcp-server/dashboard/server.js');
 const { handleWebCommand } = await import('../../mcp-server/cli/web_commands.js');
@@ -93,6 +93,29 @@ try {
   assert.ok(script.includes(process.env.MEMORY_DIR));
   assert.ok(!script.includes(connection.token));
   const startupBytes = fs.readFileSync(startup.path);
+  // Automatic client launches (any executable/package root) leave a working entry alone...
+  const otherLauncher = script.replace(join(cwd, 'mcp-server', 'cli_boot.js'), join(cwd, 'package.json'));
+  assert.notEqual(otherLauncher, script);
+  fs.writeFileSync(startup.path, Buffer.from(otherLauncher, 'utf16le'));
+  assert.equal(registerWebStartup({ automatic: true }).kept, true);
+  assert.deepEqual(fs.readFileSync(startup.path), Buffer.from(otherLauncher, 'utf16le'), 'automatic launch rewrote a working login entry');
+  // ...but repair one whose launcher no longer exists, and explicit enable still rewrites.
+  fs.writeFileSync(startup.path, Buffer.from(script.replace(join(cwd, 'mcp-server', 'cli_boot.js'), join(root, 'removed-build', 'cli_boot.js')), 'utf16le'));
+  assert.equal(registerWebStartup({ automatic: true }).kept, undefined);
+  assert.deepEqual(fs.readFileSync(startup.path), startupBytes, 'broken login entry was not repaired');
+  // A host binary (e.g. opencode-cli.exe) cannot run our scripts: never keep or write it.
+  const hostDir = join(root, 'host-bin'); fs.mkdirSync(hostDir);
+  const hostExe = join(hostDir, 'opencode-cli.exe'), nodeName = process.platform === 'win32' ? 'node.exe' : 'node';
+  fs.writeFileSync(hostExe, ''); fs.writeFileSync(join(hostDir, nodeName), '');
+  fs.writeFileSync(startup.path, Buffer.from(script.replace(process.execPath, hostExe), 'utf16le'));
+  assert.equal(registerWebStartup({ automatic: true }).kept, undefined, 'a non-Node login launcher must be repaired');
+  assert.deepEqual(fs.readFileSync(startup.path), startupBytes);
+  assert.equal(nodeExecutable({ execPath: process.execPath }), process.execPath);
+  assert.equal(nodeExecutable({ execPath: hostExe, env: { PATH: hostDir, PATHEXT: '.EXE' } }), join(hostDir, nodeName), 'a host binary must resolve to a real Node');
+  assert.equal(nodeExecutable({ execPath: hostExe, env: { PATH: join(root, 'empty'), PATHEXT: '.EXE' } }), hostExe, 'without Node on PATH keep the current executable');
+  fs.writeFileSync(startup.path, Buffer.from(otherLauncher, 'utf16le'));
+  registerWebStartup();
+  assert.deepEqual(fs.readFileSync(startup.path), startupBytes, 'explicit enable did not rewrite the entry');
   await removeWebRuntime({ dryRun: true });
   assert.deepEqual(fs.readFileSync(startup.path), startupBytes);
   assert.equal((await webStatus()).pid, restarted.pid, 'dry-run does not stop the panel');
@@ -121,6 +144,11 @@ try {
     runtime: { ...first, buildId: '0'.repeat(64) },
     onStop: () => { older.server.closeIdleConnections(); void older.close().then(() => { older = null; }); }
   });
+  // Automatic launches from other clients/builds adopt a running panel instead of replacing it.
+  const adopted = await ensureWeb({ adopt: true });
+  assert.equal(adopted.reused, true); assert.equal(adopted.otherBuild, true);
+  assert.equal(adopted.buildId, '0'.repeat(64), 'automatic launch replaced a running panel from another build');
+  assert.ok(older, 'the older panel must still be running after an automatic launch');
   const upgraded = await ensureWeb();
   assert.equal(upgraded.url, first.url);
   assert.equal(upgraded.buildId, first.buildId);

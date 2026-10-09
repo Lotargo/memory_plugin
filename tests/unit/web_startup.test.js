@@ -40,7 +40,7 @@ try {
   const stamp = new Date('2000-01-01T00:00:00Z');
   fs.utimesSync(first.path, stamp, stamp);
   const modified = fs.statSync(first.path).mtimeMs;
-  assert.deepEqual(run(register({ automatic: true }), custom), first);
+  assert.deepEqual(run(register({ automatic: true }), custom), { ...first, kept: true });
   assert.deepEqual(fs.readFileSync(first.path), bytes);
   assert.equal(fs.statSync(first.path).mtimeMs, modified, 'repeated launches must leave identical entries untouched');
   assert.deepEqual(files(sandbox), [first.path.split(/[\\/]/).at(-1)]);
