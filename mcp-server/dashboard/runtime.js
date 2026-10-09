@@ -44,8 +44,10 @@ export async function writeConnection(value) {
   } finally { fs.rmSync(temp, { force: true }); }
 }
 
-export function webBuildId() {
-  return buildPromise ||= (async () => {
+// Identifies the panel files on disk. `fresh` rehashes them instead of
+// returning the value cached when this process first asked.
+export function webBuildId({ fresh = false } = {}) {
+  const compute = async () => {
     const hash = createHash('sha256');
     function walk(dir, prefix = '') {
       for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -58,7 +60,8 @@ export function webBuildId() {
     hash.update(fs.readFileSync(join(packageRoot, 'package.json')));
     walk(join(packageRoot, 'mcp-server'));
     return hash.digest('hex');
-  })();
+  };
+  return fresh ? compute() : (buildPromise ||= compute());
 }
 
 const withLaunchLock = run => withSnapshotLock(webDir, run);
@@ -98,7 +101,10 @@ async function stopConnection(connection) {
 export async function webStatus() {
   const connection = readConnection();
   const runtime = await inspect(connection);
-  return runtime ? { running: true, ...runtime } : { running: false, port: connection?.port || null };
+  if (!runtime) return { running: false, port: connection?.port || null };
+  // Automatic launches keep a panel from another build; say how to switch.
+  return runtime.buildId === await webBuildId() ? { running: true, ...runtime }
+    : { running: true, ...runtime, otherBuild: true, hint: 'This panel runs another build of the plugin. Run `web restart` to switch to this one.' };
 }
 
 export async function stopWeb() {

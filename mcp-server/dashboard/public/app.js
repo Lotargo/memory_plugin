@@ -537,5 +537,10 @@ $('personaPreview').addEventListener('click', previewPersona); $('system').addEv
 document.addEventListener('keydown', event => {
   if (event.key === '/' && !document.querySelector('dialog[open], :popover-open') && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) { event.preventDefault(); $('search').focus(); }
 });
+async function checkPanelBuild() {
+  try { $('buildNotice').hidden = !(await api('/api/runtime/update')).filesChanged; } catch {}
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkPanelBuild(); });
+checkPanelBuild();
 window.addEventListener('beforeunload', event => { if (dirty() || state.busy) { event.preventDefault(); event.returnValue = ''; } });
 refresh();

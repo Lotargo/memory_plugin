@@ -7,6 +7,7 @@ import { assertWebPort, parseWebCommand, WEB_USAGE } from "./options.js";
 import { getConfig } from "../config/config_manager.js";
 import { inspectKnowledge } from "../services/knowledge_service.js";
 import { browserAsset } from './vendor.js';
+import { webBuildId } from './runtime.js';
 import { knowledgeLinksRequest } from '../tools/core/knowledge_links_core.js';
 import { knowledgeContentRequest } from '../tools/core/knowledge_content_core.js';
 import { projectRequest } from '../services/project_service.js';
@@ -90,6 +91,8 @@ export async function startDashboard({ port = 0, token = randomBytes(32).toStrin
       if (auth.length !== expected.length || !timingSafeEqual(auth, expected)) return json(401, { error: "Open the complete connection URL printed by the dashboard command." });
       if (cookieName && req.headers.authorization) res.setHeader('Set-Cookie', `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000`);
       if (req.method === 'GET' && url.pathname === '/api/runtime' && runtime) return json(200, runtime);
+      // The panel keeps running the code it started with; tell its page when the files changed since.
+      if (req.method === 'GET' && url.pathname === '/api/runtime/update' && runtime) return json(200, { filesChanged: (await webBuildId({ fresh: true })) !== runtime.buildId });
       if (req.method === 'GET' && url.pathname === '/api/resources') {
         if (url.search) return json(400, {code: 'INVALID', error: 'Unknown resource parameter.'});
         return json(200, await resourceOverview());

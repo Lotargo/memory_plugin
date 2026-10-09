@@ -149,9 +149,16 @@ try {
   assert.equal(adopted.reused, true); assert.equal(adopted.otherBuild, true);
   assert.equal(adopted.buildId, '0'.repeat(64), 'automatic launch replaced a running panel from another build');
   assert.ok(older, 'the older panel must still be running after an automatic launch');
+  // Status and the panel page both say that a restart switches to the current files.
+  const behind = await webStatus();
+  assert.equal(behind.otherBuild, true); assert.match(behind.hint, /web restart/);
+  const panelUpdate = async origin => (await fetch(origin + '/api/runtime/update', { headers: { Authorization: `Bearer ${connection.token}` } })).json();
+  assert.deepEqual(await panelUpdate(behind.origin), { filesChanged: true });
   const upgraded = await ensureWeb();
   assert.equal(upgraded.url, first.url);
   assert.equal(upgraded.buildId, first.buildId);
+  assert.equal((await webStatus()).otherBuild, undefined, 'a current panel is not reported as another build');
+  assert.deepEqual(await panelUpdate(upgraded.origin), { filesChanged: false });
   const off = await setWebAutostart(false);
   assert.equal(off.enabled, false);
   assert.equal(fs.existsSync(startupPath()), false);
