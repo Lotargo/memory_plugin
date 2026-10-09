@@ -1,10 +1,10 @@
 import fs from 'node:fs';
-import { basename, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { MEMORY_DIR, resolveDefaultMemoryDir } from '../memory.js';
-import { resolveClientExecutable } from '../client_cli.js';
+import { isNodeExecutable, nodeExecutable } from '../client_cli.js';
 import { getConfig, updateConfig } from '../config/config_manager.js';
 import { atomicWrite, withSnapshotLock } from '../storage/snapshot_lock.js';
 
@@ -14,6 +14,7 @@ const connectionFile = join(webDir, 'connection.json');
 export const storageId = createHash('sha256').update(resolve(MEMORY_DIR).toLowerCase()).digest('hex');
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 let buildPromise;
+export { nodeExecutable };
 
 export function readConnection() {
   try {
@@ -61,17 +62,6 @@ export function webBuildId() {
 }
 
 const withLaunchLock = run => withSnapshotLock(webDir, run);
-
-// Hosts embed this code in their own binaries (for example `opencode-cli.exe`),
-// where `process.execPath` is the host, not Node: it cannot run the panel
-// worker or the login script and just prints its own usage. Always launch the
-// panel with a real Node executable.
-const isNodeExecutable = file => /^node(?:js)?(?:\.exe)?$/i.test(basename(String(file || '')));
-export function nodeExecutable({ execPath = process.execPath, env = process.env } = {}) {
-  if (isNodeExecutable(execPath)) return execPath;
-  const found = resolveClientExecutable('node', { env });
-  return found && isNodeExecutable(found) ? found : execPath;
-}
 
 async function inspect(connection) {
   if (!connection?.port) return null;

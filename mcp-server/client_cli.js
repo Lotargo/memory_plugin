@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { delimiter, extname, join } from "node:path";
+import { basename, delimiter, extname, join } from "node:path";
 
 function envValue(env, name) {
   if (Object.prototype.hasOwnProperty.call(env || {}, name)) return env[name];
@@ -30,6 +30,18 @@ export function resolveClientExecutable(name, {
     }
   }
   return null;
+}
+
+// Hosts embed this code in their own binaries (for example `opencode-cli.exe`),
+// where `process.execPath` is the host, not Node: it cannot run our scripts and
+// just prints its own usage. Anything launched or registered as a Node command
+// must use a real Node executable.
+export const isNodeExecutable = (file) => /^node(?:js)?(?:\.exe)?$/i.test(basename(String(file || "")));
+export function nodeExecutable({ execPath = process.execPath, env = process.env, platform = process.platform } = {}) {
+  if (isNodeExecutable(execPath)) return execPath;
+  // Node is not a client CLI, so the native-client switch must not hide it.
+  const found = resolveClientExecutable("node", { env: { ...env, MEMORY_PLUGIN_DISABLE_NATIVE_CLI: "0" }, platform });
+  return found && isNodeExecutable(found) ? found : execPath;
 }
 
 export function runClientCli(name, args, {

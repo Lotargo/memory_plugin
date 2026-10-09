@@ -4,7 +4,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { resolveClientPaths } from '../client_paths.js';
-import { resolveClientExecutable } from '../client_cli.js';
+import { nodeExecutable, resolveClientExecutable } from '../client_cli.js';
 import { integrationStatus, PLUGIN_SELECTOR, projectConfigDirectories } from '../plugin_integration.js';
 import { isMemoryMcpServerEntry, isMemoryPluginEntry } from '../client_registration.js';
 import { getCodexMemoryAgentSections } from '../codex_config.js';
@@ -139,7 +139,7 @@ async function doctor(captured, options) {
   if (item.status !== 'available' || item.channel.project || !item.channel.directEnabled && !item.channel.marketplace) fail('UNSUPPORTED_LAUNCHER');
   const env = safeEnvironment(options.env), processOptions = { cwd: p.cwd, env, timeoutMs: options.timeoutMs ?? PROBE_TIMEOUT_MS };
   const deadline = Date.now() + processOptions.timeoutMs;
-  let command = process.execPath, args, expectedRuntime, metadata = {};
+  let command = nodeExecutable(), args, expectedRuntime, metadata = {};
   if (item.channel.marketplace) {
     const listing = await probeNative(item.client, ['plugin','list','--json'], processOptions);
     let listed; try { listed = JSON.parse(listing.stdout); } catch { fail('PROTOCOL'); }
@@ -159,7 +159,7 @@ async function doctor(captured, options) {
   } else {
     if (!entry || !Array.isArray(entry.args) || entry.args.length !== 1 || !path.isAbsolute(entry.args[0]) || path.basename(entry.args[0]) !== 'boot.js') fail('UNSUPPORTED_LAUNCHER');
     let node = entry.command === 'node' ? resolveClientExecutable('node', options) : entry.command;
-    if (!node || !path.isAbsolute(node) || fs.realpathSync(node) !== fs.realpathSync(process.execPath)) fail('UNSUPPORTED_LAUNCHER');
+    if (!node || !path.isAbsolute(node) || fs.realpathSync(node) !== fs.realpathSync(command)) fail('UNSUPPORTED_LAUNCHER');
     const pkg = r.json(path.join(path.dirname(path.dirname(entry.args[0])),'package.json'));
     if (pkg.name !== '@lotargo/memory_plugin' || path.basename(path.dirname(entry.args[0])) !== 'mcp-server' || !r.read(entry.args[0]).exists) fail('UNSUPPORTED_LAUNCHER');
     if (!r.read(path.join(path.dirname(entry.args[0]),'index.js')).text.includes('MEMORY_CLIENT_PROBE')) fail('UNSUPPORTED_LAUNCHER');

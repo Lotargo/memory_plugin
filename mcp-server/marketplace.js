@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { resolveClientExecutable, runClientCli, cliFailureMessage } from './client_cli.js';
+import { nodeExecutable, resolveClientExecutable, runClientCli, cliFailureMessage } from './client_cli.js';
 import { resolveClientPaths } from './client_paths.js';
 import { integrationStatus, MARKETPLACE_NAME, PLUGIN_NAME, PLUGIN_SELECTOR } from './plugin_integration.js';
 
@@ -19,7 +19,7 @@ async function npmCommand(args, cwd) {
   const resolved = executable ? await realpath(executable) : null;
   const npmCli = process.env.npm_execpath || (resolved?.endsWith('.js') ? resolved : executable && join(dirname(executable), 'node_modules', 'npm', 'bin', 'npm-cli.js'));
   if (!npmCli || !existsSync(npmCli)) throw new Error('npm-cli.js is required to prepare a local marketplace runtime');
-  const result = spawnSync(process.execPath, [npmCli, ...args], {
+  const result = spawnSync(nodeExecutable(), [npmCli, ...args], {
     cwd, encoding: 'utf8', timeout: 300000, windowsHide: true,
     env: { ...process.env, CI: '1', MEMORY_WEB_AUTOSTART: '0' }, maxBuffer: 16 * 1024 * 1024,
   });
@@ -73,12 +73,13 @@ export async function buildMarketplace({ output, memoryDir, prepare = true, inst
     // already belong to this machine and retain their immutable build, so pin
     // its adapter path just as runtime.json pins the prepared engine path.
     const entry = client === 'codex' ? join(plugin, 'scripts', 'entry.cjs') : `${macro}/scripts/entry.cjs`;
-    const mcp = { mcpServers: { 'memory-agent': { command: process.execPath, args: [entry, 'mcp'] } } };
-    const handler = { type: 'command', command: `"${process.execPath.replace(/\\/g, '/')}" "${macro}/scripts/entry.cjs" hook`, timeout: 10 };
+    const nodePath = nodeExecutable();
+    const mcp = { mcpServers: { 'memory-agent': { command: nodePath, args: [entry, 'mcp'] } } };
+    const handler = { type: 'command', command: `"${nodePath.replace(/\\/g, '/')}" "${macro}/scripts/entry.cjs" hook`, timeout: 10 };
     if (client === 'codex' && process.platform === 'win32') {
       // A quoted executable is a string expression in PowerShell. Read the
       // plugin path as an environment value so spaces and '$' stay literal.
-      const node = process.execPath.replace(/\\/g, '/').replace(/'/g, "''");
+      const node = nodePath.replace(/\\/g, '/').replace(/'/g, "''");
       handler.commandWindows = `& '${node}' (Join-Path $env:PLUGIN_ROOT 'scripts/entry.cjs') hook`;
     }
     const hooks = { hooks: { SessionStart: [{ hooks: [handler] }] } };
@@ -94,7 +95,7 @@ export async function buildMarketplace({ output, memoryDir, prepare = true, inst
     }
     await jsonWrite(join(plugin, '.mcp.json'), mcp);
   }
-  const receipt = { schema: 1, prepared: prepare, version: pkg.version, sourceDigest, runtime, memoryDir, nodePath: process.execPath, clients: ['codex', 'claude'] };
+  const receipt = { schema: 1, prepared: prepare, version: pkg.version, sourceDigest, runtime, memoryDir, nodePath: nodeExecutable(), clients: ['codex', 'claude'] };
   await jsonWrite(join(output, 'local-marketplace.json'), receipt);
   await writeFile(join(output, 'README.md'), `# Local memory marketplace\n\nVersion: ${pkg.version}\nSource: ${sourceDigest}\nPrepared: ${prepare}\n\nThis build belongs to this computer. Keep this directory: installed adapters use its prepared runtime. User memory remains in ${memoryDir}. Rebuilding requires a new output directory.\n\nInstall and migrate the direct integration:\n\n\`\`\`powershell\nnode "${join(runtime, 'mcp-server', 'boot.js')}" marketplace install --client codex --path "${output}"\nnode "${join(runtime, 'mcp-server', 'boot.js')}" marketplace install --client claude --path "${output}"\n\`\`\`\n\nReview and trust the Codex SessionStart hook in the client before expecting automatic initialization. Start a new session after installation, disable, removal or channel changes.\n`);
   return { output, ...receipt };

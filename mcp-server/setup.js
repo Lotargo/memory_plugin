@@ -3,7 +3,7 @@ import { existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { resolveClientPaths } from "./client_paths.js";
-import { cliFailureMessage, runClientCli } from "./client_cli.js";
+import { cliFailureMessage, nodeExecutable, runClientCli } from "./client_cli.js";
 import { MEMORY_MCP_ENTRY, isMemoryMcpServerEntry, isMemoryPluginEntry, readJsonConfig } from "./client_registration.js";
 
 async function configureJsonMcpClient({ label, cliName, cliArgs, configPath, entry = MEMORY_MCP_ENTRY }) {
@@ -167,11 +167,12 @@ export async function runSetup(args = process.argv.slice(2)) {
   if (doClaude) {
     try {
       const bootPath = fileURLToPath(new URL('./boot.js', import.meta.url));
+      const nodePath = nodeExecutable();
       const result = await configureJsonMcpClient({
         label: "Claude Code",
         cliName: "claude",
-        cliArgs: ["mcp", "add", "--scope", "user", "memory-agent", "--", process.execPath, bootPath],
-        entry: { command: process.execPath, args: [bootPath] },
+        cliArgs: ["mcp", "add", "--scope", "user", "memory-agent", "--", nodePath, bootPath],
+        entry: { command: nodePath, args: [bootPath] },
         configPath: clientPaths.claudeConfigPath,
       });
       console.log(`  [OK] Claude Code: configured MCP server via ${result.method === "native" ? "claude mcp add" : result.method === "existing" ? "existing owned registration" : "ownership-checked JSON fallback"}`);
@@ -252,7 +253,7 @@ export async function runSetup(args = process.argv.slice(2)) {
       } = await import("./codex_config.js");
       const codexDir = clientPaths.codexDir;
       const codexConfig = clientPaths.codexConfigPath;
-      const nodePath = process.execPath;
+      const nodePath = nodeExecutable();
       const bootPath = fileURLToPath(new URL("./boot.js", import.meta.url));
       const runtime = validateCodexRuntime({ nodePath, nodeVersion: process.versions.node, bootPath });
       if (!runtime.ok) {

@@ -2,7 +2,7 @@ import assert from "node:assert";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { resolveClientExecutable, runClientCli } from "../../mcp-server/client_cli.js";
+import { nodeExecutable, resolveClientExecutable, runClientCli } from "../../mcp-server/client_cli.js";
 
 export async function runClientCliTests() {
   console.log("--- Running Unit Tests: client_cli ---");
@@ -36,6 +36,18 @@ export async function runClientCliTests() {
       resolveClientExecutable("fake-client", { env: { ...env, MEMORY_PLUGIN_DISABLE_NATIVE_CLI: "1" } }),
       null
     );
+
+    // A host binary (e.g. opencode-cli.exe) must resolve to a real Node, even
+    // when native client CLIs are switched off.
+    const nodeName = isWindows ? "node.exe" : "node";
+    const nodePath = join(binDir, nodeName);
+    await writeFile(nodePath, "", "utf-8");
+    if (!isWindows) await chmod(nodePath, 0o755);
+    const hostExe = join(root, isWindows ? "opencode-cli.exe" : "opencode-cli");
+    const nodeEnv = { PATH: binDir, PATHEXT: ".EXE", MEMORY_PLUGIN_DISABLE_NATIVE_CLI: "1" };
+    assert.strictEqual(nodeExecutable({ execPath: process.execPath, env: nodeEnv }), process.execPath);
+    assert.strictEqual(nodeExecutable({ execPath: hostExe, env: nodeEnv }), nodePath);
+    assert.strictEqual(nodeExecutable({ execPath: hostExe, env: { PATH: join(root, "empty"), PATHEXT: ".EXE" } }), hostExe);
   } finally {
     await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }

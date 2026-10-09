@@ -409,8 +409,9 @@ async function handleSubmenuItem(value, config, stats) {
 if (process.argv[1] && process.argv[1].includes("cli.js")) {
   if (typeof global.gc !== "function") {
     const { spawn } = await import("node:child_process");
+    const { nodeExecutable } = await import("./client_cli.js");
     const args = ["--expose-gc", ...process.argv.slice(1)];
-    const child = spawn(process.execPath, args, { stdio: "inherit", windowsHide: true });
+    const child = spawn(nodeExecutable(), args, { stdio: "inherit", windowsHide: true });
     child.on("exit", (code) => process.exit(code));
   } else {
     runCli().catch((err) => console.error("CLI error:", err));

@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { MEMORY_DIR } from '../memory.js';
+import { nodeExecutable } from '../client_cli.js';
 import { getConfig } from '../config/config_manager.js';
 import { getDatabase, MODELS_DIR } from '../db/database.js';
 import { getModelStorageInfo, listAllCachedModels, isValidModelId } from '../ml/model_manager.js';
@@ -112,7 +113,7 @@ export async function startModelJob(input, {launch=launchWorker}={}) {
   });
 }
 function launchWorker(job) {
-  const worker=spawn(process.execPath,[fileURLToPath(new URL('../ml/model_admin_worker.js',import.meta.url)),job.operationId],{
+  const worker=spawn(nodeExecutable(),[fileURLToPath(new URL('../ml/model_admin_worker.js',import.meta.url)),job.operationId],{
     windowsHide:true,stdio:['ignore','ignore','ignore','ipc'],env:{...process.env,MEMORY_DIR,MEMORY_DISABLE_BACKGROUND_SYNC:'1',MEMORY_DISABLE_PERSONA_SYNC:'1',MEMORY_DISABLE_WEB_AUTOSTART:'1'}
   });
   // Handshake prevents the worker receipt being overwritten by the launcher's queued receipt.

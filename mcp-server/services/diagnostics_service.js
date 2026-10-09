@@ -7,6 +7,7 @@ import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import JSZip from 'jszip';
 import { MEMORY_DIR } from '../memory.js';
+import { nodeExecutable } from '../client_cli.js';
 import { getDatabase, BLOBS_DIR } from '../db/database.js';
 import { assertLocalMemoryReady } from '../config/config_manager.js';
 import { withSnapshotLock, atomicWrite } from '../storage/snapshot_lock.js';
@@ -57,7 +58,7 @@ async function runDiagnostic() {
     MEMORY_DISABLE_WEB_AUTOSTART: '1', MEMORY_LOG_LEVEL: 'silent', HF_HUB_OFFLINE: '1', TRANSFORMERS_OFFLINE: '1' });
   let result;
   try {
-    result = await new Promise(resolveDone => execFile(process.execPath, [fileURLToPath(new URL('../admin/diagnostic_worker.js', import.meta.url))],
+    result = await new Promise(resolveDone => execFile(nodeExecutable(), [fileURLToPath(new URL('../admin/diagnostic_worker.js', import.meta.url))],
       { cwd: actual, env, timeout: 45000, maxBuffer: 64000, windowsHide: true }, (error, stdout) => {
         let report; try { report = JSON.parse(stdout); } catch {}
         if (error && report?.status === 'passed') report = { ...report, status: 'failed', error: { code: error.killed ? 'TIMEOUT' : 'UNAVAILABLE', message: 'The diagnostic process did not finish normally.' } };
