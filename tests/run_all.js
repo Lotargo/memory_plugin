@@ -61,6 +61,7 @@ const testSuites = [
   { category: "Integration", name: "knowledge_search", file: "tests/integration/knowledge_search.test.js" },
   { category: "Integration", name: "web_commands", file: "tests/integration/web_commands.test.js" },
   { category: "Integration", name: "web_runtime", file: "tests/integration/web_runtime.test.js" },
+  { category: "Integration", name: "web_orphan", file: "tests/integration/web_orphan.test.js" },
   { category: "Integration", name: "cloud_snapshots", file: "tests/integration/cloud_snapshots.test.js" },
   { category: "Integration", name: "expanded_features", file: "tests/integration/expanded_features.test.js" },
   { category: "Integration", name: "memory_verification", file: "tests/integration/memory_verification.test.js" },

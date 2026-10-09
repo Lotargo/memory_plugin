@@ -26,6 +26,16 @@ try {
   const port = Number(new URL(app.origin).port);
   if (connection.port !== port) await writeConnection({ ...connection, port });
   process.once('SIGINT', finish); process.once('SIGTERM', finish);
+  // The saved connection is never removed while its profile exists. When the
+  // memory directory is deleted (test or abandoned profiles), stop instead of
+  // running forever; two misses in a row rule out a transient read failure.
+  let missing = 0;
+  const watchdog = setInterval(() => {
+    try { missing = readConnection() ? 0 : missing + 1; } catch { missing = 0; }
+    if (missing >= 2) { console.log('Memory panel stopped: its memory directory no longer exists.'); finish(); }
+  }, Number(process.env.MEMORY_WEB_WATCHDOG_MS) || 30000);
+  watchdog.unref();
+  finished.then(() => clearInterval(watchdog));
   console.log(`Memory panel v${runtime.version} ready on ${app.origin}`);
   await finished;
 } finally {

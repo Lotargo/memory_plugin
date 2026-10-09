@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `web status` now reports `otherBuild: true` with a hint to run `web restart` when the running panel belongs to another build, and the panel page shows a persistent notice when its files on disk changed after it started (`GET /api/runtime/update`). Automatic launches keep such a panel, so this is how a user learns that a restart is needed.
 
+- The panel worker stops by itself when its memory directory is deleted: it checks for its saved `connection.json` (every 30 s, `MEMORY_WEB_WATCHDOG_MS` overrides) and exits after two misses in a row, so abandoned test or profile directories no longer leave panel processes running.
+
 - `remember` and `update_fact` now warn when a fact body is longer than 800 characters. The fact is still saved; the response tells the agent to move the details to `remember_note` and keep a short fact linked to it, so Notebook memory stays short enough to load every session.
 
 - Every place that launches or registers a Node command now uses a real Node executable instead of `process.execPath`: the CLI's `--expose-gc` relaunch, model and diagnostic workers, `setup` registrations for Claude Code and Codex, the local marketplace build (npm, MCP entry, SessionStart hook, receipt) and the client doctor. Inside a host binary such as `opencode-cli.exe` these previously launched or wrote the host itself. The shared `nodeExecutable()` lives in `client_cli.js`.
