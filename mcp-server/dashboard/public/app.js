@@ -96,7 +96,7 @@ createProjectManager({ api, node, scopeKey: () => $('target').value, openDialog,
   state.edit=null;
   await refresh();
   if(result.targetKey && state.overview?.targets.some(target=>target.key===result.targetKey)) await selectTarget(result.targetKey);
-  notice(`Операция с проектом завершена. Резервный снимок: ${result.backup}`);
+  notice(result.backup ? `Операция с проектом завершена. Резервный снимок: ${result.backup}` : 'Регистрация проекта обновлена.');
 } });
 const selected = () => state.notebook?.records.find(record => record.ref === state.selectedRef);
 const directiveTransfer = createDirectiveTransfer({ api, node, openDialog, onSaved: async result => {

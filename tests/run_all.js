@@ -53,6 +53,7 @@ const testSuites = [
   { category: "Integration", name: "models", file: "tests/integration/models.test.js" },
   { category: "Integration", name: "resources", file: "tests/integration/resources.test.js" },
   { category: "Integration", name: "project_service", file: "tests/integration/project_service.test.js" },
+  { category: "Integration", name: "project_registration", file: "tests/integration/project_registration.test.js" },
   { category: "Integration", name: "knowledge_service", file: "tests/integration/knowledge_service.test.js" },
   { category: "Integration", name: "knowledge_links", file: "tests/integration/knowledge_links.test.js" },
   { category: "Integration", name: "knowledge_content", file: "tests/integration/knowledge_content.test.js" },

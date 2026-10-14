@@ -163,7 +163,7 @@ async function prepare(sql, input) {
     counts: { sourceFacts: source?.entries.length || 0, targetFacts: target?.entries.length || 0, addedFacts: merge.added, duplicateFacts: merge.matches.length, assignedIds: merge.assignedIds,
       links: moving ? links.length : 0, documents: moving ? docIds.length : 0 },
     matches: merge.matches.slice(0, 100), conflicts: merge.conflicts.slice(0, 100), conflictCount: merge.conflicts.length,
-    truncated: merge.matches.length > 100 || merge.conflicts.length > 100, canApply: !merge.conflicts.length,
+    truncated: merge.matches.length > 100 || merge.conflicts.length > 100, canApply: !merge.conflicts.length, backupRequired: !!moving,
     effects: operation === 'purge-identity' ? ['Remove the detected registry identity and all its aliases. Keep Notebook, documents, scopes and Git detection. This does not delete memory.']
       : operation === 'unlink' ? ['Remove only the selected path alias. Keep Notebook, documents, other aliases and Git detection.']
       : moving ? ['Merge records without dropping metadata; remap colliding fact IDs and their links.', 'Move document scopes and registry aliases; preserve other document scopes.', 'Save a verified full local ZIP before publishing; remove the source Notebook only with the committed move.', 'Repository Git configuration stays unchanged; opening its old Git remote still resolves the old identity.']
@@ -190,24 +190,28 @@ export async function projectRequest(input = {}, { afterCommit } = {}) {
     if (input.confirm !== true) failure('CONFIRMATION', 'Review and confirm the project preview.');
     if (!input.previewToken || input.previewToken !== preview.previewToken) failure('CONFLICT', 'Project preview is stale. Review it again.');
     if (!preview.canApply) failure('CONFLICT', 'Resolve the listed record or alias conflicts before moving memory.');
-    // Full snapshot also backs up legacy schema; activation happens only on
-    // an explicit move and can be recovered together with its publication.
-    const { captureLocal } = await import('../admin/full_snapshot.js');
-    const payload = captureLocal(db, MEMORY_DIR, BLOBS_DIR, getConfig());
-    const checkpoint=await checkpoints.store(payload,checkpoints.state(),{force:true,source:`project-before-${preview.operation}`,pinned:true});
-    await checkpoints.load(checkpoint.id,'local');
-    const backup=checkpoints.archivePath(checkpoint.id);
+    // Registry-only edits are atomic SQL operations and never read RAG blobs
+    // or activate the knowledge schema. Memory moves still require a verified
+    // full snapshot before schema activation and Notebook publication.
+    let checkpoint = null, backup = null;
+    if (moving) {
+      const { captureLocal } = await import('../admin/full_snapshot.js');
+      const payload = captureLocal(db, MEMORY_DIR, BLOBS_DIR, getConfig());
+      checkpoint = await checkpoints.store(payload, checkpoints.state(), { force: true, source: `project-before-${preview.operation}`, pinned: true });
+      await checkpoints.load(checkpoint.id, 'local');
+      backup = checkpoints.archivePath(checkpoint.id);
+    }
     const current = await prepare(sql, input);
     if (current.preview.previewToken !== preview.previewToken) failure('CONFLICT', 'Project changed during backup preparation. Review a new preview.');
     const files = moving ? [{ file: target.file, content: buildMemoryContent(preview.targetKey, merge.entries) }, ...(source.content !== null ? [{ file: source.file, content: null }] : [])] : [];
-    const operationId = await commitKnowledge(MEMORY_DIR, db, files, tx => {
+    const publish = tx => {
       if(sqlStamp(tx)!==prepared.stamp) failure('CONFLICT','Project data changed before publication.');
       // Recheck files synchronously inside the SQL transaction for external edits.
       for (const item of [source, target].filter(Boolean)) {
         const file = join(MEMORY_DIR, item.file), content = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
         if (content !== item.content) failure('CONFLICT', 'Notebook changed before publication.');
       }
-      createKnowledgeSchema(tx);
+      if (moving) createKnowledgeSchema(tx);
       if(preview.operation==='purge-identity') tx.prepare('DELETE FROM project_identities WHERE key=?').run(preview.sourceKey);
       else if (preview.operation === 'unlink') tx.prepare('DELETE FROM project_aliases WHERE alias=? AND identity_key=?').run(preview.aliases[0].alias, preview.sourceKey);
       else {
@@ -232,12 +236,20 @@ export async function projectRequest(input = {}, { afterCommit } = {}) {
         if (preview.operation === 'link') for (const a of preview.aliases) tx.prepare(`INSERT INTO project_aliases (alias,identity_key,kind,created_at) VALUES (?,?,?,?)
           ON CONFLICT(alias) DO UPDATE SET identity_key=excluded.identity_key,kind=excluded.kind`).run(a.alias, preview.targetKey, a.kind, Date.now());
       }
-    }, { afterCommit });
+    };
+    let operationId = null;
+    if (moving) operationId = await commitKnowledge(MEMORY_DIR, db, files, publish, { afterCommit });
+    else {
+      sql.exec('BEGIN IMMEDIATE');
+      try { publish(sql); sql.exec('COMMIT'); }
+      catch (error) { sql.exec('ROLLBACK'); throw error; }
+      if (afterCommit) await afterCommit();
+    }
     bustIdentityCache();
     return { status: 'success', operation: preview.operation, sourceKey: preview.sourceKey, targetKey: preview.targetKey, key: preview.targetKey,
       name: preview.identity?.name, primaryRemote: preview.identity?.primaryRemote, aliases: preview.aliases.map(a => a.alias), migrated: !!moving,
-      mergedFacts: merge.added, movedKnowledgeLinks: moving ? links.length : 0, movedRagDocuments: moving ? docIds.length : 0, backup, backupId:checkpoint.id,
-      restoreCommand:`memory-cli snapshots restore ${checkpoint.id} --location local`, operationId };
+      mergedFacts: merge.added, movedKnowledgeLinks: moving ? links.length : 0, movedRagDocuments: moving ? docIds.length : 0, backup, backupId:checkpoint?.id || null,
+      restoreCommand: checkpoint ? `memory-cli snapshots restore ${checkpoint.id} --location local` : null, operationId };
   });
   // Same lock order as upload/restore: checkpoint catalog, then working memory.
   // This makes the backup visible to normal CLI restore without a lock cycle.

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.7.1] - Unreleased
 
+- Fixed Git project registration failing when an unrelated archived RAG blob is missing or corrupt. Registry-only link/unlink/purge now publish atomically in SQLite without a full-memory snapshot or knowledge-schema migration. Moves and legacy-store migrations retain mandatory verified full backups; the panel shows backup information only for those operations.
+
 - `web status` now reports `otherBuild: true` with a hint to run `web restart` when the running panel belongs to another build, and the panel page shows a persistent notice when its files on disk changed after it started (`GET /api/runtime/update`). Automatic launches keep such a panel, so this is how a user learns that a restart is needed.
 
 - The panel worker stops by itself when its memory directory is deleted: it checks for its saved `connection.json` (every 30 s, `MEMORY_WEB_WATCHDOG_MS` overrides) and exits after two misses in a row, so abandoned test or profile directories no longer leave panel processes running.
