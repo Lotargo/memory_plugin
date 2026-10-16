@@ -8,11 +8,14 @@ The roadmap is intentionally not a release schedule. Priorities may change as th
 
 ### Knowledge revision and history
 
-Implementation plan: [Knowledge revision stages E0–E7](dev_docs/PLAN_KNOWLEDGE_REVISION_2026-10-16.md).
+Implementation plan: [Knowledge revision stages E0–E7 and graph maintenance G1](dev_docs/PLAN_KNOWLEDGE_REVISION_2026-10-16.md).
 Start with a read-only audit of potentially outdated knowledge. Preserve content revisions and
 the evidence behind explicit review decisions, then apply shared current/research/history
 semantics across Notebook, RAG and agent context. Bounded background auditing follows manual
-review and retrieval acceptance. All stages are planned; this entry does not enable migration,
+review and retrieval acceptance. A separate planned `maintain-knowledge-graph` skill prepares
+scoped reindexing, link repair and derived persona maintenance, requires explicit user permission
+for execution, and records proposals, refusals, coverage and verified outcomes in a shared journal.
+Elapsed time alone never triggers a cleanup proposal or rebuild. All stages are planned; this entry does not enable migration,
 change stored knowledge, or claim implementation acceptance.
 
 ### Runtime activation and deactivation
