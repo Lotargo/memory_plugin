@@ -6,6 +6,15 @@ The roadmap is intentionally not a release schedule. Priorities may change as th
 
 ## Planned
 
+### Knowledge revision and history
+
+Implementation plan: [Knowledge revision stages E0–E7](dev_docs/PLAN_KNOWLEDGE_REVISION_2026-10-16.md).
+Start with a read-only audit of potentially outdated knowledge. Preserve content revisions and
+the evidence behind explicit review decisions, then apply shared current/research/history
+semantics across Notebook, RAG and agent context. Bounded background auditing follows manual
+review and retrieval acceptance. All stages are planned; this entry does not enable migration,
+change stored knowledge, or claim implementation acceptance.
+
 ### Runtime activation and deactivation
 
 Add a safe way to temporarily disable and re-enable `memory_plugin` for configured CLI clients without uninstalling the package or removing persistent memory.
