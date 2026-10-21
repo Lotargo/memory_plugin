@@ -2,7 +2,7 @@
 
 Status: K0–K6 implemented and accepted on isolated stores, including an installed
 npm package, a real cached CPU model and namespaced live Turso checkpoints.
-Power-loss durability is unverified. Reviewed 2026-10-03
+Power-loss durability is unverified. Reviewed 2026-10-03.
 against the existing dirty working tree, including the prior dashboard changes.
 
 ## Implemented read contract (K1)

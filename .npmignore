@@ -17,6 +17,20 @@ exports/
 local_test.db
 *.log
 
+# Defense in depth: never package user profiles, credentials or generated state.
+**/.env
+**/.env.*
+**/*.sqlite*
+**/*.db
+**/*.log
+**/*.tgz
+**/*.bak
+**/*.enc
+**/connection.json
+**/config.json
+**/auth_secrets*
+**/node_modules/**
+
 # Git
 .git/
 .gitignore

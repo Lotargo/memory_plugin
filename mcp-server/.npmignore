@@ -2,3 +2,14 @@
 # This nested ignore is required because package.json explicitly includes mcp-server/.
 benchmarks/
 test*
+**/.env
+**/.env.*
+**/*.sqlite*
+**/*.db
+**/*.log
+**/*.tgz
+**/*.bak
+**/*.enc
+**/connection.json
+**/config.json
+**/auth_secrets*

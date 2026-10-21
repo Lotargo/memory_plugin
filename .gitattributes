@@ -1,0 +1,5 @@
+# Internal investigations, machine-specific evidence and local artifacts are not release sources.
+/dev_docs* export-ignore
+/.local-marketplace export-ignore
+/.test-results* export-ignore
+/local_test.db export-ignore

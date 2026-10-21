@@ -7,7 +7,8 @@ The marketplace is an alternative installation channel for the same memory engin
 Run from the checkout with Node.js >= 22.5 and npm installed:
 
 ```powershell
-node mcp-server/boot.js marketplace build --output "/path/to/project\.local-marketplace\build-2026-10-05"
+$catalog = Join-Path (Get-Location).Path ".local-marketplace/build-demo"
+node mcp-server/boot.js marketplace build --output $catalog
 ```
 
 Choose a new absolute output directory for every build. `--memory-dir <path>` explicitly selects the shared storage; it defaults to the engine's normal `MEMORY_DIR` resolution. Installation refuses a migration if the direct registration uses another data directory. User data must stay outside the output directory.
@@ -28,8 +29,8 @@ Codex's MCP command pins the adapter inside that build as an absolute path: its 
 ## Install and migrate
 
 ```powershell
-node mcp-server/boot.js marketplace install --client codex --path "/path/to/project\.local-marketplace\build-2026-10-05"
-node mcp-server/boot.js marketplace install --client claude --path "/path/to/project\.local-marketplace\build-2026-10-05"
+node mcp-server/boot.js marketplace install --client codex --path $catalog
+node mcp-server/boot.js marketplace install --client claude --path $catalog
 ```
 
 Each command validates the runtime and the existing registration before using the client's native marketplace/plugin commands. Once the new plugin is enabled, it removes the owned direct MCP registration, managed instruction blocks and unchanged global skill copies for that client. It preserves unrelated configuration, user-authored instructions, the shared web panel and all memory data. Foreign/project-scoped registrations and modified skills stop migration before client writes. Failed native installation leaves the direct integration intact. If later legacy cleanup fails, the new plugin is removed and the command reports failure; inspect `marketplace status` and run direct setup to recover any partially removed legacy connection.
