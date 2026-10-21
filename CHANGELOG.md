@@ -5,7 +5,7 @@ All notable changes to `@lotargo/memory_plugin` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.7.2] - 2026-10-21
 
 - Added English (default), Russian and Simplified Chinese to the local dashboard. The sidebar language selector remembers its choice across reloads and port changes. Labels, dialogs, dates and counts update without losing drafts; stored content remains unchanged.
 

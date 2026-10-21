@@ -12,12 +12,18 @@ const verifying = tarball === '--verify';
 if (!verifying) assert.ok(tarball?.endsWith('.tgz'), 'Usage: npm run smoke:package -- /absolute/path/package.tgz');
 assert.ok(process.env.npm_execpath, 'Run through npm run smoke:package.');
 const root = verifying ? resolve(process.argv[3]) : await mkdtemp(join(tmpdir(), 'memory-release-smoke-'));
+// Chrome needs real OS profile discovery even when the plugin's HOME is
+// redirected. Playwright still supplies its own disposable user-data-dir.
+const browserProfileEnv = process.env.MEMORY_BROWSER_PROFILE_ENV || JSON.stringify(Object.fromEntries(
+  ['HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA'].filter(key => process.env[key]).map(key => [key, process.env[key]])
+));
 const env = { ...process.env, CI: '1', MEMORY_DIR: join(root, 'memory'), OPENCODE_CONFIG_DIR: join(root, 'opencode'),
   HOME: root, USERPROFILE: root, APPDATA: join(root, 'appdata'), LOCALAPPDATA: join(root, 'local'),
   CODEX_HOME: join(root, 'codex'), CLAUDE_CONFIG_DIR: join(root, 'claude'), MEMORY_WEB_STARTUP_DIR: join(root, 'startup'),
   MEMORY_DISABLE_PERSONA_SYNC: '1', MEMORY_DISABLE_BACKGROUND_SYNC: '1', MEMORY_DISABLE_WEB_AUTOSTART: '1',
-  MEMORY_WEB_AUTOSTART: '0', MEMORY_CLIENT_PROBE: '1', MEMORY_PLUGIN_DISABLE_NATIVE_CLI: '1' };
-let client, app, closeDatabase;
+  MEMORY_WEB_AUTOSTART: '0', MEMORY_CLIENT_PROBE: '1', MEMORY_PLUGIN_DISABLE_NATIVE_CLI: '1',
+  MEMORY_BROWSER_PROFILE_ENV: browserProfileEnv };
+let client, app, closeDatabase, browser;
 try {
   if (!verifying) {
   await run(process.execPath, [process.env.npm_execpath, 'install', '--prefix', root, '--ignore-scripts', '--no-audit', '--no-fund', resolve(tarball)],
@@ -67,15 +73,46 @@ try {
   const { startDashboard } = await import(pathToFileURL(join(pkgRoot, 'mcp-server/dashboard/server.js')).href);
   app = await startDashboard();
   const url = new URL(app.url), headers = { Authorization: `Bearer ${url.hash.slice(1)}` };
-  for (const path of ['/', '/app.js', '/style.css', '/favicon.svg', '/vendor/marked/marked.esm.js', '/vendor/katex/katex.min.css', '/api/overview']) {
+  for (const path of ['/', '/app.js', '/i18n.js', '/locales.js', '/style.css', '/favicon.svg', '/vendor/marked/marked.esm.js', '/vendor/katex/katex.min.css', '/api/overview']) {
     const response = await fetch(new URL(path, url), { headers });
     assert.equal(response.status, 200, path);
+  }
+  const i18n = await import(pathToFileURL(join(pkgRoot, 'mcp-server/dashboard/public/i18n.js')).href);
+  assert.equal(i18n.locale(), 'en');
+  for (const [language, label] of [['en','All records'], ['ru','Все записи'], ['zh-CN','全部记录']]) {
+    i18n.setLanguage(language, {persist:false});
+    assert.equal(String(i18n.t('m1')), label);
+  }
+  if (process.env.MEMORY_BROWSER_DEPS) {
+    const { createRequire } = await import('node:module');
+    const require = createRequire(join(resolve(process.env.MEMORY_BROWSER_DEPS), 'package.json'));
+    const { chromium } = require('playwright');
+    browser = await chromium.launch({headless:true, env:{...process.env,...JSON.parse(browserProfileEnv)},
+      ...(process.env.MEMORY_BROWSER_EXECUTABLE ? {executablePath:process.env.MEMORY_BROWSER_EXECUTABLE} : {})});
+    const context = await browser.newContext({locale:'ru-RU'});
+    const page = await context.newPage(), errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(app.url);
+    await page.waitForFunction(() => !document.getElementById('create').disabled);
+    assert.equal(await page.locator('html').getAttribute('lang'), 'en');
+    for (const [language, label] of [['ru','Все записи'], ['en','All records'], ['zh-CN','全部记录']]) {
+      await page.locator('#language').selectOption(language);
+      assert.equal(await page.locator('#viewTitle').textContent(), label);
+    }
+    await page.reload();
+    await page.waitForFunction(() => !document.getElementById('create').disabled);
+    assert.equal(await page.locator('#language').inputValue(), 'zh-CN');
+    await page.locator('.record-row').click();
+    assert.equal(await page.locator('#recordRaw').textContent(), 'Synthetic package validation record.');
+    assert.deepEqual(errors, []);
+    await browser.close(); browser = null;
+    console.log('PASS installed dashboard in Chrome: English default, en/ru/zh-CN switching, saved choice and unchanged record text.');
   }
   console.log(`PASS installed tarball ${pkg.version}: ${tools.length} MCP tools, initially empty isolated memory, Notebook write/read, dashboard and packaged browser assets.`);
   console.log('Install lifecycle scripts and native client setup were intentionally disabled; no models were downloaded or loaded.');
   }
 } finally {
-  await client?.close(); await app?.close(); closeDatabase?.();
+  await browser?.close(); await client?.close(); await app?.close(); closeDatabase?.();
   assert.ok(resolve(root).startsWith(resolve(tmpdir()) + sep));
   if (!verifying) {
     await rm(root, { recursive: true, force: true, maxRetries: 5 });

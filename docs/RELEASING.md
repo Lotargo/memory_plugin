@@ -1,6 +1,6 @@
 # Preparing a public release
 
-This procedure applies to **1.7.1**. Run preparation checks before the explicitly authorized publication steps below.
+This procedure applies to **1.7.2**. Run preparation checks before the explicitly authorized publication steps below.
 
 ## Checks
 
@@ -20,7 +20,7 @@ npm run release:check
 Build the real tarball outside the checkout with `npm pack --ignore-scripts --pack-destination <absolute-output-directory>`, then run:
 
 ```bash
-npm run smoke:package -- /absolute/path/lotargo-memory_plugin-1.7.1.tgz
+npm run smoke:package -- /absolute/path/lotargo-memory_plugin-1.7.2.tgz
 ```
 
 Run `npm run smoke:marketplace` to build a real disposable prepared runtime, audit its installed dependencies and verify both adapters' hooks, native ONNX import and MCP readback. It uses no native client registrations or installed memory.

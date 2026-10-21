@@ -26,10 +26,11 @@
 - [Release preparation](RELEASING.md)
 - [Changelog](../CHANGELOG.md) and [roadmap](../ROADMAP.md)
 
-## Release 1.7.1 records
+## Release records
 
 These dated records describe the release checks; they are separate from the living user guides.
 
-- [Release notes](RELEASE_NOTES_1.7.1.md)
+- [1.7.2 release notes — dashboard languages](RELEASE_NOTES_1.7.2.md)
+- [1.7.1 release notes](RELEASE_NOTES_1.7.1.md)
 - [Release readiness](RELEASE_READINESS_2026-10-21.md)
 - [Security readiness](RELEASE_SECURITY_READINESS_2026-10-21.md)
