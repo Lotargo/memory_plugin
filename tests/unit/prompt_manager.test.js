@@ -33,13 +33,13 @@ export async function runPromptManagerTests() {
   );
 
   const directive = "- [2026-08-22 10:00] **Tone** — Use concise Russian <!-- kind:directive -->";
-  const normal = "- [2026-08-22 10:01] **Name** — User is Oleg <!-- kind:fact -->";
+  const normal = "- [2026-08-22 10:01] **Example** — A fictional project uses SQLite <!-- kind:fact -->";
   const legacy = "- [2026-08-22 10:02] **Style** — Use playful tone <!-- tags:persona,style -->";
   const explicitFact = "- [2026-08-22 10:03] **Preference Fact** — Historical preference <!-- kind:fact, tags:pref -->";
   const persona = buildPersonaOverlayBlock([directive, normal, legacy, explicitFact]);
   assert.ok(persona.includes("Use concise Russian"), persona);
   assert.ok(persona.includes("Use playful tone"), persona);
-  assert.ok(!persona.includes("User is Oleg"), persona);
+  assert.ok(!persona.includes("A fictional project uses SQLite"), persona);
   assert.ok(!persona.includes("Historical preference"), persona);
   const withPersona = upsertPersonaOverlayBlock(updated, persona);
   assert.strictEqual(upsertPersonaOverlayBlock(withPersona, persona), withPersona, "persona sync must be idempotent");

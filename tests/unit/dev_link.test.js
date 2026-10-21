@@ -7,7 +7,7 @@ import { isMemoryPluginSpec, linkOpenCodeToRepository, rewriteOpenCodePluginList
 
 export async function runDevLinkTests() {
   console.log("--- Running Unit Tests: dev_link ---");
-  const devUrl = "file:///F:/projects/plugins/memory/opencode-plugin/main.js";
+  const devUrl = "file:///C:/example/memory-plugin/opencode-plugin/main.js";
   const unrelatedTuple = ["other-plugin", { enabled: true }];
   const rewritten = rewriteOpenCodePluginList(
     ["unrelated", "@lotargo/memory_plugin", "memory-plugin", unrelatedTuple],
