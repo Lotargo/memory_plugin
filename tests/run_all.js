@@ -8,6 +8,7 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 const testSuites = [
   { category: "Unit", name: "package_policy", file: "tests/unit/package_policy.test.js" },
+  { category: "Unit", name: "sqlite_bindings", file: "tests/unit/sqlite_bindings.test.js" },
   // --- 1. UNIT TESTS ---
   { category: "Unit", name: "fact_format", file: "tests/unit/fact_format.test.js" },
   { category: "Unit", name: "identity", file: "tests/unit/identity.test.js" },
@@ -66,6 +67,7 @@ const testSuites = [
   { category: "Integration", name: "web_orphan", file: "tests/integration/web_orphan.test.js" },
   { category: "Integration", name: "cloud_snapshots", file: "tests/integration/cloud_snapshots.test.js" },
   { category: "Integration", name: "expanded_features", file: "tests/integration/expanded_features.test.js" },
+  { category: "Integration", name: "docx_ingestion", file: "tests/integration/docx_ingestion.test.js" },
   { category: "Integration", name: "memory_verification", file: "tests/integration/memory_verification.test.js" },
   { category: "Integration", name: "mcp_tools", file: "tests/integration/mcp_tools.test.js" },
   { category: "Integration", name: "persona_sync", file: "tests/integration/persona_sync.test.js" },
@@ -102,6 +104,9 @@ async function main() {
         stdio: "inherit",
         env: {
           ...process.env,
+          TMPDIR: sandbox,
+          TMP: sandbox,
+          TEMP: sandbox,
           MEMORY_DIR: join(sandbox, "memory"),
           OPENCODE_CONFIG_DIR: join(sandbox, "opencode"),
           MEMORY_WEB_STARTUP_DIR: join(sandbox, "startup"),

@@ -13,6 +13,19 @@ export const BLOBS_DIR = join(STORAGE_DIR, "blobs");
 export const MODELS_DIR = join(STORAGE_DIR, "models");
 export const DB_PATH = join(STORAGE_DIR, "memory.sqlite");
 
+function sqliteBindings(args) {
+  // Node 22 can return an empty SQLite BLOB as a view with a null backing
+  // pointer. Rebinding that view becomes SQL NULL. A fresh empty Buffer keeps
+  // the BLOB type without changing real NULLs or copying nonempty vectors.
+  const scalar = value => ArrayBuffer.isView(value) && value.byteLength === 0 ? Buffer.alloc(0) : value;
+  return args.map(value => {
+    if (value && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)) {
+      return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, scalar(item)]));
+    }
+    return scalar(value);
+  });
+}
+
 class DatabaseWrapper {
   constructor(localDb, mode) {
     this.localDb = localDb;
@@ -23,9 +36,9 @@ class DatabaseWrapper {
   prepare(sql) {
     const db = this;
     return {
-      async run(...args) { return db.localDb.prepare(sql).run(...args); },
-      async get(...args) { return db.localDb.prepare(sql).get(...args); },
-      async all(...args) { return db.localDb.prepare(sql).all(...args); },
+      async run(...args) { return db.localDb.prepare(sql).run(...sqliteBindings(args)); },
+      async get(...args) { return db.localDb.prepare(sql).get(...sqliteBindings(args)); },
+      async all(...args) { return db.localDb.prepare(sql).all(...sqliteBindings(args)); },
     };
   }
   close() {

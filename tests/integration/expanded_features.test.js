@@ -3,7 +3,7 @@ import { rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import xlsx from "xlsx";
-import mammoth from "mammoth";
+import mammoth from "../../mcp-server/vendor/mammoth/lib/index.js";
 import { getDatabase } from "../../mcp-server/db/database.js";
 import { extractSymbolsFromContent } from "../../mcp-server/graph/graph_extractor.js";
 import { normalizeContent } from "../../mcp-server/ingest/normalizer.js";

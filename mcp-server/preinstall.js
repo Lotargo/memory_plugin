@@ -1,4 +1,5 @@
 import { execSync } from "child_process";
+import { isSupportedNodeVersion, SUPPORTED_NODE_RANGE } from './codex_config.js';
 
 // Skip preinstall entirely in CI / Docker / Jules containers
 if (process.env.CI || process.env.CONTINUOUS_INTEGRATION || process.env.DEBIAN_FRONTEND === "noninteractive" || process.cwd().startsWith("/app")) {
@@ -6,18 +7,17 @@ if (process.env.CI || process.env.CONTINUOUS_INTEGRATION || process.env.DEBIAN_F
 }
 
 // ── Node version warning ────────────────────────────────────────────────────
-// engines.node >= 22.5.0 is set in package.json but npm only warns by default.
+// package.json declares the same supported range, but npm only warns by default.
 // Print a loud, actionable message so the user notices before the server crashes.
 {
-  const [major, minor] = process.versions.node.split(".").map(Number);
-  if (major < 22 || (major === 22 && minor < 5)) {
+  if (!isSupportedNodeVersion(process.versions.node)) {
     console.error(
       `\n` +
-      `  ⚠️  @lotargo/memory_plugin requires Node.js >= 22.5.0\n` +
+      `  ⚠️  @lotargo/memory_plugin requires Node.js ${SUPPORTED_NODE_RANGE}\n` +
       `     Detected: Node.js ${process.versions.node}\n` +
       `\n` +
-      `     The built-in node:sqlite module used by this plugin was\n` +
-      `     introduced in Node.js 22.5.0.  The server WILL NOT START\n` +
+      `     SQLite FTS5 and supported browser dependencies are required.\n` +
+      `     The server WILL NOT START\n` +
       `     on your current version.\n` +
       `\n` +
       `     Please upgrade:  nvm install 22   (or: brew install node@22)\n`

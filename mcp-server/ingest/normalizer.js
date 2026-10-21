@@ -21,7 +21,7 @@ async function getPdfParseCtor() {
 
 async function getMammoth() {
   if (!_mammoth) {
-    const mod = await import("mammoth");
+    const mod = await import("../vendor/mammoth/lib/index.js");
     _mammoth = mod.default || mod;
   }
   return _mammoth;

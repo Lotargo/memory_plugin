@@ -45,7 +45,7 @@ export async function buildMarketplace({ output, memoryDir, prepare = true, inst
   for (const name of files) {
     const source = resolve(ROOT, name);
     const rel = relative(ROOT, source);
-    if (rel.startsWith('..') || isAbsolute(rel) || !/^(mcp-server\/|opencode-plugin\/|skills\/|package\.json$|README\.md$|MARKETPLACE\.md$|CHANGELOG\.md$|LICENSE$)/.test(name)) {
+    if (rel.startsWith('..') || isAbsolute(rel) || !/^(mcp-server\/|opencode-plugin\/|skills\/|package\.json$|npm-shrinkwrap\.json$|README\.md$|MARKETPLACE\.md$|CHANGELOG\.md$|LICENSE$)/.test(name)) {
       throw new Error(`Unexpected source bundle file: ${name}`);
     }
     if ((await lstat(source)).isSymbolicLink()) throw new Error(`Symlinks are not permitted in source bundles: ${name}`);
@@ -54,8 +54,6 @@ export async function buildMarketplace({ output, memoryDir, prepare = true, inst
     await mkdir(dirname(join(runtime, name)), { recursive: true });
     await writeFile(join(runtime, name), content);
   }
-  await cp(join(ROOT, 'package-lock.json'), join(runtime, 'package-lock.json'));
-  digest.update('package-lock.json').update('\0').update(await readFile(join(ROOT, 'package-lock.json')));
   // Dependencies are prepared explicitly. Do not run this package's npm
   // lifecycle hooks, change client registrations, or autostart the dashboard.
   await jsonWrite(join(runtime, 'package.json'), { ...pkg, scripts: {} });

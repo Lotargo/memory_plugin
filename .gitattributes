@@ -3,3 +3,7 @@
 /.local-marketplace export-ignore
 /.test-results* export-ignore
 /local_test.db export-ignore
+
+# Preserve byte-for-byte upstream sources, including their original whitespace.
+# Provenance hashes verify these files; do not normalize the imported code/license.
+/mcp-server/vendor/mammoth/** -text -whitespace

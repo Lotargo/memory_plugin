@@ -237,7 +237,7 @@ try {
   api?.close(); client.close(); closeDatabase();
   try { fs.rmSync(temp, { recursive: true, force: true }); }
   catch (error) {
-    if (process.platform !== "win32" || error.code !== "EPERM") throw error;
+    if (process.platform !== "win32" || !["EPERM", "EBUSY"].includes(error.code)) throw error;
     // The unified runner removes the entire isolated suite directory after
     // this process exits and libSQL releases its Windows native handles.
     console.warn("Deferred native libSQL temp cleanup until process exit:", temp);

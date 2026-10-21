@@ -4,21 +4,18 @@
 // Same version check as boot.js — see that file for the rationale.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const MIN_MAJOR = 22;
-const MIN_MINOR = 5;
+import { isSupportedNodeVersion, SUPPORTED_NODE_RANGE } from './codex_config.js';
 
-const [major, minor] = process.versions.node.split(".").map(Number);
-
-if (major < MIN_MAJOR || (major === MIN_MAJOR && minor < MIN_MINOR)) {
+if (!isSupportedNodeVersion(process.versions.node)) {
   process.stderr.write(
     `\n` +
     `  ╔══════════════════════════════════════════════════════════════════╗\n` +
-    `  ║  @lotargo/memory_plugin requires Node.js >= 22.5.0             ║\n` +
+    `  ║  @lotargo/memory_plugin needs Node.js 22.16+ (22.x) or 24+     ║\n` +
     `  ║                                                                ║\n` +
     `  ║  Detected: Node.js ${process.versions.node.padEnd(44)}║\n` +
     `  ║                                                                ║\n` +
-    `  ║  The built-in node:sqlite module used by this plugin was       ║\n` +
-    `  ║  introduced in Node.js 22.5.0.  Please upgrade your           ║\n` +
+    `  ║  SQLite FTS5 and the browser dependencies are required.      ║\n` +
+    `  ║  Supported range: ${SUPPORTED_NODE_RANGE.padEnd(39)}║\n` +
     `  ║  Node.js installation:                                        ║\n` +
     `  ║                                                                ║\n` +
     `  ║    nvm install 22   # or: brew install node@22                 ║\n` +

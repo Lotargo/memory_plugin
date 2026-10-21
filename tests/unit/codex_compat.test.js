@@ -13,7 +13,11 @@ export async function runCodexCompatTests() {
   console.log("--- Running Unit Tests: codex_compat ---");
 
   assert.strictEqual(isSupportedNodeVersion("22.4.9"), false);
-  assert.strictEqual(isSupportedNodeVersion("v22.5.0"), true);
+  assert.strictEqual(isSupportedNodeVersion("v22.5.0"), false);
+  assert.strictEqual(isSupportedNodeVersion("22.15.9"), false);
+  assert.strictEqual(isSupportedNodeVersion("v22.16.0"), true);
+  assert.strictEqual(isSupportedNodeVersion("23.11.0"), false);
+  assert.strictEqual(isSupportedNodeVersion("24.0.0"), true);
   assert.strictEqual(isSupportedNodeVersion("26.1.0"), true);
   assert.strictEqual(isSupportedNodeVersion("garbage"), false);
 
@@ -114,7 +118,7 @@ export async function runCodexCompatTests() {
     pathExists: () => true,
   });
   assert.strictEqual(invalid.ok, false);
-  assert.ok(invalid.errors.some((error) => error.includes("Node.js >= 22.5.0")));
+  assert.ok(invalid.errors.some((error) => error.includes("Node.js ^22.16.0 || >=24.0.0")));
 
   console.log("✅ ALL CODEX CONFIG COMPATIBILITY TESTS PASSED!");
 }

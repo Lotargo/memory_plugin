@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 
-export const MIN_NODE_VERSION = Object.freeze({ major: 22, minor: 5, patch: 0 });
+export const MIN_NODE_VERSION = Object.freeze({ major: 22, minor: 16, patch: 0 });
+export const SUPPORTED_NODE_RANGE = '^22.16.0 || >=24.0.0';
 export const DEFAULT_CODEX_STARTUP_TIMEOUT_SEC = 60;
 
 function parseVersion(version) {
@@ -16,6 +17,7 @@ function parseVersion(version) {
 export function isSupportedNodeVersion(version) {
   const parsed = parseVersion(version);
   if (!parsed) return false;
+  if (parsed.major === 23) return false;
   if (parsed.major !== MIN_NODE_VERSION.major) return parsed.major > MIN_NODE_VERSION.major;
   if (parsed.minor !== MIN_NODE_VERSION.minor) return parsed.minor > MIN_NODE_VERSION.minor;
   return parsed.patch >= MIN_NODE_VERSION.patch;
@@ -33,7 +35,7 @@ export function validateCodexRuntime({
   }
   if (!isSupportedNodeVersion(nodeVersion)) {
     errors.push(
-      `@lotargo/memory_plugin requires Node.js >= ${MIN_NODE_VERSION.major}.${MIN_NODE_VERSION.minor}.0; detected ${nodeVersion || "unknown"}`
+      `@lotargo/memory_plugin requires Node.js ${SUPPORTED_NODE_RANGE}; detected ${nodeVersion || "unknown"}`
     );
   }
   if (!bootPath || !pathExists(bootPath)) {

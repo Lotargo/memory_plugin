@@ -113,7 +113,7 @@ try {
     const busy = run(entry, ["web", "--foreground"]);
     assert.equal(busy.status, 1, busy.stderr);
     assert.match(busy.stderr, /already in use.*--port 0/);
-    assert.ok(!busy.stderr.includes(" at "), "address conflict is reported without a stack trace");
+    assert.doesNotMatch(busy.stderr, /^\s+at\s/m, "address conflict is reported without a stack trace");
     assert.equal(readFileSync(configFile, "utf8"), savedConfig);
   }
   const automatic = await launch("mcp-server/boot.js", ["web", "--port", "0"]);

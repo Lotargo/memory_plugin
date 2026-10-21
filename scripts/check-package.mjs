@@ -16,8 +16,10 @@ const localPaths = [homedir(), root].flatMap(path => [path, path.replaceAll('\\'
 const issues = inspectPackage(files, approved, path => readFileSync(resolve(root, path), 'utf8'), localPaths);
 for (const path of files) if (lstatSync(resolve(root, path)).isSymbolicLink()) issues.push(`${path}: symlink`);
 const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
-const lock = JSON.parse(readFileSync(resolve(root, 'package-lock.json'), 'utf8'));
+const lock = JSON.parse(readFileSync(resolve(root, 'npm-shrinkwrap.json'), 'utf8'));
 if (pkg.version !== lock.version || pkg.version !== lock.packages[''].version) issues.push('package/lock versions differ');
+if (JSON.stringify(pkg.dependencies) !== JSON.stringify(lock.packages[''].dependencies)) issues.push('package/shrinkwrap dependencies differ');
+if (JSON.stringify(pkg.engines) !== JSON.stringify(lock.packages[''].engines)) issues.push('package/shrinkwrap runtime requirements differ');
 for (const path of Object.values(pkg.bin).concat(pkg.main)) if (!files.includes(path)) issues.push(`${path}: missing package entrypoint`);
 if (issues.length) { console.error(issues.join('\n')); process.exitCode = 1; }
 else console.log(`Package privacy check PASS: ${packed.name}@${packed.version}, ${files.length} approved files, ${packed.unpackedSize} unpacked bytes.`);

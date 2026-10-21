@@ -1,0 +1,8 @@
+{
+  "name": "mammoth-library-runtime",
+  "version": "1.13.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "./lib/index.js",
+  "license": "BSD-2-Clause"
+}
