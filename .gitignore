@@ -15,3 +15,4 @@ exports/
 .local-marketplace/
 doc_export_*.json
 *.tgz
+/local_test.db
