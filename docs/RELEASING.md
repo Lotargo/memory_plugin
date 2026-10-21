@@ -38,6 +38,7 @@ DOCX library source, license and module hashes are recorded in `mcp-server/vendo
 - Never attach memory databases, Notebook stores, snapshots, encrypted auth files, `connection.json`, raw runtime logs, or installed client configuration.
 - Removing files from the current tree does not remove earlier Git commits or previously published artifacts. History cleanup is a separate operation.
 - README images use public repository URLs. Publish the reviewed screenshot assets to the repository before publishing the corresponding README to npm, then verify that the image URLs load.
+- The short npm README links to user guides in the repository's `docs/` directory, which is intentionally excluded from the npm tarball. Publish new guide files before updating the npm README and verify those public links. `docs/README.md` is the documentation index.
 
 ## Reproducing the UI screenshots
 
