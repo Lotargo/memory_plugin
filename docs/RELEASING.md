@@ -1,6 +1,6 @@
 # Preparing a public release
 
-The pending version is **1.7.1**. Preparation does not publish the package, push Git changes, or create a tag.
+This procedure applies to **1.7.1**. Run preparation checks before the explicitly authorized publication steps below.
 
 ## Checks
 

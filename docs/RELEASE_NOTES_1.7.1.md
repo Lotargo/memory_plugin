@@ -1,4 +1,4 @@
-# 1.7.1 release notes draft
+# 1.7.1 — Local web UI and reproducible runtime
 
 The local web UI brings Notebook records, instructions, history, project scopes, knowledge sources, source links and graphs, settings, model controls, and reviewed maintenance into one browser panel. It runs locally and is shared by connected coding clients.
 
@@ -8,4 +8,12 @@ The README shows real UI screenshots using entirely fictional demo data. Public 
 
 Dependency security updates include Transformers.js 4.3.1, patched Sharp/ONNX Runtime dependencies, a library-only Mammoth DOCX distribution with license and provenance, and a published shrinkwrap for reproducible consumer installs. **Node.js 22.16+ in the 22.x branch, or 24+, is required** for built-in SQLite FTS5 and browser dependencies. Node 23 is excluded. The publication gate rejects known advisories at low severity or higher.
 
-**Publication remains pending an explicit request.** The version and date in this draft do not confirm an npm publication or GitHub release. See the security readiness report for actual test coverage and platform limits.
+Validation: all 69 regression suites pass on Node.js 22.16.0 and 26.1.0. Production audits report zero vulnerabilities in the source tree, a fresh tarball installation and the prepared marketplace runtime. Real CPU embeddings/reranking, DOCX conversion, isolated MCP read/write and packaged dashboard smoke checks pass. These checks do not represent new native-client sessions or live Linux/macOS/GPU acceptance.
+
+Install or update:
+
+```bash
+npm install -g @lotargo/memory_plugin@1.7.1
+```
+
+See [CHANGELOG](https://github.com/Lotargo/memory_plugin/blob/v1.7.1/CHANGELOG.md) for the complete changes and [security readiness](https://github.com/Lotargo/memory_plugin/blob/v1.7.1/docs/RELEASE_SECURITY_READINESS_2026-10-21.md) for test coverage and platform limits.
