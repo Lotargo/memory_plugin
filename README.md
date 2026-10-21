@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./assets/01_hero_banner.png" alt="memory_plugin architecture — persistent memory, RAG, persona and CLI runtime" width="100%">
+<img src="https://raw.githubusercontent.com/Lotargo/memory_plugin/main/assets/01_hero_banner.png" alt="memory_plugin architecture — persistent memory, RAG, persona and CLI runtime" width="100%">
 
 <br>
 
@@ -21,6 +21,7 @@ One memory system for OpenCode, Codex, Claude Code, Gemini CLI, Antigravity, Goo
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> ·
+  <a href="#local-web-ui">Web UI</a> ·
   <a href="#memory-architecture">Memory Architecture</a> ·
   <a href="#persona-and-agent-personalization">Persona</a> ·
   <a href="#retrieval-and-knowledge-graph">RAG & Retrieval</a> ·
@@ -47,7 +48,7 @@ The same engine adds Git-based project isolation, semantic search, full raw-sour
 
 ### Architecture at a Glance
 
-<img src="./assets/02_project_evolution.png" alt="Evolution of memory_plugin from notebook memory through RAG, persona and cross-client agent state" width="100%">
+<img src="https://raw.githubusercontent.com/Lotargo/memory_plugin/main/assets/02_project_evolution.png" alt="Evolution of memory_plugin from notebook memory through RAG, persona and cross-client agent state" width="100%">
 
 ### Highlights
 
@@ -60,9 +61,35 @@ The same engine adds Git-based project isolation, semantic search, full raw-sour
 - Git-identity project scopes that follow a repository across directories, machines, and operating systems.
 - Active persona overlays shared across OpenCode, Codex, Claude Code, Gemini CLI, and Antigravity.
 - Local-only working storage and full ZIP cloud checkpoints.
+- Local web UI for Notebook records, instructions, project scopes, knowledge sources, settings, and reviewed maintenance.
 - No Docker, external vector database, hosted embedding API, or telemetry.
 
 > This is a practical agent-memory system, not a claim of generalized benchmark superiority. Repository benchmark results describe the included evaluation corpus and configuration.
+
+---
+
+## Local Web UI
+
+Browse and edit memory in a local browser panel, shared by all connected clients:
+
+```bash
+npx -y @lotargo/memory_plugin web
+```
+
+The panel opens on `127.0.0.1` with a private connection URL. It includes searchable Notebook records, facts and active instructions, history, Git project scopes, a knowledge reader/editor, source links and graphs, settings, model controls, and reviewed backup/maintenance actions. Light, dark, and system themes and a compact mobile layout are supported.
+
+<img src="https://raw.githubusercontent.com/Lotargo/memory_plugin/main/assets/ui/notebook.png" alt="Local Memory UI in dark mode: synthetic Notebook facts, instructions, filters and record details" width="100%">
+
+<details>
+<summary>Knowledge sources and Memory Notes</summary>
+
+<img src="https://raw.githubusercontent.com/Lotargo/memory_plugin/main/assets/ui/knowledge.png" alt="Knowledge UI showing a synthetic Memory Note, source metadata and rendered Markdown" width="100%">
+
+</details>
+
+Both screenshots use a disposable demo profile with entirely fictional records and `example.test` projects. They contain no personal memory, client configuration, credentials, or private connection URLs. The current panel labels are in Russian. Browsing saved memory does not require a cloud account or load an embedding model.
+
+See the [dashboard commands and behavior](#local-dashboard) for lifecycle, authentication, and maintenance details.
 
 ---
 
@@ -167,9 +194,10 @@ The original flag-based `uninstall --codex`, `--purge` and `--purge-cache` flows
 Build a separate local catalog from this checkout, then install it with migration from direct setup:
 
 ```powershell
-node mcp-server/boot.js marketplace build --output "/path/to/project\.local-marketplace\build-2026-10-05"
-node mcp-server/boot.js marketplace install --client codex --path "/path/to/project\.local-marketplace\build-2026-10-05"
-node mcp-server/boot.js marketplace install --client claude --path "/path/to/project\.local-marketplace\build-2026-10-05"
+$catalog = Join-Path (Get-Location).Path ".local-marketplace/build-demo"
+node mcp-server/boot.js marketplace build --output $catalog
+node mcp-server/boot.js marketplace install --client codex --path $catalog
+node mcp-server/boot.js marketplace install --client claude --path $catalog
 ```
 
 Use one active installation channel per client. Both channels share the engine and existing storage; marketplace removal retains memory. Builds use a fixed prepared runtime outside the client cache and are local to the computer. The installer detects duplicate registrations, changed skills and mismatched data directories. Codex requires review/trust of the bundled SessionStart hook for automatic initialization. See [MARKETPLACE.md](MARKETPLACE.md) for diagnosis, switching back, removal, updates and acceptance boundaries.
@@ -212,7 +240,7 @@ After code changes, restart OpenCode to reload the module. Codex, Claude Code, G
 
 ## Memory Architecture
 
-<img src="./assets/03_hot_memory_vs_cold_rag.png" alt="Hot persistent memory versus cold RAG retrieval architecture in memory_plugin" width="100%">
+<img src="https://raw.githubusercontent.com/Lotargo/memory_plugin/main/assets/03_hot_memory_vs_cold_rag.png" alt="Hot persistent memory versus cold RAG retrieval architecture in memory_plugin" width="100%">
 
 The architecture deliberately separates **small, always-useful context** from **large, on-demand knowledge**. This keeps session initialization useful without turning persistent memory into an ever-growing prompt.
 
@@ -288,7 +316,7 @@ This keeps startup context small while preserving the complete reasoning trail w
 
 ## Persona and Agent Personalization
 
-<img src="./assets/04_fact_vs_directive.png" alt="Fact versus directive semantics in memory_plugin" width="100%">
+<img src="https://raw.githubusercontent.com/Lotargo/memory_plugin/main/assets/04_fact_vs_directive.png" alt="Fact versus directive semantics in memory_plugin" width="100%">
 
 Notebook entries have explicit semantics:
 
@@ -299,7 +327,7 @@ kind: "directive"  # active configuration — how the agent should behave
 
 Use `kind: "directive"` for personality, behavior, tone, communication style, preferences, or working conventions the agent should actively apply. Explicit `kind` is authoritative; persuasive wording alone does not turn a fact into an instruction.
 
-<img src="./assets/05_persona_as_runtime_state.png" alt="The same model with neutral, coding-focused and personalized runtime state" width="100%">
+<img src="https://raw.githubusercontent.com/Lotargo/memory_plugin/main/assets/05_persona_as_runtime_state.png" alt="The same model with neutral, coding-focused and personalized runtime state" width="100%">
 
 ### OpenCode
 
@@ -759,7 +787,7 @@ node mcp-server/boot.js web
 
 With this checkout installed or linked, use `memory-plugin web` (also `memory_plugin web` or `memory-cli web`). The existing `dashboard` command remains an alias. This command starts or reuses a detached local panel and exits; closing the terminal or an MCP client leaves the panel running. Installation, setup and MCP/OpenCode startup ensure the panel is available when `webAutoStart` is enabled (the default). Windows installs an owned, hidden per-user Startup launcher so the same panel returns at the next login. Other platforms currently ensure startup on installation/client launch, without installing an OS login service. CI and `MEMORY_DISABLE_WEB_AUTOSTART=1` suppress automatic launch and Startup registration.
 
-The server listens only on `127.0.0.1`. Open the private connection URL printed by the command once; an HttpOnly, SameSite=Strict cookie reconnects the browser after a reload or panel restart. The browser removes the token from the address. The managed port and secret are retained in `<MEMORY_DIR>/web/connection.json`, outside full-memory snapshots; keep this private file locally. Concurrent clients share one verified panel per data directory. A changed installed build restarts the panel on its next managed launch. Only an explicitly saved cloud-snapshots / scheduled configuration enables the shared snapshot scheduler in the managed or foreground panel; its persisted deadline prevents duplicate sends from other clients. Ordinary reads never poll the cloud. Persona synchronization and model loading remain disabled in the panel process. No frontend build or cloud login is required.
+The server listens only on `127.0.0.1`. Open the private connection URL printed by the command once; an HttpOnly, SameSite=Strict cookie reconnects the browser after a reload or panel restart. The browser removes the token from the address. The managed port and secret are retained in `<MEMORY_DIR>/web/connection.json`, outside full-memory snapshots; keep this private file locally. Concurrent clients share one verified panel per data directory. Automatic launches adopt a verified running panel even when it belongs to another build; `web status` and a page notice indicate when `web restart` is needed. Explicit `web start` or `web restart` replaces the running build. Only an explicitly saved cloud-snapshots / scheduled configuration enables the shared snapshot scheduler in the managed or foreground panel; its persisted deadline prevents duplicate sends from other clients. Ordinary reads never poll the cloud. Persona synchronization and model loading remain disabled in the panel process. No frontend build or cloud login is required.
 
 ```bash
 memory-plugin web status          # running version, process and connection URL
@@ -800,14 +828,14 @@ Saving shows a field comparison and checks the store version. If another client 
 
 ## Client Integration
 
-| Client | Integration | Session initialization | Tool count |
-| :--- | :--- | :--- | ---: |
-| OpenCode | Native plugin in `~/.config/opencode/opencode.json` | Full memory auto-injection + system persona transform | 18 |
-| Codex | MCP server in `~/.codex/config.toml` | Managed prompt requires a startup `recall(scope: "all")` (newest 10 project facts) | 16 |
-| Claude Code | MCP server in `~/.claude.json` | Managed prompt requires a startup `recall(scope: "all")` (newest 10 project facts) | 16 |
-| Gemini CLI | MCP server in `~/.gemini/settings.json` | Managed `~/.gemini/GEMINI.md` prompt requires a startup `recall(scope: "all")` (newest 10 project facts) | 16 |
-| Antigravity | MCP server in `~/.gemini/config/mcp_config.json` and optional `.agents/mcp_config.json` | Managed prompt requires a startup `recall(scope: "all")` (newest 10 project facts) | 16 |
-| Google Jules / generic MCP | MCP stdio server | Client instructions should initialize with full recall | 16 |
+| Client | Integration | Session initialization |
+| :--- | :--- | :--- |
+| OpenCode | Native plugin in `~/.config/opencode/opencode.json` | Full memory auto-injection + system persona transform |
+| Codex | MCP server in `~/.codex/config.toml` | Managed prompt requires a startup `recall(scope: "all")` (newest 10 project facts) |
+| Claude Code | MCP server in `~/.claude.json` | Managed prompt requires a startup `recall(scope: "all")` (newest 10 project facts) |
+| Gemini CLI | MCP server in `~/.gemini/settings.json` | Managed `~/.gemini/GEMINI.md` prompt requires a startup `recall(scope: "all")` (newest 10 project facts) |
+| Antigravity | MCP server in `~/.gemini/config/mcp_config.json` and optional `.agents/mcp_config.json` | Managed prompt requires a startup `recall(scope: "all")` (newest 10 project facts) |
+| Google Jules / generic MCP | MCP stdio server | Client instructions should initialize with full recall |
 
 The bundled [`using-memory` skill](./skills/using-memory/SKILL.md) teaches agents to:
 
@@ -889,7 +917,9 @@ exports/                          snapshots/exports
 
 Spreadsheet ingestion uses SheetJS CE `0.20.3` from the official SheetJS CDN rather than the stale `xlsx@0.18.5` package in the public npm registry. This version is outside the affected ranges for the known [prototype pollution](https://github.com/advisories/GHSA-4r6h-8v6p-xvw6) and [ReDoS](https://github.com/advisories/GHSA-5pgg-2g8v-p4x9) advisories.
 
-`npm audit` may still report the high-severity `sharp` / libvips advisory inherited through `@huggingface/transformers`. The project uses Transformers only for text feature extraction and explicitly sets `env.sharp = false`; it does not pass images through the Transformers image-decoding path. The upstream dependency currently constrains `sharp` below the patched `0.35.x` line, so this warning remains transitive until Transformers updates its dependency. Advisory: [GHSA-f88m-g3jw-g9cj](https://github.com/advisories/GHSA-f88m-g3jw-g9cj).
+The 2026-10-21 production dependency audit reports **8 affected packages: 2 high and 6 moderate**, with no critical or low findings after compatible updates. High findings come from `sharp` and its Transformers dependency chain. The project uses text feature extraction with `env.sharp = false`, but this limits the exposed code path rather than clearing the dependency advisory. See [Sharp/libvips advisories](https://github.com/advisories/GHSA-f88m-g3jw-g9cj).
+
+The remaining moderate chain includes `sprintf-js`, inherited through DOCX parsing and ONNX installation/logging dependencies. The [sprintf-js advisory](https://github.com/advisories/GHSA-hp3w-g68c-fv3c) has no patched version. These findings remain open; `npm run release:check` and `prepublishOnly` block publication at high severity. A major Transformers upgrade or parser replacement needs separate compatibility testing. Do not treat an audit count as proof of exploitability or the narrowed text-only path as a clean audit.
 
 ---
 

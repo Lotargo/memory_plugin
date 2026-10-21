@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 const testSuites = [
+  { category: "Unit", name: "package_policy", file: "tests/unit/package_policy.test.js" },
   // --- 1. UNIT TESTS ---
   { category: "Unit", name: "fact_format", file: "tests/unit/fact_format.test.js" },
   { category: "Unit", name: "identity", file: "tests/unit/identity.test.js" },

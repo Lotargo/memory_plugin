@@ -1,0 +1,57 @@
+// Install a real tarball into a fresh directory; no client setup or user data access.
+import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve, sep } from 'node:path';
+import { pathToFileURL } from 'node:url';
+const run = promisify(execFile);
+const tarball = process.argv[2];
+assert.ok(tarball?.endsWith('.tgz'), 'Usage: npm run smoke:package -- /absolute/path/package.tgz');
+assert.ok(process.env.npm_execpath, 'Run through npm run smoke:package.');
+const root = await mkdtemp(join(tmpdir(), 'memory-release-smoke-'));
+const env = { ...process.env, CI: '1', MEMORY_DIR: join(root, 'memory'), OPENCODE_CONFIG_DIR: join(root, 'opencode'),
+  HOME: root, USERPROFILE: root, APPDATA: join(root, 'appdata'), LOCALAPPDATA: join(root, 'local'),
+  CODEX_HOME: join(root, 'codex'), CLAUDE_CONFIG_DIR: join(root, 'claude'), MEMORY_WEB_STARTUP_DIR: join(root, 'startup'),
+  MEMORY_DISABLE_PERSONA_SYNC: '1', MEMORY_DISABLE_BACKGROUND_SYNC: '1', MEMORY_DISABLE_WEB_AUTOSTART: '1',
+  MEMORY_WEB_AUTOSTART: '0', MEMORY_CLIENT_PROBE: '1', MEMORY_PLUGIN_DISABLE_NATIVE_CLI: '1' };
+let client, app, closeDatabase;
+try {
+  await run(process.execPath, [process.env.npm_execpath, 'install', '--prefix', root, '--ignore-scripts', '--no-audit', '--no-fund', resolve(tarball)],
+    { env, windowsHide: true, timeout: 300000, maxBuffer: 4 * 1024 * 1024 });
+  const pkgRoot = join(root, 'node_modules', '@lotargo', 'memory_plugin');
+  const imported = path => import(pathToFileURL(join(root, 'node_modules', path)).href);
+  const { Client } = await imported('@modelcontextprotocol/sdk/dist/esm/client/index.js');
+  const { StdioClientTransport } = await imported('@modelcontextprotocol/sdk/dist/esm/client/stdio.js');
+  client = new Client({ name: 'release-smoke', version: '1.0.0' });
+  const transport = new StdioClientTransport({ command: process.execPath, args: [join(pkgRoot, 'mcp-server/boot.js')], cwd: root, env, stderr: 'pipe' });
+  await client.connect(transport);
+  const tools = (await client.listTools()).tools;
+  assert.ok(tools.some(tool => tool.name === 'remember'));
+  const recalled = await client.callTool({ name: 'recall', arguments: { scope: 'all' } });
+  assert.match(JSON.stringify(recalled), /empty/i);
+  const saved = await client.callTool({ name: 'remember', arguments: { title: 'Release smoke', fact: 'Synthetic package validation record.', kind: 'fact', scope: 'global' } });
+  assert.ok(!saved.isError, JSON.stringify(saved));
+  const readback = await client.callTool({ name: 'recall', arguments: { scope: 'all' } });
+  assert.match(JSON.stringify(readback), /Synthetic package validation record/);
+  const info = await client.callTool({ name: 'memory_info', arguments: {} });
+  const pkg = JSON.parse(await readFile(join(pkgRoot, 'package.json'), 'utf8'));
+  assert.ok(JSON.stringify(info).includes(pkg.version));
+  await client.close(); client = null;
+  Object.assign(process.env, env);
+  ({ closeDatabase } = await import(pathToFileURL(join(pkgRoot, 'mcp-server/db/database.js')).href));
+  const { startDashboard } = await import(pathToFileURL(join(pkgRoot, 'mcp-server/dashboard/server.js')).href);
+  app = await startDashboard();
+  const url = new URL(app.url), headers = { Authorization: `Bearer ${url.hash.slice(1)}` };
+  for (const path of ['/', '/app.js', '/style.css', '/favicon.svg', '/vendor/marked/marked.esm.js', '/vendor/katex/katex.min.css', '/api/overview']) {
+    const response = await fetch(new URL(path, url), { headers });
+    assert.equal(response.status, 200, path);
+  }
+  console.log(`PASS installed tarball ${pkg.version}: ${tools.length} MCP tools, initially empty isolated memory, Notebook write/read, dashboard and packaged browser assets.`);
+  console.log('Install lifecycle scripts and native client setup were intentionally disabled; no models were downloaded or loaded.');
+} finally {
+  await client?.close(); await app?.close(); closeDatabase?.();
+  assert.ok(resolve(root).startsWith(resolve(tmpdir()) + sep));
+  await rm(root, { recursive: true, force: true, maxRetries: 5 });
+}
