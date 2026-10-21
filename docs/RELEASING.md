@@ -13,7 +13,7 @@ npm audit --omit=dev
 npm run release:check
 ```
 
-`release:check` and npm's `prepublishOnly` stop on high/critical dependency advisories. Do not use `npm audit fix --force` as a release shortcut: a major model-engine upgrade or an old DOCX-parser downgrade needs its own compatibility review.
+`release:check` and npm's `prepublishOnly` stop on dependency advisories at low severity or higher. Do not use `npm audit fix --force` as a release shortcut. Source and consumer installations use `npm-shrinkwrap.json`, which replaces the root package-lock and ships in the tarball; use `npm ci` to reproduce that tree. Dependency/runtime changes require actual DOCX/model tests as well as the audit.
 
 `scripts/package-files.json` is the reviewed npm file list. Add a file only after reviewing its contents and purpose. The check rejects missing runtime files, extra files, common credential formats, local profile/workspace paths, and private/development artifacts. Pattern scans cannot prove that arbitrary private text is absent; manually review documentation, screenshots and every manifest change as well.
 
@@ -23,7 +23,13 @@ Build the real tarball outside the checkout with `npm pack --ignore-scripts --pa
 npm run smoke:package -- /absolute/path/lotargo-memory_plugin-1.7.1.tgz
 ```
 
-This installs the archive with lifecycle scripts disabled into a temporary directory, verifies real MCP discovery and isolated Notebook writes/reads in a child process, and starts its packaged dashboard to check API and browser assets. The parent removes the temporary installation after the child exits, so Windows can release native SQLite libraries. It never runs native client setup or uses installed memory. Normal installation hooks, native client sessions, model execution, and other operating systems require separate acceptance.
+Run `npm run smoke:marketplace` to build a real disposable prepared runtime, audit its installed dependencies and verify both adapters' hooks, native ONNX import and MCP readback. It uses no native client registrations or installed memory.
+
+This installs the archive with lifecycle scripts disabled into a temporary directory, audits the actual consumer dependency tree, verifies real DOCX conversion, MCP discovery and isolated Notebook writes/reads in a child process, and starts its packaged dashboard to check API and browser assets. The parent removes the temporary installation after the child exits, so Windows can release native SQLite libraries. It never runs native client setup or uses installed memory. Normal installation hooks, native client sessions and other operating systems require separate acceptance.
+
+Run `npm run smoke:models` for real CPU embedding, saved dense retrieval, unload/reload and default multilingual reranker acceptance. `MEMORY_MODEL_CACHE` can point to an existing public-model cache: selected weights are copied into the temporary profile rather than edited in place. Missing test models download only into that profile. This opt-in test is separate from the offline regression suite. Repeat it on the minimum supported Node version when changing the model runtime.
+
+DOCX library source, license and module hashes are recorded in `mcp-server/vendor/mammoth/`. Reproduce them with `npm run vendor:docx`, review upstream changes and external dependency versions, run the real DOCX test, and explicitly review the approved package-file manifest. Do not replace this with an opaque browser bundle or an out-of-range override that disappears in consumer installations.
 
 ## Public and private files
 
@@ -39,4 +45,4 @@ Install Playwright in a separate development environment. Set `MEMORY_BROWSER_DE
 
 ## Final publication
 
-After the checks and dependency review pass, set the release date in CHANGELOG, commit the reviewed tree, verify the source archive, push the reviewed commit/assets, and verify npm README image URLs. Create the release/tag and publish only when explicitly requested. Keep the version aligned in package.json and package-lock.json; never reuse an already published version.
+After the checks and dependency review pass, set the release date in CHANGELOG, commit the reviewed tree, verify the source archive, push the reviewed commit/assets, and verify npm README image URLs. Create the release/tag and publish only when explicitly requested. Keep the version aligned in package.json and npm-shrinkwrap.json; never reuse an already published version. The supported range is `^22.16.0 || >=24.0.0`; test both the minimum and the current runtime when changing it.

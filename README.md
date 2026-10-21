@@ -7,7 +7,7 @@
 [![npm version](https://img.shields.io/npm/v/@lotargo/memory_plugin)](https://www.npmjs.com/package/@lotargo/memory_plugin)
 [![npm downloads](https://img.shields.io/npm/dt/@lotargo/memory_plugin)](https://www.npmjs.com/package/@lotargo/memory_plugin)
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
-[![node version](https://img.shields.io/badge/node-%3E%3D22.5.0-brightgreen)](https://nodejs.org)
+[![node version](https://img.shields.io/badge/node-22.16%2B%20%2822.x%29%20or%2024%2B-brightgreen)](https://nodejs.org)
 [![mcp](https://img.shields.io/badge/MCP-Supported-8A2BE2)](https://modelcontextprotocol.io)
 [![storage](https://img.shields.io/badge/Storage-Local%20%2B%20Cloud%20Sync-success)](#storage-privacy-and-security)
 
@@ -97,7 +97,7 @@ See the [dashboard commands and behavior](#local-dashboard) for lifecycle, authe
 
 ### Requirements
 
-- Node.js `22.5.0` or newer; the project uses the built-in `node:sqlite` module.
+- Node.js **22.16+ in the 22.x branch, or 24+** (`^22.16.0 || >=24.0.0`), with built-in SQLite FTS5 and the required browser-dependency support. Node 23 is excluded.
 - npm/npx.
 - OpenCode, Codex, Claude Code, Gemini CLI, Antigravity, Google Jules, or another MCP-capable client.
 
@@ -917,9 +917,9 @@ exports/                          snapshots/exports
 
 Spreadsheet ingestion uses SheetJS CE `0.20.3` from the official SheetJS CDN rather than the stale `xlsx@0.18.5` package in the public npm registry. This version is outside the affected ranges for the known [prototype pollution](https://github.com/advisories/GHSA-4r6h-8v6p-xvw6) and [ReDoS](https://github.com/advisories/GHSA-5pgg-2g8v-p4x9) advisories.
 
-The 2026-10-21 production dependency audit reports **8 affected packages: 2 high and 6 moderate**, with no critical or low findings after compatible updates. High findings come from `sharp` and its Transformers dependency chain. The project uses text feature extraction with `env.sharp = false`, but this limits the exposed code path rather than clearing the dependency advisory. See [Sharp/libvips advisories](https://github.com/advisories/GHSA-f88m-g3jw-g9cj).
+The 2026-10-21 production dependency audit reports **zero known vulnerabilities**. Transformers.js `4.3.1` uses patched Sharp `0.35.5` and ONNX Runtime `1.30.0`. DOCX ingestion retains the unmodified Mammoth `1.13.0` library API as [reviewed source modules](mcp-server/vendor/mammoth/README.md), excluding its unused CLI and legacy argument-parser dependency. All external parser libraries remain explicit, audited dependencies; copied modules retain their BSD license and verified upstream hashes.
 
-The remaining moderate chain includes `sprintf-js`, inherited through DOCX parsing and ONNX installation/logging dependencies. The [sprintf-js advisory](https://github.com/advisories/GHSA-hp3w-g68c-fv3c) has no patched version. These findings remain open; `npm run release:check` and `prepublishOnly` block publication at high severity. A major Transformers upgrade or parser replacement needs separate compatibility testing. Do not treat an audit count as proof of exploitability or the narrowed text-only path as a clean audit.
+The published `npm-shrinkwrap.json` locks the tested dependency tree for consumer installations. `npm run release:check` and `prepublishOnly` fail on dependency advisories at low severity or higher. A clean audit covers known advisories, not every possible defect; vendored source updates also require upstream/security review.
 
 ---
 
@@ -956,7 +956,7 @@ The stored 32-document / 21-query technical corpus produced:
 
 ## Troubleshooting
 
-- **`No such built-in module: node:sqlite`**: install Node.js `22.5.0` or newer.
+- **`No such built-in module: node:sqlite` / `no such module: fts5`**: use Node.js 22.16+ in the 22.x branch, or 24+.
 - **Codex tools are missing**: run `npx -y @lotargo/memory_plugin setup --codex`, then `npx -y @lotargo/memory_plugin doctor --codex`, and open a new Codex task.
 - **OpenCode still runs old code**: restart OpenCode. For repository development, confirm `npm run dev:link` points its plugin entry to `opencode-plugin/main.js`.
 - **Persona changes are not visible**: run `memory-cli sync-persona`, then start a new CLI session/task. Use `memory-cli migrate-persona --dry-run` for legacy entries.

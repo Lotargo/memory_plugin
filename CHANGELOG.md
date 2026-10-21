@@ -7,9 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.7.1] - Unreleased
 
+- Resolved the remaining production dependency audit findings with Transformers.js 4.3.1, Sharp 0.35.5 and ONNX Runtime 1.30.0. DOCX conversion uses unmodified, hash-verified Mammoth 1.13.0 library sources with the BSD license and explicit audited external dependencies; its unused CLI/argparse/sprintf-js chain is excluded. The published npm-shrinkwrap.json retains the tested dependency tree in consumer and marketplace installations. Publication checks now reject advisories at low severity or higher.
+- Corrected the supported Node range to `^22.16.0 || >=24.0.0` across package metadata, shared boot/install guards, client diagnostics and documentation, matching built-in SQLite FTS5 and browser dependencies. Node 23 is excluded. Added real DOCX/provenance coverage and opt-in real CPU embedding/reranker acceptance.
+- Preserved empty SQLite BLOBs when rebinding values read on Node 22: zero-length views are normalized to fresh empty binary buffers, preventing valid vector updates/restores from becoming SQL NULL. Regression coverage verifies positional/named bindings, empty/nonempty vectors and unchanged real NULL handling.
+
 - README now introduces the local web UI with real screenshots captured from a disposable profile containing only fictional records. Public examples use portable paths; README images use repository-hosted URLs so they also render on npm without bundling large marketing assets.
 - Publication privacy checks use an exact approved package manifest, reject common credentials/private paths and development artifacts, and verify entrypoints and version consistency. `prepublishOnly` runs the package gate, a high-severity dependency audit and the regression suite. Internal development evidence remains local and is removed from the release source tree and source archives.
-- Updated compatible dependencies and the lockfile, including MCP SDK 1.32.1 and Mermaid 12.2.0. Unresolved transitive Transformers/Sharp and sprintf-js advisories are documented as release blockers; no forced major upgrades or dependency downgrades are applied.
+- Updated compatible dependencies and the lockfile, including MCP SDK 1.32.1 and Mermaid 12.2.0.
 
 - Fixed Git project registration failing when an unrelated archived RAG blob is missing or corrupt. Registry-only link/unlink/purge now publish atomically in SQLite without a full-memory snapshot or knowledge-schema migration. Moves and legacy-store migrations retain mandatory verified full backups; the panel shows backup information only for those operations.
 

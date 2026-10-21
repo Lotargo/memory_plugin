@@ -4,7 +4,7 @@ The marketplace is an alternative installation channel for the same memory engin
 
 ## Build a prepared local catalog
 
-Run from the checkout with Node.js >= 22.5 and npm installed:
+Run from the checkout with Node.js 22.16+ in the 22.x branch, or 24+, and npm installed:
 
 ```powershell
 $catalog = Join-Path (Get-Location).Path ".local-marketplace/build-demo"
@@ -13,7 +13,7 @@ node mcp-server/boot.js marketplace build --output $catalog
 
 Choose a new absolute output directory for every build. `--memory-dir <path>` explicitly selects the shared storage; it defaults to the engine's normal `MEMORY_DIR` resolution. Installation refuses a migration if the direct registration uses another data directory. User data must stay outside the output directory.
 
-The builder copies only npm-packaged source files plus the dependency lockfile, computes a source digest, and prepares locked production dependencies with lifecycle scripts disabled. It does not register clients, start the web panel, ingest memories, fetch models, or publish anything. `--source-only` creates a catalog for inspection without preparing dependencies; installation rejects such a build.
+The builder copies only npm-packaged source files, including the published `npm-shrinkwrap.json`, computes a source digest, and prepares locked production dependencies with lifecycle scripts disabled. It does not register clients, start the web panel, ingest memories, fetch models, or publish anything. `--source-only` creates a catalog for inspection without preparing dependencies; installation rejects such a build.
 
 The output contains:
 
