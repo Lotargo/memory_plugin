@@ -23,7 +23,7 @@ Build the real tarball outside the checkout with `npm pack --ignore-scripts --pa
 npm run smoke:package -- /absolute/path/lotargo-memory_plugin-1.7.1.tgz
 ```
 
-This installs the archive with lifecycle scripts disabled into a temporary directory, verifies real MCP discovery and isolated Notebook writes/reads, and starts its packaged dashboard to check API and browser assets. It never runs native client setup or uses installed memory. Normal installation hooks, native client sessions, model execution, and other operating systems require separate acceptance.
+This installs the archive with lifecycle scripts disabled into a temporary directory, verifies real MCP discovery and isolated Notebook writes/reads in a child process, and starts its packaged dashboard to check API and browser assets. The parent removes the temporary installation after the child exits, so Windows can release native SQLite libraries. It never runs native client setup or uses installed memory. Normal installation hooks, native client sessions, model execution, and other operating systems require separate acceptance.
 
 ## Public and private files
 

@@ -21,7 +21,7 @@ Candidate: `@lotargo/memory_plugin@1.7.1`.
 | Private/development payloads | No Notebook stores, databases, credentials, connection files, local marketplaces, logs, test harnesses, benchmarks, internal evidence or node_modules in the archive |
 | Negative packaging test | An unexpected JavaScript file in the runtime directory was rejected; the canary was removed |
 | Policy regression | Covers extra/missing files, private artifacts, credentials/private connection URLs and redacted error messages |
-| Installed tarball smoke | Fresh install with lifecycle scripts disabled; 22 real MCP tools; initially empty memory; synthetic Notebook write/read; dashboard API and packaged browser assets |
+| Installed tarball smoke | Fresh install with lifecycle scripts disabled; 22 real MCP tools; initially empty memory; synthetic Notebook write/read; dashboard API and packaged browser assets; child exit and complete temporary-profile cleanup passed |
 | Regression suite | All 67 suites passed after dependency updates, in 358.94 seconds |
 | Release source archive | Verified from the reviewed tree: no internal evidence directory or matching personal identifiers |
 | Publication gate | `release:check` exits nonzero at the high-severity dependency audit, as intended |
@@ -46,5 +46,7 @@ Required follow-up: review replacement/upgrade options, verify real model loadin
 ## Acceptance limits and final release steps
 
 Tests here run on Windows with Node.js 26.1.0. This is not fresh acceptance of the minimum supported Node version, Linux/macOS, normal installation hooks, native client setup/session delivery or real model execution. The isolated tarball smoke deliberately disables install hooks and does not download/load models.
+
+The smoke harness was corrected to import the installed native SQLite runtime only in a child process, allowing parent cleanup after exit. Two earlier temporary installation directories retained only native library files after Windows locked them; their test processes were stopped. Automatic approval review rejected their explicit recursive deletion with `blocked by policy` and no further reason. These directories are outside the checkout, ignored by package/source generation, and contain no personal memory. No alternate deletion mechanism was used after rejection.
 
 After the dependency decision: finish the release date/notes, verify the committed source archive, push the reviewed files and screenshot assets, verify public README images, then tag/release/publish only on an explicit request. See [RELEASING.md](RELEASING.md) and the [release notes draft](RELEASE_NOTES_1.7.1.md).

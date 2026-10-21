@@ -5,12 +5,13 @@ import { promisify } from 'node:util';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 const run = promisify(execFile);
 const tarball = process.argv[2];
-assert.ok(tarball?.endsWith('.tgz'), 'Usage: npm run smoke:package -- /absolute/path/package.tgz');
+const verifying = tarball === '--verify';
+if (!verifying) assert.ok(tarball?.endsWith('.tgz'), 'Usage: npm run smoke:package -- /absolute/path/package.tgz');
 assert.ok(process.env.npm_execpath, 'Run through npm run smoke:package.');
-const root = await mkdtemp(join(tmpdir(), 'memory-release-smoke-'));
+const root = verifying ? resolve(process.argv[3]) : await mkdtemp(join(tmpdir(), 'memory-release-smoke-'));
 const env = { ...process.env, CI: '1', MEMORY_DIR: join(root, 'memory'), OPENCODE_CONFIG_DIR: join(root, 'opencode'),
   HOME: root, USERPROFILE: root, APPDATA: join(root, 'appdata'), LOCALAPPDATA: join(root, 'local'),
   CODEX_HOME: join(root, 'codex'), CLAUDE_CONFIG_DIR: join(root, 'claude'), MEMORY_WEB_STARTUP_DIR: join(root, 'startup'),
@@ -18,8 +19,15 @@ const env = { ...process.env, CI: '1', MEMORY_DIR: join(root, 'memory'), OPENCOD
   MEMORY_WEB_AUTOSTART: '0', MEMORY_CLIENT_PROBE: '1', MEMORY_PLUGIN_DISABLE_NATIVE_CLI: '1' };
 let client, app, closeDatabase;
 try {
+  if (!verifying) {
   await run(process.execPath, [process.env.npm_execpath, 'install', '--prefix', root, '--ignore-scripts', '--no-audit', '--no-fund', resolve(tarball)],
     { env, windowsHide: true, timeout: 300000, maxBuffer: 4 * 1024 * 1024 });
+  // Native SQLite libraries stay locked until their process exits on Windows.
+  // Only this child imports the installed runtime; the parent can then remove it.
+  const result = await run(process.execPath, [fileURLToPath(import.meta.url), '--verify', root],
+    { env, windowsHide: true, timeout: 60000, maxBuffer: 4 * 1024 * 1024 });
+  process.stdout.write(result.stdout);
+  } else {
   const pkgRoot = join(root, 'node_modules', '@lotargo', 'memory_plugin');
   const imported = path => import(pathToFileURL(join(root, 'node_modules', path)).href);
   const { Client } = await imported('@modelcontextprotocol/sdk/dist/esm/client/index.js');
@@ -50,8 +58,12 @@ try {
   }
   console.log(`PASS installed tarball ${pkg.version}: ${tools.length} MCP tools, initially empty isolated memory, Notebook write/read, dashboard and packaged browser assets.`);
   console.log('Install lifecycle scripts and native client setup were intentionally disabled; no models were downloaded or loaded.');
+  }
 } finally {
   await client?.close(); await app?.close(); closeDatabase?.();
   assert.ok(resolve(root).startsWith(resolve(tmpdir()) + sep));
-  await rm(root, { recursive: true, force: true, maxRetries: 5 });
+  if (!verifying) {
+    await rm(root, { recursive: true, force: true, maxRetries: 5 });
+    console.log('PASS temporary install/profile cleanup after the runtime child exited.');
+  }
 }
