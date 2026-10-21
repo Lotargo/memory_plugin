@@ -9,32 +9,17 @@
 [![mcp](https://img.shields.io/badge/MCP-Supported-8A2BE2)](https://modelcontextprotocol.io)
 [![storage](https://img.shields.io/badge/Storage-Local%20%2B%20Cloud%20Snapshots-success)](#storage-privacy-and-security)
 
-[Quick Start](#quick-start) · [First use](#first-use) · [Web UI](#local-web-ui) · [Documentation](#documentation)
+[Quick Start](#quick-start) · [Web UI](#local-web-ui) · [First use](#first-use) · [Documentation](#documentation)
 
 ## Why use it?
 
-AI coding assistants lose preferences, architectural decisions and investigation context between sessions. `memory_plugin` keeps that knowledge available across OpenCode, Codex, Claude Code, Gemini CLI, Antigravity and other MCP clients, including Google Jules.
+AI coding assistants lose preferences, architectural decisions and investigation context between sessions. `memory_plugin` keeps that knowledge available across OpenCode, Codex, Claude Code, Gemini CLI, Antigravity and other MCP clients.
 
-It separates small startup context from detailed knowledge retrieved on demand:
-
-| What to preserve | Where it belongs | Tool |
-| :--- | :--- | :--- |
-| Concise facts, preferences, working rules and active instructions | Hot Notebook memory | `remember` |
-| Detailed decisions, investigations, experiments and handoffs | Searchable cold Memory Notes | `remember_note` |
-| Documentation, files, URLs, reports and source code | Curated RAG knowledge base | `ingest_document` |
-
-<img src="https://raw.githubusercontent.com/Lotargo/memory_plugin/main/assets/03_hot_memory_vs_cold_rag.png" alt="Hot Notebook context and cold RAG knowledge retrieved on demand" width="100%">
-
-## Main features
-
-- Human-readable Markdown facts with stable IDs, tags, expiry, protection and history.
-- Git-based project identity shared across checkouts, with global and project scope isolation.
-- Long-form Memory Notes and ingestion of PDF, DOCX, spreadsheets, Markdown, web pages and code.
-- Hybrid SQLite FTS5 + local ONNX search, optional reranking, source expansion and a knowledge graph.
-- Explicit `fact` / `directive` semantics and native persona delivery to supported clients.
-- A shared local web panel for records, sources, instructions, settings and reviewed maintenance.
-- Local working storage with optional full ZIP cloud checkpoints through Turso.
-- No Docker, external vector database, hosted embedding API or telemetry.
+- **Keep useful context across sessions.** Save concise facts and working instructions in human-readable Markdown, with tags, history and explicit persona controls.
+- **Retrieve the details when needed.** Search long-form Notes, PDF, DOCX, spreadsheets, web pages and code with hybrid full-text/vector retrieval, source links and a knowledge graph.
+- **Follow the project across checkouts.** Git-based identity keeps project memory consistent while isolating unrelated projects and global context.
+- **Manage memory in one local panel.** Browse and edit records, instructions and sources, configure models, and review backup and maintenance actions.
+- **Run locally.** CPU inference and local storage need no Docker, external vector database or hosted embedding API. Full ZIP cloud checkpoints through Turso are optional; there is no telemetry.
 
 ## Quick Start
 
@@ -47,20 +32,26 @@ CPU execution is the stable default. WebGPU is experimental.
 
 ### Install
 
-Configure all five supported client integrations:
+Choose the client you want to configure. For Codex:
+
+```bash
+npx -y @lotargo/memory_plugin setup --codex
+```
+
+Other client flags: `--opencode`, `--claude`, `--gemini`, `--antigravity`.
+
+Setup installs the selected integration and bundled skill, and adds managed memory instructions where supported. Existing unrelated configuration is preserved.
+
+<details>
+<summary>Configure all five client integrations</summary>
+
+To set up OpenCode, Codex, Claude Code, Gemini CLI and Antigravity together, omit the client flag:
 
 ```bash
 npx -y @lotargo/memory_plugin setup
 ```
 
-This sets up OpenCode, Codex, Claude Code, Gemini CLI and Antigravity, installs the bundled skill and adds managed memory instructions where supported. Existing unrelated configuration is preserved.
-
-For a single client, choose its flag:
-
-```bash
-npx -y @lotargo/memory_plugin setup --codex
-# Other choices: --opencode, --claude, --gemini, --antigravity
-```
+</details>
 
 Restart the configured client or open a new session to load the integration. For Codex, check the connection with:
 
@@ -69,35 +60,6 @@ npx -y @lotargo/memory_plugin doctor --codex
 ```
 
 See [installation and client integration](https://github.com/Lotargo/memory_plugin/blob/main/docs/INSTALLATION.md) for marketplace installation, client configuration locations, headless setup and removal.
-
-## First use
-
-Ask your connected agent to save a project fact:
-
-> Remember for this project: the API uses Fastify and Zod.
-
-The agent can call `remember` with these arguments:
-
-```json
-{
-  "fact": "The project API uses Fastify and Zod.",
-  "title": "API Stack",
-  "kind": "fact",
-  "scope": "project"
-}
-```
-
-Then ask:
-
-> What API stack have we saved for this project?
-
-`recall(scope: "project")` reads the saved Notebook context. Project memory requires a Git repository; global memory is also available. When explicitly targeting a workspace, pass its path as `directory`.
-
-OpenCode initializes memory automatically. Other supported integrations provide instructions for startup recall; clients must load those instructions. A configured integration or preview does not establish delivery to an already active session.
-
-For an instruction the agent should actively apply, use `kind: "directive"`. Save a long investigation with `remember_note`, and external source material with `ingest_document`. Notes and sources are searched on demand instead of being injected into every session.
-
-See [memory architecture](https://github.com/Lotargo/memory_plugin/blob/main/docs/MEMORY_ARCHITECTURE.md) and [personalization](https://github.com/Lotargo/memory_plugin/blob/main/docs/PERSONALIZATION.md) for routing, source links and client behavior.
 
 ## Local Web UI
 
@@ -114,6 +76,40 @@ Browse and edit Notebook records, active instructions, history, project scopes a
 The screenshot uses fictional demo records. Current panel labels are in Russian; light, dark and system themes are supported. The panel listens on `127.0.0.1` and opens with a private connection URL. Saved-memory browsing needs no cloud account or embedding model.
 
 See the [web UI guide](https://github.com/Lotargo/memory_plugin/blob/main/docs/WEB_UI.md) for editing, lifecycle, authentication, ports and autostart.
+
+## First use
+
+In a Git project, ask your connected agent to save a fact:
+
+> Remember for this project: the API uses Fastify and Zod.
+
+After the agent confirms it has saved the fact, **open a new session in the same project** and ask:
+
+> What API stack have we saved for this project?
+
+The agent reads the saved Notebook context with `recall(scope: "project")`. You can also inspect the saved record in the web panel. Global memory is available outside Git projects; pass `directory` when explicitly targeting a workspace.
+
+<details>
+<summary>Tool arguments for saving the example fact</summary>
+
+The agent can call `remember` with:
+
+```json
+{
+  "fact": "The project API uses Fastify and Zod.",
+  "title": "API Stack",
+  "kind": "fact",
+  "scope": "project"
+}
+```
+
+</details>
+
+OpenCode initializes memory automatically. For other supported clients, restart the client or open a new session after setup to load the managed startup instructions. See [installation and client integration](https://github.com/Lotargo/memory_plugin/blob/main/docs/INSTALLATION.md) for client-specific behavior and troubleshooting.
+
+For an instruction the agent should actively apply, use `kind: "directive"`. Save a long investigation with `remember_note`, and external source material with `ingest_document`. Notes and sources are searched on demand instead of being injected into every session.
+
+See [memory architecture](https://github.com/Lotargo/memory_plugin/blob/main/docs/MEMORY_ARCHITECTURE.md) and [personalization](https://github.com/Lotargo/memory_plugin/blob/main/docs/PERSONALIZATION.md) for routing, source links and client behavior.
 
 ## Storage, Privacy, and Security
 

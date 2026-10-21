@@ -10,7 +10,7 @@ Choose direct setup or a local marketplace channel. This guide covers client-spe
 
 - Node.js **22.16+ in the 22.x branch, or 24+** (`^22.16.0 || >=24.0.0`), with built-in SQLite FTS5 and the required browser-dependency support. Node 23 is excluded.
 - npm/npx.
-- OpenCode, Codex, Claude Code, Gemini CLI, Antigravity, Google Jules, or another MCP-capable client.
+- OpenCode, Codex, Claude Code, Gemini CLI, Antigravity, or another MCP-capable client.
 
 CPU execution with `Xenova/multilingual-e5-small` is the recommended stable default. WebGPU execution is experimental.
 
@@ -145,7 +145,7 @@ Prefer `TURSO_API_TOKEN`, `TURSO_DB_URL`, and `TURSO_DB_TOKEN` environment varia
 | Claude Code | MCP server in `~/.claude.json` | Managed prompt requires a startup `recall(scope: "all")` (newest 10 project facts) |
 | Gemini CLI | MCP server in `~/.gemini/settings.json` | Managed `~/.gemini/GEMINI.md` prompt requires a startup `recall(scope: "all")` (newest 10 project facts) |
 | Antigravity | MCP server in `~/.gemini/config/mcp_config.json` and optional `.agents/mcp_config.json` | Managed prompt requires a startup `recall(scope: "all")` (newest 10 project facts) |
-| Google Jules / generic MCP | MCP stdio server | Client instructions should initialize with full recall |
+| Other MCP clients | MCP stdio server | Configure client instructions to recall memory at session start |
 
 The bundled [`using-memory` skill](../skills/using-memory/SKILL.md) teaches agents to:
 
