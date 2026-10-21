@@ -1,5 +1,6 @@
+import { dateText, formatText, serviceText, setText, t } from './i18n.js';
 const $ = id => document.getElementById(id);
-const ownership = { 'unchanged-owned': 'Последняя запись сервиса не изменена', 'externally-edited': 'Файл изменён вне сервиса', untracked: 'Владение файлом не подтверждено' };
+const ownership = { 'unchanged-owned': t('m596'), 'externally-edited': t('m597'), untracked: t('m598') };
 
 export function createPromptAdmin({ api, node, openDialog }) {
   const dialog = $('promptsDialog');
@@ -7,10 +8,10 @@ export function createPromptAdmin({ api, node, openDialog }) {
   function reset() { preview = null; $('promptsPreviewContent').replaceChildren(); $('promptsApply').disabled = true; }
   function error(problem) {
     $('promptsError').hidden = !problem;
-    $('promptsError').textContent = !problem ? '' : problem.code === 'CONFLICT'
-      ? 'Файл, владение, настройки клиента или глобальные инструкции изменились. Обновите статус и предпросмотр.'
-      : problem.code === 'RECOVERY_REQUIRED' ? 'Есть прерванная операция или повреждённое состояние владения. Проверьте файлы и журнал; восстановление доступно через memory-cli prompts recover --confirm.'
-      : `${problem.code || 'Ошибка'}: ${problem.message}. Перед повторной записью обновите статус.`;
+    setText($('promptsError'), !problem ? '' : problem.code === 'CONFLICT'
+      ? t('m599')
+      : problem.code === 'RECOVERY_REQUIRED' ? t('m600')
+      : t('m601', problem.code || t('m205'), serviceText(problem.message)));
   }
   function busy(value) {
     pending = value; dialog.setAttribute('aria-busy', String(value)); $('promptsLoading').hidden = !value;
@@ -20,30 +21,30 @@ export function createPromptAdmin({ api, node, openDialog }) {
   function renderStatus() {
     const box = $('promptsStatus'); box.replaceChildren();
     if (!status) return;
-    box.append(node('p', `Состояние файлов: ${new Date(status.observedAt).toLocaleString('ru')}. Активная сессия и использование агентом: нет данных.`, 'caption'));
-    box.append(node('p', 'OpenCode передаёт инструкции через native-контекст; отдельный глобальный файл здесь не создаётся.', 'caption'));
-    if (status.recoveryRequired) box.append(node('p', 'Незавершённая операция: запись заблокирована до восстановления журнала.', 'inline-error'));
+    box.append(node('p', t('m602', dateText(new Date(status.observedAt), 'toLocaleString')), 'caption'));
+    box.append(node('p', t('m603'), 'caption'));
+    if (status.recoveryRequired) box.append(node('p', t('m604'), 'inline-error'));
     const list = node('ul', null, 'prompt-status-list');
     for (const item of status.items) {
       const li = node('li'); li.append(node('strong', item.name), node('p', item.filePath, 'caption prompt-path'));
-      li.append(node('p', item.unavailable ? `Статус недоступен: ${item.code}`
-        : `${item.exists ? 'Файл существует' : 'Файла нет'} · prompt: ${item.prompt ? 'есть' : 'нет'} · persona: ${item.persona ? 'есть' : 'нет'}`));
-      if (!item.unavailable) li.append(node('p', item.integration.pluginManaged ? 'Канал принадлежит marketplace-плагину. Файл пропускается при enable, disable и sync.'
-        : `${ownership[item.ownership]}. ${item.integration.conflict ? 'Обнаружен конфликт подключений клиента.' : ''}`, 'caption'));
+      li.append(node('p', item.unavailable ? t('m605', item.code)
+        : formatText`${item.exists ? t('m606') : t('m607')} · prompt: ${item.prompt ? t('m608') : t('m609')} · persona: ${item.persona ? t('m608') : t('m609')}`));
+      if (!item.unavailable) li.append(node('p', item.integration.pluginManaged ? t('m610')
+        : formatText`${ownership[item.ownership]}. ${item.integration.conflict ? t('m611') : ''}`, 'caption'));
       list.append(li);
     }
     const selected = status.items.find(item => item.id === $('promptsClient').value);
     if (selected) {
       const card = node('div', null, 'prompt-selected-status');
       card.append(node('strong', selected.name), node('p', selected.filePath, 'caption prompt-path'));
-      card.append(node('p', selected.unavailable ? `Статус недоступен: ${selected.code}` : `${selected.exists ? 'Файл существует' : 'Файла нет'} · prompt: ${selected.prompt ? 'есть' : 'нет'} · persona: ${selected.persona ? 'есть' : 'нет'}`));
-      if (!selected.unavailable) card.append(node('p', selected.integration.pluginManaged ? 'Канал принадлежит marketplace-плагину; файлы не изменяются.' : ownership[selected.ownership], 'caption'));
+      card.append(node('p', selected.unavailable ? t('m605', selected.code) : formatText`${selected.exists ? t('m606') : t('m607')} · prompt: ${selected.prompt ? t('m608') : t('m609')} · persona: ${selected.persona ? t('m608') : t('m609')}`));
+      if (!selected.unavailable) card.append(node('p', selected.integration.pluginManaged ? t('m612') : ownership[selected.ownership], 'caption'));
       box.append(card);
     }
-    const all = node('details'); all.append(node('summary', 'Статусы всех клиентов'), list); box.append(all);
+    const all = node('details'); all.append(node('summary', t('m613')), list); box.append(all);
   }
   async function load() {
-    const current = ++sequence; reset(); error(null); $('promptsResult').textContent = ''; busy(true);
+    const current = ++sequence; reset(); error(null); setText($('promptsResult'), ''); busy(true);
     try {
       const result = await api('/api/prompts');
       if (current !== sequence || !dialog.open) return;
@@ -52,30 +53,30 @@ export function createPromptAdmin({ api, node, openDialog }) {
     finally { if (current === sequence) busy(false); }
   }
   function fileDetails(label, text) {
-    const details = node('details'); details.append(node('summary', label), node('pre', text || 'Пустой файл.', 'knowledge-text')); return details;
+    const details = node('details'); details.append(node('summary', label), node('pre', text || t('m614'), 'knowledge-text')); return details;
   }
   $('promptsReview').addEventListener('click', async () => {
-    const current = ++sequence; reset(); error(null); $('promptsResult').textContent = ''; busy(true);
+    const current = ++sequence; reset(); error(null); setText($('promptsResult'), ''); busy(true);
     try {
       const result = await api('/api/prompts', { action: 'preview', client: $('promptsClient').value, operation: $('promptsOperation').value });
       if (current !== sequence || !dialog.open) return;
       preview = result;
       const box = $('promptsPreviewContent');
-      box.append(node('h3', `${result.target.name} · ${result.target.filePath}`), node('p', ownership[result.ownership], 'caption'));
-      if (!result.canApply) box.append(node('p', 'Marketplace-плагин управляет этим клиентом. Запись файла недоступна.', 'inline-error'));
-      else box.append(node('p', result.proposed.removeFile ? 'Будет удалён неизменённый файл, созданный сервисом.'
-        : result.changed ? 'Изменятся только managed-блоки. Остальной текст сохранится. Перед записью будет создана локальная резервная копия.' : 'Изменений нет.'));
-      box.append(node('p', 'Глобальные инструкции. Операция disable удаляет prompt/persona-блоки; MCP и плагин остаются подключёнными. Активная сессия может хранить прежний контекст.', 'caption'));
-      box.append(fileDetails(`Текущий файл · SHA-256: ${result.current.hash || 'файла нет'}`, result.current.text));
-      box.append(fileDetails(result.proposed.exists ? 'Файл после операции' : 'После операции файла не будет', result.proposed.text));
-      box.append(fileDetails('Шаблон prompt-блока', result.operation === 'enable' ? result.prompt.expectedBlock : 'Prompt не добавляется этой операцией.'));
-      box.append(fileDetails('Persona-блок из текущих глобальных инструкций', result.operation === 'disable' ? 'Persona будет удалена.' : result.persona.expectedBlock));
+      box.append(node('h3', formatText`${result.target.name} · ${result.target.filePath}`), node('p', ownership[result.ownership], 'caption'));
+      if (!result.canApply) box.append(node('p', t('m615'), 'inline-error'));
+      else box.append(node('p', result.proposed.removeFile ? t('m616')
+        : result.changed ? t('m617') : t('m469')));
+      box.append(node('p', t('m618'), 'caption'));
+      box.append(fileDetails(t('m619', result.current.hash || t('m170')), result.current.text));
+      box.append(fileDetails(result.proposed.exists ? t('m620') : t('m621'), result.proposed.text));
+      box.append(fileDetails(t('m622'), result.operation === 'enable' ? result.prompt.expectedBlock : t('m623')));
+      box.append(fileDetails(t('m624'), result.operation === 'disable' ? t('m625') : result.persona.expectedBlock));
       if (result.target.includeSupported) {
-        box.append(node('p', `Общий include-файл: ${result.sharedPrompt.path}. ${result.sharedPrompt.changes
-          ? 'Будет обновлён; это также изменит содержимое include для других подключённых клиентов.' : !result.canApply ? 'Не изменяется: канал принадлежит плагину.'
-            : result.sharedPrompt.exists ? 'Не изменится.' : 'Отсутствует; эта операция не создаёт prompt include.'}`, 'caption prompt-path'));
-        box.append(fileDetails('Текущий общий include-файл', result.sharedPrompt.text));
-        if (result.sharedPrompt.changes) box.append(fileDetails('Общий include-файл после операции', result.sharedPrompt.proposedText));
+        box.append(node('p', t('m626', result.sharedPrompt.path, result.sharedPrompt.changes
+          ? t('m627') : !result.canApply ? t('m628')
+            : result.sharedPrompt.exists ? t('m629') : t('m630')), 'caption prompt-path'));
+        box.append(fileDetails(t('m631'), result.sharedPrompt.text));
+        if (result.sharedPrompt.changes) box.append(fileDetails(t('m632'), result.sharedPrompt.proposedText));
       }
     } catch (problem) { if (current === sequence) error(problem); }
     finally { if (current === sequence) busy(false); }
@@ -86,12 +87,12 @@ export function createPromptAdmin({ api, node, openDialog }) {
     busy(true); error(null);
     try {
       const result = await api('/api/prompts', input); reset();
-      $('promptsResult').textContent = `${result.name}: ${result.status}. ${result.backup ? `Резервная копия: ${result.backup}.` : ''} Активная сессия: нет данных.`;
+      setText($('promptsResult'), t('m633', result.name, result.status, result.backup ? t('m634', result.backup) : ''));
       status = await api('/api/prompts'); renderStatus();
     } catch (problem) { reset(); error(problem); }
     finally { busy(false); }
   });
-  for (const id of ['promptsClient', 'promptsOperation']) $(id).addEventListener('change', () => { sequence++; reset(); renderStatus(); error(null); $('promptsResult').textContent = ''; });
+  for (const id of ['promptsClient', 'promptsOperation']) $(id).addEventListener('change', () => { sequence++; reset(); renderStatus(); error(null); setText($('promptsResult'), ''); });
   $('promptsRefresh').addEventListener('click', load);
   $('promptsClose').addEventListener('click', () => { if (!pending) dialog.close(); });
   dialog.addEventListener('cancel', event => { if (pending) event.preventDefault(); });

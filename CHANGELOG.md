@@ -5,6 +5,10 @@ All notable changes to `@lotargo/memory_plugin` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+- Added English (default), Russian and Simplified Chinese to the local dashboard. The sidebar language selector remembers its choice across reloads and port changes. Labels, dialogs, dates and counts update without losing drafts; stored content remains unchanged.
+
 ## [1.7.1] - 2026-10-21
 
 - Resolved the remaining production dependency audit findings with Transformers.js 4.3.1, Sharp 0.35.5 and ONNX Runtime 1.30.0. DOCX conversion uses unmodified, hash-verified Mammoth 1.13.0 library sources with the BSD license and explicit audited external dependencies; its unused CLI/argparse/sprintf-js chain is excluded. The published npm-shrinkwrap.json retains the tested dependency tree in consumer and marketplace installations. Publication checks now reject advisories at low severity or higher.

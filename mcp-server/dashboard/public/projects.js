@@ -1,15 +1,16 @@
+import { formatText, setText, t } from './i18n.js';
 export function createProjectManager({ api, node, scopeKey, onSaved, openDialog, allowDiscard, closeNavigation }) {
   const $ = id => document.getElementById(id);
   let items=[], preview=null, request=null, busy=false;
-  const labels={link:'Привязать каталог',unlink:'Отвязать каталог',relink:'Перенести память',migrate:'Перенести legacy-память'};
+  const labels={link:t('m549'),unlink:t('m550'),relink:t('m551'),migrate:t('m552')};
   function error(error) {
     $('projectError').hidden=false;
-    $('projectError').textContent=error.code==='CONFLICT' ? 'Данные изменились или есть конфликт записей. Поля сохранены; проверьте предпросмотр заново.'
-      : error.code==='INVALID' ? 'Проверьте абсолютный путь существующего Git-каталога, источник и целевой проект.'
-      : error.code==='NOT_FOUND' ? 'Проект или ассоциация больше не доступны. Обновите список.'
-      : error.code==='MIGRATION_REQUIRED' ? 'Сначала восстановите память прежнего облачного режима через CLI.'
-      : error.code==='RECOVERY_REQUIRED' ? 'Публикация требует восстановления. Проверьте локальный журнал перед продолжением.'
-      : 'Операция не завершена. Проверьте доступ к локальному хранилищу и резервному снимку.';
+    setText($('projectError'), error.code==='CONFLICT' ? t('m553')
+      : error.code==='INVALID' ? t('m554')
+      : error.code==='NOT_FOUND' ? t('m555')
+      : error.code==='MIGRATION_REQUIRED' ? t('m556')
+      : error.code==='RECOVERY_REQUIRED' ? t('m557')
+      : t('m558'));
   }
   function invalidate() { preview=null; $('projectPreview').hidden=true; $('projectApply').hidden=true; $('projectReview').hidden=false; }
   function setBusy(value) {
@@ -20,11 +21,11 @@ export function createProjectManager({ api, node, scopeKey, onSaved, openDialog,
   function selected() { return items.find(item=>item.key===$('projectSource').value); }
   function display() {
     const item=selected(); $('projectDetails').replaceChildren();
-    for(const [label,value] of [['Идентичность',item?.key],['Remote',item?.primaryRemote],['Записей',item?.facts],['Документов',item?.documents]]) {
-      $('projectDetails').append(node('dt',label),node('dd',value==null?'Нет данных':String(value)));
+    for(const [label,value] of [[t('m559'),item?.key],['Remote',item?.primaryRemote],[t('m560'),item?.facts],[t('m561'),item?.documents]]) {
+      $('projectDetails').append(node('dt',label),node('dd',value==null?t('m562'):value));
     }
     $('projectAliases').replaceChildren(...(item?.aliases||[]).map(alias=>node('li',alias.alias)));
-    if(!item?.aliases.length) $('projectAliases').append(node('li','Зарегистрированных ассоциаций нет.'));
+    if(!item?.aliases.length) $('projectAliases').append(node('li',t('m563')));
     const paths=(item?.aliases||[]).filter(alias=>alias.kind==='path');
     $('projectPathAlias').replaceChildren(...paths.map(alias=>{const option=node('option',alias.alias.slice(5));option.value=alias.alias.slice(5);return option;}));
     $('projectPathAlias').required=$('projectOperation').value==='unlink';
@@ -38,9 +39,9 @@ export function createProjectManager({ api, node, scopeKey, onSaved, openDialog,
     $('projectTargetField').hidden=!['relink','migrate'].includes(operation);
     $('projectAliasField').hidden=operation!=='unlink';
     $('projectTarget').required=['relink','migrate'].includes(operation);
-    $('projectHint').textContent=operation==='unlink' ? 'Отвязка удаляет только ассоциацию пути. Память и Git-автоопределение сохраняются.'
-      : operation==='link' ? 'Укажите существующий Git-каталог. Привязка обнаружит память прежнего пути; перенос потребует проверки.'
-      : 'Память объединится с выбранным проектом. Конфликтующие записи останутся на месте до их исправления. Git remote репозитория не меняется.';
+    setText($('projectHint'), operation==='unlink' ? t('m564')
+      : operation==='link' ? t('m565')
+      : t('m566'));
     display();
   }
   async function open() {
@@ -49,8 +50,8 @@ export function createProjectManager({ api, node, scopeKey, onSaved, openDialog,
     setBusy(true);
     try {
       items=(await api('/api/projects?action=list')).items;
-      $('projectSource').replaceChildren(...items.map(item=>{const option=node('option',`${item.name}${item.legacy?' · legacy':''}`);option.value=item.key;return option;}));
-      $('projectTarget').replaceChildren(...items.filter(item=>!item.legacy).map(item=>{const option=node('option',`${item.name} · ${item.key}`);option.value=item.key;return option;}));
+      $('projectSource').replaceChildren(...items.map(item=>{const option=node('option',formatText`${item.name}${item.legacy?' · legacy':''}`);option.value=item.key;return option;}));
+      $('projectTarget').replaceChildren(...items.filter(item=>!item.legacy).map(item=>{const option=node('option',formatText`${item.name} · ${item.key}`);option.value=item.key;return option;}));
       if(items.some(item=>item.key===scopeKey())) $('projectSource').value=scopeKey();
       $('projectOperation').value='link'; mode();
     }catch(err){error(err);}finally{setBusy(false);$('projectOperation').focus();}
@@ -67,15 +68,15 @@ export function createProjectManager({ api, node, scopeKey, onSaved, openDialog,
     try {
       preview=await api('/api/projects',{...request,action:'preview'});
       const c=preview.counts;
-      const backupText = preview.backupRequired ? 'Перед переносом памяти сохранится проверенный полный локальный ZIP.' : 'Изменения регистрации сохранятся одной транзакцией.';
-      $('projectSummary').textContent=`${labels[preview.operation]}\n${preview.sourceKey||preview.directory} → ${preview.targetKey||'Удаление ассоциации'}\nЗаписей в источнике: ${c.sourceFacts}; в цели: ${c.targetFacts}; добавится: ${c.addedFacts}; совпадений: ${c.duplicateFacts}; новых ID: ${c.assignedIds}.\nДокументов: ${c.documents}; связей: ${c.links}.\n${backupText}`;
-      const effects=preview.operation==='unlink' ? ['Удаляется только выбранная ассоциация пути. Записи, документы, другие aliases и Git-автоопределение сохраняются.']
-        : preview.backupRequired ? ['Записи объединяются с сохранением метаданных; совпавшие ID переназначаются вместе со связями.','Области документов и aliases переносятся; остальные области документов сохраняются.','Исходный Notebook удаляется только после согласованного сохранения переноса.','Git remote остаётся прежним; открытие старого репозитория по-прежнему определяет прежнюю Git-идентичность.']
-          : ['Регистрируются Git-идентичность и ассоциации каталога.'];
+      const backupText = preview.backupRequired ? t('m567') : t('m568');
+      setText($('projectSummary'), t('m569', labels[preview.operation], preview.sourceKey||preview.directory, preview.targetKey||t('m570'), c.sourceFacts, c.targetFacts, c.addedFacts, c.duplicateFacts, c.assignedIds, c.documents, c.links, backupText));
+      const effects=preview.operation==='unlink' ? [t('m571')]
+        : preview.backupRequired ? [t('m572'),t('m573'),t('m574'),t('m575')]
+          : [t('m576')];
       $('projectEffects').replaceChildren(...effects.map(text=>node('li',text)));
-      const reasons={'same-text-different-record':'Одинаковый текст, разные поля записи','duplicate-source-id':'Повторяющийся ID в источнике','duplicate-target-id':'Повторяющийся ID в цели','duplicate-history-needs-rebinding':'История совпавшей записи требует отдельного сопоставления','alias-owned-by-other-project':'Ассоциация принадлежит другому проекту','ambiguous-link':'Связь неоднозначна','target-fact-has-no-id':'У совпавшего факта в цели нет ID','invalid-fact':'Повреждённая запись'};
-      $('projectConflicts').replaceChildren(...preview.conflicts.map(c=>node('li',`${reasons[c.reason]||c.reason}${c.title?`: ${c.title}`:''}${c.linkId?`: ${c.linkId}`:''}${c.alias?`: ${c.alias} → ${c.owner}`:''}`)));
-      $('projectConflictState').textContent=preview.conflictCount ? `Конфликтов: ${preview.conflictCount}. Изменение недоступно; исправьте записи или выберите другую цель.${preview.truncated?' Показано до 100.':''}` : 'Конфликтов нет. Проверьте последствия перед подтверждением.';
+      const reasons={'same-text-different-record':t('m577'),'duplicate-source-id':t('m578'),'duplicate-target-id':t('m579'),'duplicate-history-needs-rebinding':t('m580'),'alias-owned-by-other-project':t('m581'),'ambiguous-link':t('m582'),'target-fact-has-no-id':t('m583'),'invalid-fact':t('m584')};
+      $('projectConflicts').replaceChildren(...preview.conflicts.map(c=>node('li',formatText`${reasons[c.reason]||c.reason}${c.title?formatText`: ${c.title}`:''}${c.linkId?formatText`: ${c.linkId}`:''}${c.alias?formatText`: ${c.alias} → ${c.owner}`:''}`)));
+      setText($('projectConflictState'), preview.conflictCount ? t('m585', preview.conflictCount, preview.truncated?t('m586'):'') : t('m587'));
       $('projectPreview').hidden=false; $('projectApply').hidden=false;
     }catch(err){error(err);}finally{setBusy(false);(preview?.canApply?$('projectApply'):$('projectReview')).focus();}
   }

@@ -1,35 +1,36 @@
+import { appendText, countText, dateText, formatText, serviceText, setText, t } from './i18n.js';
 const $ = id => document.getElementById(id);
 export function createDiagnostics({ api, node, openDialog, allowDiscard, closeNavigation }) {
   const dialog = $('diagnosticsDialog'); let status = null, preview = null, pending = false;
-  const names = { 'graph-check': 'Проверка движка', 'cleanup-blobs': 'Очистка файлов', 'restore-blobs': 'Восстановление файлов', 'resume-cleanup': 'Продолжение очистки' };
-  const checkNames = { 'isolated-store': 'Отдельное временное хранилище', 'notebook-write-readback': 'Запись и чтение Notebook',
-    'scoped-link-graph-projection': 'Связь с источником и проекция в графе', 'saved-source-lines': 'Текст сохранённого источника', 'lexical-retrieval-without-models': 'Поиск без загрузки моделей' };
-  const fileCount = count => `${count} ${count % 100 >= 11 && count % 100 <= 14 ? 'файлов' : count % 10 === 1 ? 'файл' : count % 10 >= 2 && count % 10 <= 4 ? 'файла' : 'файлов'}`;
+  const names = { 'graph-check': t('m192'), 'cleanup-blobs': t('m193'), 'restore-blobs': t('m194'), 'resume-cleanup': t('m195') };
+  const checkNames = { 'isolated-store': t('m196'), 'notebook-write-readback': t('m197'),
+    'scoped-link-graph-projection': t('m198'), 'saved-source-lines': t('m199'), 'lexical-retrieval-without-models': t('m200') };
+  const fileCount = count => countText(count, 'files');
   function input() { const operation = $('diagnosticsOperation').value; return { operation,
     ...(['restore-blobs','resume-cleanup'].includes(operation) ? { backupId: $('diagnosticsBackup').value } : {}) }; }
   function error(problem) {
     $('diagnosticsError').hidden = !problem;
-    $('diagnosticsError').textContent = !problem ? '' : problem.code === 'CONFLICT'
-      ? 'Файлы, привязки или состояние восстановления изменились. Обновите состояние и проверьте список снова.' : `${problem.code || 'Ошибка'}: ${problem.message}`;
+    setText($('diagnosticsError'), !problem ? '' : problem.code === 'CONFLICT'
+      ? t('m204') : formatText`${problem.code || t('m205')}: ${serviceText(problem.message)}`);
   }
   function reset() { preview = null; $('diagnosticsPreview').replaceChildren(); }
   function controls() {
     const { operation, backupId } = input(), run = operation === 'graph-check', recovery = ['restore-blobs','resume-cleanup'].includes(operation);
     $('diagnosticsBackupField').hidden = !recovery;
-    $('diagnosticsHint').textContent = run
-      ? 'Проверка выполняется в отдельном процессе с временной памятью. Создаёт тестовый Notebook, источник и связь, читает текст и проверяет поиск. Модели и облако не используются. Временная память удаляется после проверки; это не проверка активной сессии клиента.'
-      : 'Файлы всех локальных областей RAG. Notebook, индекс, модели, файлы клиентов и история снимков сохраняются. Неиспользуемые файлы резервируются в проверенный ZIP. Уменьшение рабочего хранилища не означает освобождение того же объёма на диске: ZIP остаётся для восстановления.';
-    if (!run && status?.recoveryRequired) $('diagnosticsHint').textContent += ' Есть незавершённая операция: выберите её квитанцию и продолжите очистку либо восстановите файлы.';
+    setText($('diagnosticsHint'), run
+      ? t('m206')
+      : t('m207'));
+    if (!run && status?.recoveryRequired) appendText($('diagnosticsHint'), t('m208'));
     dialog.setAttribute('aria-busy', String(pending));
     for (const id of ['diagnosticsOperation','diagnosticsBackup','diagnosticsRefresh','diagnosticsClose']) $(id).disabled = pending;
-    $('diagnosticsReview').textContent = run ? 'Запустить проверку' : 'Проверить список файлов';
+    setText($('diagnosticsReview'), run ? t('m209') : t('m210'));
     $('diagnosticsReview').disabled = pending || !run && (!status || recovery && !backupId || operation === 'cleanup-blobs' && status.recoveryRequired);
     $('diagnosticsApply').disabled = pending || !preview || !preview.changed && operation === 'cleanup-blobs';
   }
   function backups() {
     const selected = $('diagnosticsBackup').value, resume = input().operation === 'resume-cleanup';
     $('diagnosticsBackup').replaceChildren(...(status?.receipts || []).filter(item => !item.unavailable && (!resume || item.operation !== 'restore-blobs')).map(item => {
-      const option = node('option', `${names[item.operation]} · ${item.status} · ${item.operationId}`); option.value = item.operationId; return option;
+      const option = node('option', formatText`${names[item.operation]} · ${item.status} · ${item.operationId}`); option.value = item.operationId; return option;
     }));
     if ([...$('diagnosticsBackup').options].some(item => item.value === selected)) $('diagnosticsBackup').value = selected;
   }
@@ -37,56 +38,56 @@ export function createDiagnostics({ api, node, openDialog, allowDiscard, closeNa
     reset(); error(null); pending = true; controls();
     try {
       status = await api('/api/diagnostics'); backups();
-      $('diagnosticsCounts').textContent = `Неиспользуемые файлы: ${status.unusedFiles}. Рабочий объём: ${status.unusedBytes.toLocaleString('ru')} байт. Пропущено: ${status.skipped.length}. Проверено: ${new Date(status.observedAt).toLocaleString('ru')}.`;
+      setText($('diagnosticsCounts'), t('m211', status.unusedFiles, dateText(status.unusedBytes, 'toLocaleString'), status.skipped.length, dateText(new Date(status.observedAt), 'toLocaleString')));
       $('diagnosticsReceipts').hidden = !status.receipts.length;
       $('diagnosticsReceiptList').replaceChildren(...status.receipts.map(item => node('li', item.unavailable
-        ? `${item.operationId}: квитанция недоступна (${item.unavailable})`
-        : `${names[item.operation]} · ${item.status} / ${item.phase} · обработано ${item.completed} · ${item.operationId} · ZIP: ${item.backup}`)));
+        ? t('m212', item.operationId, item.unavailable)
+        : t('m213', names[item.operation], item.status, item.phase, item.completed, item.operationId, item.backup))));
     } catch (problem) {
-      status = null; $('diagnosticsCounts').textContent = 'Состояние файлов недоступно. Изолированная проверка движка остаётся доступной.';
+      status = null; setText($('diagnosticsCounts'), t('m214'));
       $('diagnosticsBackup').replaceChildren(); $('diagnosticsReceipts').hidden = true; error(problem);
     }
     finally { pending = false; controls(); }
   }
   $('openDiagnostics').addEventListener('click', async () => {
-    if (!(await allowDiscard())) return; closeNavigation(); openDialog('diagnosticsDialog'); $('diagnosticsResult').textContent = '';
+    if (!(await allowDiscard())) return; closeNavigation(); openDialog('diagnosticsDialog'); setText($('diagnosticsResult'), '');
     await load(); if (dialog.open) $('diagnosticsOperation').focus();
   });
   $('diagnosticsReview').addEventListener('click', async () => {
     reset(); error(null); const request = input(); pending = true; controls();
-    $('diagnosticsResult').textContent = request.operation === 'graph-check' ? 'Проверка во временном хранилище…' : 'Проверяется список файлов…';
+    setText($('diagnosticsResult'), request.operation === 'graph-check' ? t('m215') : t('m216'));
     try {
       const result = await api('/api/diagnostics', { action: request.operation === 'graph-check' ? 'run' : 'preview', ...request });
-      $('diagnosticsResult').textContent = '';
+      setText($('diagnosticsResult'), '');
       if (request.operation === 'graph-check') {
-        const box = $('diagnosticsPreview'); box.append(node('h3', result.status === 'passed' ? 'Проверка движка пройдена' : 'Проверка движка не пройдена'));
-        const list = node('ul'); for (const item of result.checks) list.append(node('li', `${checkNames[item.name] || item.name}: ${item.status === 'passed' ? 'пройдено' : item.status}`)); box.append(list);
-        box.append(node('p', `Рабочая память не изменялась. Временное хранилище: ${result.temporaryCleanup === 'completed' ? 'удалено' : 'очистка не подтверждена'}. Проверено: ${new Date(result.observedAt).toLocaleString('ru')}.`));
+        const box = $('diagnosticsPreview'); box.append(node('h3', result.status === 'passed' ? t('m217') : t('m218')));
+        const list = node('ul'); for (const item of result.checks) list.append(node('li', formatText`${checkNames[item.name] || item.name}: ${item.status === 'passed' ? t('m219') : item.status}`)); box.append(list);
+        box.append(node('p', t('m220', result.temporaryCleanup === 'completed' ? t('m221') : t('m222'), dateText(new Date(result.observedAt), 'toLocaleString'))));
         if (result.error) error(result.error);
       } else {
-        preview = result; const box = $('diagnosticsPreview'); box.append(node('h3', `${names[result.operation]}: ${fileCount(result.changed)}`),
-          node('p', `Рабочий объём: ${result.bytes.toLocaleString('ru')} байт. ${result.operation === 'restore-blobs' ? 'Будут восстановлены отсутствующие файлы.' : 'Будут убраны перечисленные неиспользуемые файлы; резервный ZIP сохранится.'}`));
-        const list = node('ul'); for (const item of result.files) list.append(node('li', `${item.hash} · ${item.bytes} байт`)); box.append(list);
-        if (result.skipped.length) { const details = node('details'); details.append(node('summary', `Пропущено: ${result.skipped.length}`),node('pre',JSON.stringify(result.skipped,null,2),'knowledge-text')); box.append(details); }
-        if (!result.changed) box.append(node('p', request.operation === 'cleanup-blobs' ? 'Неиспользуемых файлов нет.' : 'Изменять файлы не требуется. Подтверждение завершит восстановление состояния операции.'));
+        preview = result; const box = $('diagnosticsPreview'); box.append(node('h3', formatText`${names[result.operation]}: ${fileCount(result.changed)}`),
+          node('p', t('m223', dateText(result.bytes, 'toLocaleString'), result.operation === 'restore-blobs' ? t('m224') : t('m225'))));
+        const list = node('ul'); for (const item of result.files) list.append(node('li', t('m226', item.hash, item.bytes))); box.append(list);
+        if (result.skipped.length) { const details = node('details'); details.append(node('summary', t('m227', result.skipped.length)),node('pre',JSON.stringify(result.skipped,null,2),'knowledge-text')); box.append(details); }
+        if (!result.changed) box.append(node('p', request.operation === 'cleanup-blobs' ? t('m228') : t('m229')));
       }
-    } catch (problem) { $('diagnosticsResult').textContent = ''; error(problem); }
+    } catch (problem) { setText($('diagnosticsResult'), ''); error(problem); }
     finally { pending = false; controls(); if (dialog.open) $('diagnosticsReview').focus(); }
   });
   $('diagnosticsApply').addEventListener('click', async () => {
     if (pending || !preview) return; const request = { action: 'apply', ...input(), previewToken: preview.previewToken, confirm: true };
-    pending = true; error(null); controls(); $('diagnosticsResult').textContent = 'Выполняется подтверждённая операция…';
+    pending = true; error(null); controls(); setText($('diagnosticsResult'), t('m230'));
     try {
       const result = await api('/api/diagnostics', request); reset();
-      const message = `${result.status === 'saved' ? 'Выполнено' : result.status === 'partial' ? 'Выполнено частично' : 'Без изменений'}. Обработано: ${result.completed || 0}. Квитанция: ${result.operationId || 'не нужна'}. ZIP: ${result.backup || 'не нужен'}.`;
-      await load(); $('diagnosticsResult').textContent = message; if (result.error) error(result.error);
+      const message = t('m231', result.status === 'saved' ? t('m232') : result.status === 'partial' ? t('m233') : t('m80'), result.completed || 0, result.operationId || t('m234'), result.backup || t('m235'));
+      await load(); setText($('diagnosticsResult'), message); if (result.error) error(result.error);
     } catch (problem) {
-      reset(); error(problem); $('diagnosticsResult').textContent = !problem.status || problem.status >= 500
-        ? 'Ответ мог быть потерян. Обновите состояние и проверьте квитанции перед повтором операции.' : '';
+      reset(); error(problem); setText($('diagnosticsResult'), !problem.status || problem.status >= 500
+        ? t('m236') : '');
     } finally { pending = false; controls(); if (dialog.open) $('diagnosticsReview').focus(); }
   });
-  $('diagnosticsOperation').addEventListener('change', () => { reset(); error(null); $('diagnosticsResult').textContent = ''; backups(); controls(); });
-  $('diagnosticsBackup').addEventListener('change', () => { reset(); error(null); $('diagnosticsResult').textContent = ''; controls(); });
+  $('diagnosticsOperation').addEventListener('change', () => { reset(); error(null); setText($('diagnosticsResult'), ''); backups(); controls(); });
+  $('diagnosticsBackup').addEventListener('change', () => { reset(); error(null); setText($('diagnosticsResult'), ''); controls(); });
   $('diagnosticsRefresh').addEventListener('click', load);
   $('diagnosticsClose').addEventListener('click', () => { if (!pending) dialog.close(); });
   dialog.addEventListener('cancel', event => { if (pending) event.preventDefault(); });

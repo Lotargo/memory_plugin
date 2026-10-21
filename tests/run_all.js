@@ -35,6 +35,7 @@ const testSuites = [
   { category: "Unit", name: "model_control", file: "tests/unit/model_control.test.js" },
   { category: "Unit", name: "resources", file: "tests/unit/resources.test.js" },
   { category: "Unit", name: "resources_ui", file: "tests/unit/resources_ui.test.js" },
+  { category: "Unit", name: "dashboard_i18n", file: "tests/unit/dashboard_i18n.test.js" },
   { category: "Unit", name: "notebook_filters", file: "tests/unit/notebook_filters.test.js" },
 
   // --- 2. INTEGRATION TESTS ---

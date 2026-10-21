@@ -32,6 +32,7 @@ for (const [name, type] of [
   ["apple-touch-icon.png", "image/png"]
 ]) assets.set(`/${name}`, [name, type]);
 const statuses = { INVALID: 400, CONFIRMATION: 400, CONFLICT: 409, BUSY: 409, MIGRATION_REQUIRED: 409, NOT_FOUND: 404, UNSUPPORTED: 422 };
+for (const name of ['i18n.js', 'locales.js']) assets.set(`/${name}`, [name, 'text/javascript; charset=utf-8']);
 statuses.BUSY = 503;
 statuses.STORAGE_UNAVAILABLE = 503;
 statuses.RECOVERY_REQUIRED = 409;

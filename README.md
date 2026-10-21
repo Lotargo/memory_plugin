@@ -73,7 +73,7 @@ Browse and edit Notebook records, active instructions, history, project scopes a
 
 <img src="https://raw.githubusercontent.com/Lotargo/memory_plugin/main/assets/ui/notebook.png" alt="Local Memory UI showing fictional Notebook facts, instructions, filters and record details" width="100%">
 
-The screenshot uses fictional demo records. Current panel labels are in Russian; light, dark and system themes are supported. The panel listens on `127.0.0.1` and opens with a private connection URL. Saved-memory browsing needs no cloud account or embedding model.
+The screenshot uses fictional demo records. The panel supports English (default), Russian and Simplified Chinese, with a saved language choice, plus light, dark and system themes. It listens on `127.0.0.1` and opens with a private connection URL. Saved-memory browsing needs no cloud account or embedding model.
 
 See the [web UI guide](https://github.com/Lotargo/memory_plugin/blob/main/docs/WEB_UI.md) for editing, lifecycle, authentication, ports and autostart.
 

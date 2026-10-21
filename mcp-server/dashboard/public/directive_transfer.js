@@ -1,14 +1,15 @@
+import { formatText, joinText, scopeText, serviceText, setText, t } from './i18n.js';
 const $ = id => document.getElementById(id);
 const conflicts = {
-  'duplicate-body': 'Такой текст уже есть в целевом хранилище. Измените цель или разберите совпадение отдельно.',
-  'ambiguous-target-ids': 'В целевом хранилище повторяются ID; сначала исправьте их.',
-  'replacement-history': 'Перенос одной записи разделит историю замещения. Перенос цепочки пока недоступен.',
-  'target-history-reference': 'ID записи уже упоминается в истории целевого хранилища.',
-  'unresolved-source-links': 'Есть неоднозначные старые связи. Сначала разберите их в редакторе связей.',
-  'source-unavailable': 'Связанный источник недоступен в исходной области.',
-  'source-not-visible-in-target': 'Связанный источник не виден в целевой области. Для переноса разрешите открыть перечисленные источники целевой области.',
-  'independent-graph-edges': 'Есть независимые графовые связи. Их автоматический перенос не поддерживается.',
-  'independent-legacy-graph-edges': 'Есть неоднозначные старые графовые связи; сначала разберите их.',
+  'duplicate-body': t('m237'),
+  'ambiguous-target-ids': t('m238'),
+  'replacement-history': t('m239'),
+  'target-history-reference': t('m240'),
+  'unresolved-source-links': t('m241'),
+  'source-unavailable': t('m242'),
+  'source-not-visible-in-target': t('m243'),
+  'independent-graph-edges': t('m244'),
+  'independent-legacy-graph-edges': t('m245'),
 };
 
 export function createDirectiveTransfer({ api, node, openDialog, onSaved }) {
@@ -25,48 +26,48 @@ export function createDirectiveTransfer({ api, node, openDialog, onSaved }) {
     $('transferConfirm').disabled = value || !preview?.canApply || preview.sources.some(item => item.addScope) && !$('transferShareConfirm').checked;
     $('transferLoading').hidden = !value;
   }
-  function error(message) { $('transferError').textContent = message; $('transferError').hidden = !message; }
+  function error(message) { setText($('transferError'), message); $('transferError').hidden = !message; }
   function errorMessage(problem) {
-    if (problem.code === 'CONFLICT') return 'Данные изменились. Обновите предпросмотр. Если изменилась сама инструкция, откройте её заново из свежего списка.';
-    if (problem.code === 'MIGRATION_REQUIRED') return 'Сначала подготовьте связи через «Добавить связь с источником → Подготовить связи». Перенос не запускает миграцию автоматически.';
-    if (problem.code === 'RECOVERY_REQUIRED') return 'Публикация прервана. Проверьте обе области после восстановления движка; повторный перенос автоматически не выполняется.';
-    return `${problem.code || 'Ошибка'}: ${problem.message}. При ошибке применения обновите обе области: перенос мог уже сохраниться.`;
+    if (problem.code === 'CONFLICT') return t('m246');
+    if (problem.code === 'MIGRATION_REQUIRED') return t('m247');
+    if (problem.code === 'RECOVERY_REQUIRED') return t('m248');
+    return t('m249', problem.code || t('m205'), serviceText(problem.message));
   }
   function render() {
     const results = $('transferResults'); results.replaceChildren();
     results.append(node('h3', preview.directive.title), node('p', preview.directive.body, 'knowledge-text'));
     const list = node('ul');
     for (const text of [
-      `Из: ${preview.source.name} · ${preview.source.key} · ${preview.source.ref}`,
-      `В: ${preview.target.name} · ${preview.target.key} · ${preview.target.ref}`,
-      preview.idChange.changed ? `ID изменится: ${preview.idChange.from || 'legacy без ID'} → ${preview.idChange.to}.` : 'ID сохранится.',
-      'Дата, TTL, защита, выключенное состояние и теги сохранятся.',
-      `Связей будет перенесено: ${preview.links.length}. Прежние области документов сохранятся.`,
-      'Перед применением будет создан проверенный локальный резервный ZIP.',
-      'Активная сессия может хранить прежний контекст; передача в неё и использование агентом не наблюдались.',
+      t('m250', scopeText(preview.source), preview.source.key, preview.source.ref),
+      t('m251', scopeText(preview.target), preview.target.key, preview.target.ref),
+      preview.idChange.changed ? t('m252', preview.idChange.from || t('m253'), preview.idChange.to) : t('m254'),
+      t('m255'),
+      t('m256', preview.links.length),
+      t('m257'),
+      t('m258'),
     ]) list.append(node('li', text));
     results.append(list);
     for (const item of preview.sources) results.append(node('p',
-      `${item.title || item.docId}: ${item.addScope ? `открыть области ${item.addScope}`
-        : item.scopes.some(key => key === 'global' || key === preview.target.key) ? 'доступ в целевой области уже есть' : 'доступа в целевой области нет'}. Текущие области: ${item.scopes.join(', ')}.`, 'caption'));
-    if (preview.sharingGlobal) results.append(node('p', 'Глобальная область откроет эти источники всем проектам, использующим глобальные знания.', 'inline-error'));
+      t('m259', item.title || item.docId, item.addScope ? t('m260', item.addScope)
+        : item.scopes.some(key => key === 'global' || key === preview.target.key) ? t('m261') : t('m262'), joinText(item.scopes, ', ')), 'caption'));
+    if (preview.sharingGlobal) results.append(node('p', t('m263'), 'inline-error'));
     if (preview.conflicts.length) {
       const issues = node('ul', null, 'inline-error');
       for (const item of preview.conflicts) issues.append(node('li', conflicts[item.reason] || item.reason));
       results.append(issues);
     }
     $('transferShareConfirmation').hidden = !preview.sources.some(item => item.addScope);
-    $('transferHint').textContent = preview.canApply ? 'Проверьте обе области и последствия, затем подтвердите перенос.' : 'Перенос заблокирован перечисленными конфликтами. Измените цель или устраните причины и обновите предпросмотр.';
+    setText($('transferHint'), preview.canApply ? t('m264') : t('m265'));
   }
   async function review() {
     if (pending || !source) return;
     const current = ++sequence; resetPreview(); error('');
     const targetKey = $('transferTarget').value;
-    if (!targetKey) { error('Выберите целевое хранилище.'); return; }
+    if (!targetKey) { error(t('m266')); return; }
     busy(true);
     try {
       const [from, to] = await Promise.all([
-        api(`/api/notebook?key=${encodeURIComponent(source.key)}`), api(`/api/notebook?key=${encodeURIComponent(targetKey)}`),
+        api(formatText`/api/notebook?key=${encodeURIComponent(source.key)}`), api(formatText`/api/notebook?key=${encodeURIComponent(targetKey)}`),
       ]);
       if (current !== sequence || !dialog.open) return;
       const matches = from.records.filter(item => item.ref === source.ref);
@@ -79,8 +80,8 @@ export function createDirectiveTransfer({ api, node, openDialog, onSaved }) {
     } catch (problem) { if (current === sequence && dialog.open) error(errorMessage(problem)); }
     finally { if (current === sequence) busy(false); }
   }
-  $('transferTarget').addEventListener('change', () => { sequence++; resetPreview(); error(''); $('transferHint').textContent = 'Обновите предпросмотр для выбранной цели.'; });
-  $('transferShare').addEventListener('change', () => { sequence++; resetPreview(); error(''); $('transferHint').textContent = 'Обновите предпросмотр после изменения доступа источников.'; });
+  $('transferTarget').addEventListener('change', () => { sequence++; resetPreview(); error(''); setText($('transferHint'), t('m267')); });
+  $('transferShare').addEventListener('change', () => { sequence++; resetPreview(); error(''); setText($('transferHint'), t('m268')); });
   $('transferShareConfirm').addEventListener('change', () => { if (!pending) busy(false); });
   $('transferPreview').addEventListener('click', review);
   $('transferClose').addEventListener('click', () => { if (!pending) dialog.close(); });
@@ -94,23 +95,23 @@ export function createDirectiveTransfer({ api, node, openDialog, onSaved }) {
     try {
       const result = await api('/api/directive-transfer', input);
       busy(false); dialog.close(); await onSaved(result);
-    } catch (problem) { resetPreview(); error(errorMessage(problem)); $('transferHint').textContent = 'Прежний предпросмотр сброшен. Проверьте состояние и обновите его перед повторным применением.'; }
+    } catch (problem) { resetPreview(); error(errorMessage(problem)); setText($('transferHint'), t('m269')); }
     finally { busy(false); }
   });
   return { async open({ key, record }) {
     source = { key, ref: record.ref, fingerprint: record.fingerprint }; sequence++;
     resetPreview(); error(''); $('transferShare').checked = false; $('transferTarget').replaceChildren();
-    $('transferSource').textContent = `Исходная область: ${key} · ${record.ref}`;
-    $('transferHint').textContent = 'Выберите цель и проверьте предпросмотр.';
+    setText($('transferSource'), t('m270', key, record.ref));
+    setText($('transferHint'), t('m271'));
     openDialog('transferDialog'); busy(true);
     const current = sequence;
     try {
       const targets = await api('/api/directive-transfer', { action: 'targets' });
       if (current !== sequence || !dialog.open) return;
-      $('transferTarget').append(node('option', 'Выберите хранилище…'));
+      $('transferTarget').append(node('option', t('m272')));
       $('transferTarget').firstChild.value = '';
       for (const item of targets.items.filter(item => item.key !== key && !item.unavailable && item.notebookAvailable !== false)) {
-        const option = node('option', `${item.name} · ${item.key}`); option.value = item.key; $('transferTarget').append(option);
+        const option = node('option', formatText`${scopeText(item)} · ${item.key}`); option.value = item.key; $('transferTarget').append(option);
       }
     } catch (problem) { if (current === sequence) error(errorMessage(problem)); }
     finally { if (current === sequence) { busy(false); $('transferTarget').focus(); } }

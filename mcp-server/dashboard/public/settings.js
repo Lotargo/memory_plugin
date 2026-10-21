@@ -1,10 +1,11 @@
+import { concatText, dateText, formatText, joinText, serviceText, setAttr, setText, t } from './i18n.js';
 const $ = id => document.getElementById(id);
-const groups = {search:'Поиск',models:'Модели и вычисления',web:'Веб-панель',sources:'Доступ к источникам'};
-const display = value => Array.isArray(value) ? value.join('\n') || 'Нет' : typeof value === 'boolean' ? value ? 'Да' : 'Нет' : String(value);
+const groups = {search:t('m665'),models:t('m666'),web:t('m667'),sources:t('m668')};
+const display = value => Array.isArray(value) ? joinText(value, '\n') || t('m92') : typeof value === 'boolean' ? value ? t('m91') : t('m92') : value;
 export function createSettings({api,node,openDialog,allowDiscard,closeNavigation,onChanged,onOpen}) {
   let data, busy = false, pending, afterDiscard, reviewTrigger;
-  const input = key => $(`setting-${key}`);
-  function message(text='',error=false) { $('settingsMessage').textContent=text; $('settingsMessage').hidden=!text; $('settingsMessage').classList.toggle('error',error); }
+  const input = key => $(formatText`setting-${key}`);
+  function message(text='',error=false) { setText($('settingsMessage'), serviceText(text)); $('settingsMessage').hidden=!text; $('settingsMessage').classList.toggle('error',error); }
   function fieldValue(field) {
     const control=input(field.key);
     return field.type==='boolean' ? control.checked : field.type==='number' ? Number(control.value) : field.type==='paths' ? control.value.split('\n').map(path=>path.trim()).filter(Boolean) : control.value.trim();
@@ -17,53 +18,53 @@ export function createSettings({api,node,openDialog,allowDiscard,closeNavigation
   const dirty=()=>!!dirtyGroups().length;
   function allow(group) {
     if (busy) return false;
-    if(dirtyGroups().some(other=>other!==group)) {message('Есть правки в другом блоке. Сохраните их или отмените перед этой операцией.',true);return false;}
+    if(dirtyGroups().some(other=>other!==group)) {message(t('m669'),true);return false;}
     return true;
   }
-  function draft() { $('settingsDraftState').textContent=Object.keys(enginePatch()).length ? 'Есть несохранённые настройки.' : 'Без изменений.'; }
+  function draft() { setText($('settingsDraftState'), Object.keys(enginePatch()).length ? t('m670') : t('m671')); }
   function property(container,label,value) {container.append(node('dt',label),node('dd',display(value??'—')));}
   function render(next) {
-    data=next; $('settingsContent').hidden=false; $('settingsLoadState').textContent='';
+    data=next; $('settingsContent').hidden=false; setText($('settingsLoadState'), '');
     $('settingsMode').value=data.storage.mode; $('settingsSyncMode').value=data.storage.syncMode; $('settingsInterval').value=data.storage.intervalHours;
     const cloudMode=data.storage.mode==='cloud-snapshots';
     $('settingsScheduleFields').disabled=!cloudMode;
-    $('settingsScheduleHint').textContent=cloudMode ? 'Для отправки требуется сохранённое облачное подключение.' : 'Расписание доступно в режиме «Локально + облачные снимки».';
+    setText($('settingsScheduleHint'), cloudMode ? t('m672') : t('m673'));
     const migration=data.storage.legacyCloudBackupRequired || data.storage.legacyCloudRestoreRequired;
     $('settingsMigration').hidden=!migration;
-    $('settingsMigration').textContent=data.storage.legacyCloudRestoreRequired ? 'Прежний режим only-cloud: включите облачные снимки для резервирования, затем явно восстановите скачанный локальный архив. До восстановления память недоступна.' : 'Прежний hybrid-sync: включение облачных снимков сначала сохранит локальную и старую облачную копии.';
+    setText($('settingsMigration'), data.storage.legacyCloudRestoreRequired ? t('m674') : t('m675'));
     $('settingsCloudUrl').value=data.cloud.dbUrl; $('settingsCloudToken').value='';
-    $('settingsCloudStatus').textContent=`${data.cloud.configured ? 'Подключение сохранено' : 'Подключение не задано'} · источник: ${data.cloud.source}. Доступность сети не проверялась.`;
+    setText($('settingsCloudStatus'), t('m676', data.cloud.configured ? t('m677') : t('m678'), data.cloud.source));
     $('settingsSnapshotUpload').disabled=!cloudMode || migration;
     $('settingsSnapshotStatus').replaceChildren();
-    for(const [label,value] of [['Последний отправленный снимок',data.snapshots.lastUploadedId],['Ожидающий снимок',data.snapshots.pendingId],['Следующая отправка',cloudMode && data.storage.syncMode==='scheduled' && data.snapshots.nextDueAt ? new Date(data.snapshots.nextDueAt).toLocaleString('ru') : 'Расписание выключено'],['Повтор после ошибки',data.snapshots.nextAttemptAt ? new Date(data.snapshots.nextAttemptAt).toLocaleString('ru') : null],['Квота блокирует отправку',data.snapshots.quotaBlocked],['Ошибка отправки',data.snapshots.lastError]]) property($('settingsSnapshotStatus'),label,value);
+    for(const [label,value] of [[t('m679'),data.snapshots.lastUploadedId],[t('m680'),data.snapshots.pendingId],[t('m681'),cloudMode && data.storage.syncMode==='scheduled' && data.snapshots.nextDueAt ? dateText(new Date(data.snapshots.nextDueAt), 'toLocaleString') : t('m682')],[t('m683'),data.snapshots.nextAttemptAt ? dateText(new Date(data.snapshots.nextAttemptAt), 'toLocaleString') : null],[t('m684'),data.snapshots.quotaBlocked],[t('m685'),data.snapshots.lastError]]) property($('settingsSnapshotStatus'),label,value);
     $('settingsGroups').replaceChildren();
     for(const [group,label] of Object.entries(groups)) {
       const section=node('section',null,'settings-section'),heading=node('h3',label),grid=node('div',null,'settings-grid');
       section.append(heading,grid);
       for(const field of data.fields.filter(field=>field.group===group)) {
-        const wrap=node('div',null,'field'),label=node('label',field.label);label.htmlFor=`setting-${field.key}`;
+        const wrap=node('div',null,'field'),label=node('label',serviceText(field.label));label.htmlFor=formatText`setting-${field.key}`;
         const control=node(field.type==='select' ? 'select' : field.type==='paths' ? 'textarea' : 'input');
-        control.id=`setting-${field.key}`;control.name=field.key;
-        if(field.type==='select') for(const [value,label] of field.options) {const option=node('option',label);option.value=value;control.append(option);}
+        control.id=formatText`setting-${field.key}`;control.name=field.key;
+        if(field.type==='select') for(const [value,label] of field.options) {const option=node('option',serviceText(label));option.value=value;control.append(option);}
         else if(field.type==='paths') control.rows=3;
         else {control.type=field.type==='boolean' ? 'checkbox' : field.type==='number' ? 'number' : 'text';if(field.type!=='boolean')control.required=true;}
         if(field.type==='number') {control.min=field.min;control.max=field.max;control.step=field.step;}
         if(field.type==='boolean') {control.checked=data.values[field.key];wrap.classList.add('settings-check');}
-        else control.value=field.type==='paths' ? data.values[field.key].join('\n') : data.values[field.key];
-        const hint=node('p',field.hint,'caption');hint.id=`setting-${field.key}-hint`;control.setAttribute('aria-describedby',`${hint.id} settingsMessage`);
+        else control.value=field.type==='paths' ? joinText(data.values[field.key], '\n') : data.values[field.key];
+        const hint=node('p',serviceText(field.hint),'caption');hint.id=formatText`setting-${field.key}-hint`;control.setAttribute('aria-describedby',formatText`${hint.id} settingsMessage`);
         wrap.append(label,control,hint);grid.append(wrap);control.addEventListener('input',()=>{control.removeAttribute('aria-invalid');draft();});
       }
       $('settingsGroups').append(section);
     }
     draft();
   }
-  async function load() { $('settingsContent').hidden=true; $('settingsLoadState').textContent='Читаем локальные настройки…'; try {render(await api('/api/settings'));}catch(error){message(error.message,true);$('settingsLoadState').textContent='Не удалось загрузить настройки.';} }
+  async function load() { $('settingsContent').hidden=true; setText($('settingsLoadState'), t('m686')); try {render(await api('/api/settings'));}catch(error){message(error.message,true);setText($('settingsLoadState'), t('m687'));} }
   async function operation(path,request,{review=false}={}) {
     if(busy)return;
     busy=true;const disabled=new Map();
     for(const control of document.querySelectorAll('#settingsDialog button,#settingsDialog input,#settingsDialog select,#settingsDialog textarea,#settingsReviewDialog button')) {disabled.set(control,control.disabled);control.disabled=true;}
     $('settingsDialog').setAttribute('aria-busy','true');$('settingsReviewApply').disabled=true;
-    message('Выполняем операцию…');
+    message(t('m688'));
     try {
       const result=await api(path,request);
       if(result.settings)render(result.settings);
@@ -71,16 +72,16 @@ export function createSettings({api,node,openDialog,allowDiscard,closeNavigation
       if(path==='/api/snapshots') {
         render(await api('/api/settings'));await listSnapshots();
       }
-      let text={saved:'Настройки сохранены.',enabled:'Облачные снимки включены. Локальная резервная копия сохранена.',connected:`Подключение проверено: ${new Date(result.observedAt).toLocaleString('ru')}.`,uploaded:'Снимок отправлен в облако.',unchanged:'Память не изменилась; повторная отправка не требуется.','saved-local':'Локальный снимок сохранён.','local-only':result.reason,restored:'Память восстановлена. Текущее состояние сохранено в резервном снимке.',deleted:'Выбранные снимки удалены.','restore-required':`Облачный архив сохранён локально: ${result.cloudBackupId}. Загрузите локальный список и выберите «Восстановить» для этого архива.`}[result.status] || 'Операция завершена.';
-      if(result.reindexRequired)text+=' Смена модели или размерности требует переиндексации в разделе «Модели»; векторы ещё не перестроены.';
-      if(result.restartRequired)text+=' Новый порт применится после перезапуска панели.';
+      let text={saved:t('m689'),enabled:t('m690'),connected:t('m691', dateText(new Date(result.observedAt), 'toLocaleString')),uploaded:t('m692'),unchanged:t('m693'),'saved-local':t('m694'),'local-only':serviceText(result.reason),restored:t('m695'),deleted:t('m696'),'restore-required':t('m697', result.cloudBackupId)}[result.status] || t('m698');
+      if(result.reindexRequired)text = concatText(text, t('m699'));
+      if(result.restartRequired)text = concatText(text, t('m700'));
       message(text,result.status==='local-only');
       if(['switch-mode','cloud-logout'].includes(request.action) || result.status==='restored')await onChanged();
       return result;
     } catch(error) {
-      const text=error.message || 'Операция не завершена.';
+      const text=error.message || t('m701');
       message(text,true);
-      if(review){$('settingsReviewError').textContent=text;$('settingsReviewError').hidden=false;}
+      if(review){setText($('settingsReviewError'), serviceText(text));$('settingsReviewError').hidden=false;}
       if(error.code==='INVALID') for(const field of data?.fields||[]) if(text.startsWith(field.label))input(field.key)?.setAttribute('aria-invalid','true');
     } finally {
       busy=false;for(const [control,value] of disabled)if(control.isConnected)control.disabled=value;
@@ -93,21 +94,21 @@ export function createSettings({api,node,openDialog,allowDiscard,closeNavigation
   }
   function review(path,request,hint,changes=[]) {
     reviewTrigger=document.activeElement;
-    pending={path,request};$('settingsReviewHint').textContent=hint;$('settingsReviewChanges').replaceChildren();
+    pending={path,request};setText($('settingsReviewHint'), hint);$('settingsReviewChanges').replaceChildren();
     for(const [label,value] of changes)property($('settingsReviewChanges'),label,value);
     $('settingsReviewError').hidden=true;openDialog('settingsReviewDialog');
   }
   async function listSnapshots() {
     const location=$('settingsSnapshotLocation').value;
-    $('settingsSnapshotListStatus').textContent='Загружаем список…';
+    setText($('settingsSnapshotListStatus'), t('m702'));
     try {
       const rows=await api('/api/snapshots',{action:'list',location,limit:100});
-      $('settingsSnapshotList').replaceChildren();$('settingsSnapshotListStatus').textContent=rows.length ? `Снимков: ${rows.length}. Показаны последние 100.` : 'Снимков пока нет.';
+      $('settingsSnapshotList').replaceChildren();setText($('settingsSnapshotListStatus'), rows.length ? t('m703', rows.length) : t('m704'));
       for(const row of rows) {
-        const li=node('li'),description=node('p',`${new Date(Number(row.created_at)).toLocaleString('ru')} · ${(Number(row.size)/1024).toFixed(1)} КБ${Number(row.pinned) ? ' · Закреплён' : ''}`);
+        const li=node('li'),description=node('p',t('m705', dateText(new Date(Number(row.created_at)), 'toLocaleString'), (Number(row.size)/1024).toFixed(1), Number(row.pinned) ? t('m706') : ''));
         li.append(description,node('p',row.id,'caption'));const actions=node('div',null,'settings-actions');
-        for(const [label,action] of [['Восстановить','restore'],[Number(row.pinned) ? 'Снять закрепление' : 'Закрепить','pin']]) {
-          const button=node('button',label,'button secondary');button.type='button';button.setAttribute('aria-label',`${label} снимок ${row.id}`);
+        for(const [label,action] of [[t('m707'),'restore'],[Number(row.pinned) ? t('m708') : t('m709'),'pin']]) {
+          const button=node('button',label,'button secondary');button.type='button';setAttr(button, 'aria-label', t('m710', label, row.id));
           button.addEventListener('click',async()=>{
             if(!allow())return;
             if(action==='pin')await operation('/api/snapshots',{action,id:row.id,location,pinned:!Number(row.pinned)});
@@ -115,7 +116,7 @@ export function createSettings({api,node,openDialog,allowDiscard,closeNavigation
           });actions.append(button);
         }li.append(actions);$('settingsSnapshotList').append(li);
       }
-    }catch(error){$('settingsSnapshotListStatus').textContent=error.message;$('settingsSnapshotList').replaceChildren();}
+    }catch(error){setText($('settingsSnapshotListStatus'), serviceText(error.message));$('settingsSnapshotList').replaceChildren();}
   }
   async function prepareSnapshot(request) {
     if(!allow())return;
@@ -124,9 +125,9 @@ export function createSettings({api,node,openDialog,allowDiscard,closeNavigation
     $('settingsDialog').setAttribute('aria-busy','true');
     try {
       const result=await api('/api/snapshots',request);
-      const counts=value=>`Областей Notebook: ${value.notebookStores}; документов: ${value.documents}; связей: ${value.factsLinked}; чанков: ${value.chunks}.`;
-      const changes=request.action==='restore' ? [['Снимок',request.id],['Текущее состояние',counts(result.current)],['Состояние из снимка',counts(result.replacement)]] : Object.entries(result).filter(([key])=>['local','cloud'].includes(key)).map(([key,value])=>[key==='local' ? 'На компьютере' : 'В облаке',`${value.count} снимков, ${(value.bytes/1024).toFixed(1)} КБ`]);
-      review('/api/snapshots',{...request,confirmToken:result.confirmToken},request.action==='restore' ? 'Рабочая память будет полностью заменена снимком. Перед восстановлением сохраняется резервная копия текущего состояния. Закройте другие клиенты памяти.' : 'Будут удалены только снимки из предпросмотра. Рабочая память остаётся доступной.',changes);
+      const counts=value=>t('m711', value.notebookStores, value.documents, value.factsLinked, value.chunks);
+      const changes=request.action==='restore' ? [[t('m712'),request.id],[t('m713'),counts(result.current)],[t('m714'),counts(result.replacement)]] : Object.entries(result).filter(([key])=>['local','cloud'].includes(key)).map(([key,value])=>[key==='local' ? t('m715') : t('m716'),t('m717', value.count, (value.bytes/1024).toFixed(1))]);
+      review('/api/snapshots',{...request,confirmToken:result.confirmToken},request.action==='restore' ? t('m718') : t('m719'),changes);
     }catch(error){message(error.message,true);}finally{busy=false;for(const [control,value] of disabled)if(control.isConnected)control.disabled=value;$('settingsDialog').removeAttribute('aria-busy');}
   }
   function discardThen(callback) {if(!dirty()){callback();return;}afterDiscard=callback;openDialog('settingsDiscardDialog');}
@@ -137,18 +138,18 @@ export function createSettings({api,node,openDialog,allowDiscard,closeNavigation
   $('settingsReviewDialog').addEventListener('cancel',event=>{if(busy)event.preventDefault();});
   $('settingsDiscard').addEventListener('click',()=>{$('settingsDiscardDialog').close();const callback=afterDiscard;afterDiscard=null;if(data)render(data);callback?.();});
   $('settingsReload').addEventListener('click',()=>{if(!busy)discardThen(()=>{message();load();});});
-  $('settingsStorageForm').addEventListener('submit',event=>{event.preventDefault();if(!allow('storage'))return;review('/api/settings',{action:'switch-mode',mode:$('settingsMode').value,expectedVersion:data.version},'Применить режим хранения?', [['Режим',`${data.storage.mode} → ${$('settingsMode').value}`]]);});
-  $('settingsScheduleForm').addEventListener('submit',event=>{event.preventDefault();if(!allow('schedule'))return;review('/api/settings',{action:'configure-snapshots',syncMode:$('settingsSyncMode').value,intervalHours:Number($('settingsInterval').value),expectedVersion:data.version},'Изменить расписание отправки снимков?', [['Отправка',$('settingsSyncMode').value],['Интервал, часов',Number($('settingsInterval').value)]]);});
-  $('settingsEngineForm').addEventListener('submit',event=>{event.preventDefault();if(!allow('engine'))return;const fields=enginePatch();if(!Object.keys(fields).length){message('Нет изменённых настроек.');return;}review('/api/settings',{action:'save',fields,expectedVersion:data.version},'Настройки сохраняются для всех клиентов. Смена embedding-модели или размерности требует отдельной переиндексации.',Object.entries(fields).map(([key,value])=>[data.fields.find(field=>field.key===key).label,`${display(data.values[key])} → ${display(value)}`]));});
-  $('settingsCloudForm').addEventListener('submit',event=>{event.preventDefault();if(!allow('cloud'))return;review('/api/settings',{action:'cloud-login',dbUrl:$('settingsCloudUrl').value.trim(),token:$('settingsCloudToken').value,expectedVersion:data.version},'Сохранить подключение в зашифрованном хранилище? Проверка сети выполняется отдельно.',[['URL базы',$('settingsCloudUrl').value.trim()]]);});
+  $('settingsStorageForm').addEventListener('submit',event=>{event.preventDefault();if(!allow('storage'))return;review('/api/settings',{action:'switch-mode',mode:$('settingsMode').value,expectedVersion:data.version},t('m720'), [[t('m115'),formatText`${data.storage.mode} → ${$('settingsMode').value}`]]);});
+  $('settingsScheduleForm').addEventListener('submit',event=>{event.preventDefault();if(!allow('schedule'))return;review('/api/settings',{action:'configure-snapshots',syncMode:$('settingsSyncMode').value,intervalHours:Number($('settingsInterval').value),expectedVersion:data.version},t('m721'), [[t('m722'),$('settingsSyncMode').value],[t('m723'),Number($('settingsInterval').value)]]);});
+  $('settingsEngineForm').addEventListener('submit',event=>{event.preventDefault();if(!allow('engine'))return;const fields=enginePatch();if(!Object.keys(fields).length){message(t('m724'));return;}review('/api/settings',{action:'save',fields,expectedVersion:data.version},t('m725'),Object.entries(fields).map(([key,value])=>[serviceText(data.fields.find(field=>field.key===key).label),formatText`${display(data.values[key])} → ${display(value)}`]));});
+  $('settingsCloudForm').addEventListener('submit',event=>{event.preventDefault();if(!allow('cloud'))return;review('/api/settings',{action:'cloud-login',dbUrl:$('settingsCloudUrl').value.trim(),token:$('settingsCloudToken').value,expectedVersion:data.version},t('m726'),[[t('m727'),$('settingsCloudUrl').value.trim()]]);});
   $('settingsCloudCheck').addEventListener('click',()=>{if(allow())operation('/api/settings',{action:'cloud-check'});});
-  $('settingsCloudLogout').addEventListener('click',()=>{if(allow())review('/api/settings',{action:'cloud-logout',expectedVersion:data.version},'Удалить сохранённые секреты и перейти к локальному режиму? Учётные данные из окружения остаются заданными.');});
+  $('settingsCloudLogout').addEventListener('click',()=>{if(allow())review('/api/settings',{action:'cloud-logout',expectedVersion:data.version},t('m728'));});
   $('settingsReviewApply').addEventListener('click',async()=>{if(pending){const {path,request}=pending;await operation(path,request,{review:true});if(request.action==='cloud-login'){$('settingsCloudToken').value='';request.token='';if($('settingsReviewDialog').open)$('settingsReviewDialog').close();}}});
   $('settingsReviewDialog').addEventListener('close',()=>{if(pending?.request.action==='cloud-login')pending.request.token='';pending=null;});
   $('settingsSnapshotCreate').addEventListener('click',()=>{if(allow())operation('/api/snapshots',{action:'create'});});
   $('settingsSnapshotUpload').addEventListener('click',()=>{if(allow())operation('/api/snapshots',{action:'upload'});});
   $('settingsSnapshotListForm').addEventListener('submit',event=>{event.preventDefault();if(!busy)listSnapshots();});
-  $('settingsSnapshotDeleteForm').addEventListener('submit',event=>{event.preventDefault();prepareSnapshot({action:'delete',from:Date.parse($('settingsDeleteFrom').value+'T00:00:00Z'),to:Date.parse($('settingsDeleteTo').value+'T00:00:00Z'),location:$('settingsDeleteLocation').value});});
+  $('settingsSnapshotDeleteForm').addEventListener('submit',event=>{event.preventDefault();prepareSnapshot({action:'delete',from:Date.parse(concatText($('settingsDeleteFrom').value, 'T00:00:00Z')),to:Date.parse(concatText($('settingsDeleteTo').value, 'T00:00:00Z')),location:$('settingsDeleteLocation').value});});
   window.addEventListener('beforeunload',event=>{if(busy||$('settingsDialog').open && dirty()){event.preventDefault();event.returnValue='';}});
   return {dirty};
 }

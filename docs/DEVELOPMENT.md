@@ -33,6 +33,12 @@ The unified suites cover fact formatting, typed directives, persona migration/sy
 
 See [`docs/BENCHMARKS.md`](BENCHMARKS.md) for methodology and detailed reports.
 
+### Dashboard translations
+
+UI copy lives in `mcp-server/dashboard/public/locales.js`; each message has `en`, `ru` and `zh-CN` text with matching numbered placeholders. `t(id, ...values)` returns a reactive UI message. Pass it directly to `node`, `setText` or `setAttr`; use the `formatText` template tag and `joinText` to combine messages without losing their language bindings. Avoid converting messages to plain strings before rendering. Use `dateText` and `countText` for locale-sensitive output. Static HTML uses `data-i18n` and `data-i18n-attrs` markers. Only trusted service labels/errors use `serviceText`; stored content stays plain text.
+
+`npm test` includes catalog, persistence and content-preservation regressions. `tests/smoke/dashboard_i18n_ui_live.test.js` additionally checks an isolated real dashboard in Chrome with Playwright. It accepts `PLAYWRIGHT_MODULE` (an installed `playwright/index.mjs`), `BROWSER_EXECUTABLE` and an optional `I18N_SCREENSHOT_DIR`; it does not use personal memory or run models.
+
 ### Included Search Evaluation
 
 The stored 32-document / 21-query technical corpus produced:
